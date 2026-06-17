@@ -1,0 +1,37 @@
+# OS and editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+!.env.template
+
+# Go build artifacts
+/routeup
+/bin/
+/build/
+/dist/
+*.test
+*.out
+
+# Go coverage, profiling, and fuzzing output
+coverage.out
+*.coverprofile
+cpu.pprof
+mem.pprof
+trace.out
+
+# Temporary and local runtime state
+/tmp/
+/.routeup/
+*.log
+
+# Dependency and tool caches that should not be committed
+/.cache/
+/.tmp/
