@@ -74,8 +74,8 @@ Acceptance:
 ```bash
 just test
 just lint
-just run -- --help
-just run -- doctor
+just dev help
+just dev doctor
 ```
 
 CI must be green on push and PR.

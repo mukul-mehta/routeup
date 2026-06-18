@@ -6,7 +6,26 @@ It is an open source developer tool for local apps, APIs, webhooks, OAuth callba
 
 ## Status
 
-In planning. No implementation yet.
+Phase 1 — Scaffolding & walking skeleton. The CLI builds, lints, tests, and exposes stub commands. No real networking behavior yet.
+
+## Implementation Progress
+
+Currently: Phase 1 in flight — repo builds, `routeup --version` works, `doctor`/`routes`/`logs` are stubs.
+
+Phase definitions and acceptance criteria live in [docs/MILESTONES.md](docs/MILESTONES.md).
+
+- [x] **Phase 0 — Documentation:** PLAN, README, ARCHITECTURE, ENGINEERING-STANDARDS, MILESTONES, OPEN-QUESTIONS, AGENTS, LICENSE
+- [ ] **Phase 1 — Scaffolding & walking skeleton:** Go module, lint, CI, cobra root with `doctor`/`routes`/`logs` stubs
+- [ ] **Phase 2 — Route names & config discovery:** parser, hostname mapping, dry-run expose
+- [ ] **Phase 3 — Local agent on a high port:** registry, CLI↔agent IPC, reverse proxy by Host
+- [ ] **Phase 4 — Process runner:** child process with `PORT`/`HOST`/`ROUTEUP_*` env injection
+- [ ] **Phase 5 — Real local setup:** local CA, certificate generation, HTTPS on 443
+- [ ] **Phase 6 — Public server & tokens:** route claim API, token allow patterns, public namespace
+- [ ] **Phase 7 — Tunnel MVP:** WebSocket + yamux, one public request reaches a local port
+- [ ] **Phase 8 — Streaming, WebSockets, SSE:** real dev servers work through the tunnel
+- [ ] **Phase 9 — Path proxy:** frontend + API behind one route
+- [ ] **Phase 10 — Route logs:** local/public, `routeup logs --follow`
+- [ ] **Phase 11 — Inspect & replay:** opt-in header/body capture, `routeup inspect`/`replay`
 
 ## Quick Look
 

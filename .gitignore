@@ -1,37 +1,26 @@
-# OS and editor noise
-.DS_Store
-Thumbs.db
-.idea/
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.json
-
-# Local environment and secrets
-.env
-.env.*
-!.env.example
-!.env.template
-
-# Go build artifacts
-/routeup
+# Binaries (anchored to repo root so they don't shadow cmd/routeup/)
 /bin/
-/build/
 /dist/
+/routeup
+/routeup.exe
+
+# Test and coverage artifacts
 *.test
 *.out
+coverage.*
+profile.*
 
-# Go coverage, profiling, and fuzzing output
-coverage.out
-*.coverprofile
-cpu.pprof
-mem.pprof
-trace.out
+# Editor and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
 
-# Temporary and local runtime state
-/tmp/
-/.routeup/
-*.log
+# Go workspace files (optional, kept out of repo by default)
+go.work
+go.work.sum
 
-# Dependency and tool caches that should not be committed
-/.cache/
-/.tmp/
+# Local environment
+.env
+.env.local
