@@ -131,7 +131,7 @@ Expected shape:
 route: api.myapp
 local: https://api.myapp.localhost
 public: https://api.myapp.routeup.dev
-target: http://127.0.0.1:8080
+target: http://localhost:8080
 ```
 
 Do not build yet:

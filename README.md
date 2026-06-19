@@ -6,18 +6,18 @@ It is an open source developer tool for local apps, APIs, webhooks, OAuth callba
 
 ## Status
 
-Phase 2 — Route names & config discovery. `routeup serve <name> --port <p> --dry-run` resolves the route and prints local + public URLs. No real networking yet.
+Phase 3 — Local agent on a high port. `routeup serve <name> --port <p>` registers the route with a background agent that reverse-proxies by `Host` header on `127.0.0.1:7070`. No TLS or public exposure yet.
 
 ## Implementation Progress
 
-Currently: Phase 2 complete — route parser, single-dir config discovery, flag/env/config precedence, `expose --dry-run`.
+Currently: Phase 3 complete — background agent on `127.0.0.1:7070`, in-memory route registry, CLI↔agent IPC over a per-user Unix socket, reverse proxy by `Host`, plus `serve`, `routes`, and `agent` (status/start/stop/restart) commands. The agent auto-starts on demand; `serve` re-registers its route automatically if the agent restarts, and the agent restarts itself when the binary changes.
 
 Phase definitions and acceptance criteria live in [docs/MILESTONES.md](docs/MILESTONES.md).
 
 - [x] **Phase 0 — Documentation:** PLAN, README, ARCHITECTURE, ENGINEERING-STANDARDS, MILESTONES, OPEN-QUESTIONS, AGENTS, LICENSE
 - [x] **Phase 1 — Scaffolding & walking skeleton:** Go module, lint, CI, cobra root with `doctor`/`routes`/`logs` stubs
 - [x] **Phase 2 — Route names & config discovery:** parser, hostname mapping, dry-run expose
-- [ ] **Phase 3 — Local agent on a high port:** registry, CLI↔agent IPC, reverse proxy by Host
+- [x] **Phase 3 — Local agent on a high port:** registry, CLI↔agent IPC, reverse proxy by Host
 - [ ] **Phase 4 — Process runner:** child process with `PORT`/`HOST`/`ROUTEUP_*` env injection
 - [ ] **Phase 5 — Real local setup:** local CA, certificate generation, HTTPS on 443
 - [ ] **Phase 6 — Public server & tokens:** route claim API, token allow patterns, public namespace

@@ -1,0 +1,77 @@
+// Package ipc holds the wire types the routeup CLI and agent exchange over the
+// control socket: the JSON messages, the typed errors, and the shared path and
+// address constants.
+//
+// It has no behavior. Both the agent and the CLI client import it, which keeps
+// them from importing each other.
+package ipc
+
+import (
+	"fmt"
+	"time"
+)
+
+// DefaultProxyAddr is the high-port loopback address the local proxy binds to
+const DefaultProxyAddr = "127.0.0.1:7070"
+
+// DefaultProxyPort is the port half of DefaultProxyAddr, used when building
+// the user-facing local URL (e.g. http://api.myapp.localhost:7070).
+const DefaultProxyPort = 7070
+
+// Control-plane paths, versioned under /v1/. Shared so the handler routes and
+// the client requests can never drift apart.
+const (
+	PathStatus   = "/v1/status"
+	PathRoutes   = "/v1/routes"
+	PathShutdown = "/v1/shutdown"
+)
+
+// Claim is one active route registration. The same shape is used for the
+// agent's in-memory registry record and the JSON body on /v1/routes.
+type Claim struct {
+	Name         string    `json:"name"`
+	Port         int       `json:"port"`
+	OwnerPID     int       `json:"owner_pid"`
+	OwnerCWD     string    `json:"owner_cwd"`
+	RegisteredAt time.Time `json:"registered_at"`
+}
+
+// Status is the response shape for GET /v1/status.
+//
+// BootID is a random identifier generated once per agent process at startup.
+// A change in BootID tells the CLI the agent restarted (and therefore lost its
+// in-memory registry), which is the signal the serve reconcile loop uses to
+// re-register.
+//
+// ExecPath and ExecModTime describe the binary the running agent was launched
+// from, captured at startup; the CLI compares them (plus Version) to decide
+// whether a running agent is a stale build.
+type Status struct {
+	Version       string    `json:"version"`
+	UptimeSeconds int64     `json:"uptime_seconds"`
+	ProxyAddr     string    `json:"proxy_addr"`
+	BootID        string    `json:"boot_id"`
+	ExecPath      string    `json:"exec_path,omitempty"`
+	ExecModTime   time.Time `json:"exec_mod_time"`
+}
+
+// ConflictError means a route name is already held by a different, still-alive
+// process. The CLI prints it directly, so its fields are what a user sees when
+// two invocations collide.
+type ConflictError struct {
+	Name     string
+	Existing Claim
+}
+
+func (e *ConflictError) Error() string {
+	return fmt.Sprintf("route %q is already claimed (pid %d, cwd %s)",
+		e.Name, e.Existing.OwnerPID, e.Existing.OwnerCWD)
+}
+
+// ErrorBody is the JSON shape returned by the API for 4xx/5xx responses,
+// encoded by the agent and decoded by the client.
+type ErrorBody struct {
+	Error    string `json:"error"`
+	OwnerPID int    `json:"owner_pid,omitempty"`
+	OwnerCWD string `json:"owner_cwd,omitempty"`
+}

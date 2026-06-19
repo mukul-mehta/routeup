@@ -117,11 +117,19 @@ Initial API surface:
 POST   /v1/routes               register a route claim
 DELETE /v1/routes/{name}        release a claim
 GET    /v1/routes               list active routes
-GET    /v1/status               agent status, version, uptime
+GET    /v1/status               agent status, version, uptime, boot id
+POST   /v1/shutdown             graceful shutdown (used by `agent stop`/restart)
 GET    /v1/logs?route=&follow=  SSE stream of access logs
 POST   /v1/expose               start public exposure for a claimed route
 POST   /v1/unexpose             stop public exposure
 ```
+
+The status response carries a `boot_id` generated once per agent process. The
+foreground `serve` command registers its claim, remembers that boot id, and
+re-registers if the id changes (the agent restarted) or the agent becomes
+unreachable. This client-driven reconciliation is why the agent can keep its
+registry purely in memory: the live `serve` processes are the source of truth
+and re-assert their claims after any agent restart.
 
 ### Public Server
 
@@ -182,7 +190,7 @@ Browser
   -> https://api.myapp.localhost
   -> local agent
   -> route registry lookup
-  -> local target on 127.0.0.1:<port>
+  -> local target on localhost:<port>
   -> response through local agent
 ```
 
@@ -229,7 +237,7 @@ Initial route shape:
 
 ```txt
 name: api.myapp
-target: http://127.0.0.1:9080
+target: http://localhost:9080
 public: exposed or not exposed
 ```
 
@@ -238,8 +246,8 @@ Later route shape:
 ```txt
 name: myapp
 targets:
-  /: http://127.0.0.1:<dynamic-vite-port>
-  /api: http://127.0.0.1:9080
+  /: http://localhost:<dynamic-vite-port>
+  /api: http://localhost:9080
 public:
   exposed: true
   paths: all or selected patterns
@@ -318,7 +326,9 @@ cmd/routeup/main.go
 internal/cli/
 internal/config/
 internal/route/
+internal/ipc/
 internal/agent/
+internal/agentctl/
 internal/proxy/
 internal/process/
 internal/server/
@@ -335,7 +345,9 @@ Package responsibilities:
 cli: command tree and command orchestration
 config: config/env/package.json discovery
 route: route names, host mapping, match rules
-agent: local agent API and registry ownership
+ipc: wire types + path constants shared by agent and agentctl
+agent: local agent daemon — API handlers, registry, reverse proxy
+agentctl: CLI-side stub that talks to the agent over the socket
 proxy: reverse proxy behavior
 process: child command runner and env injection
 server: public ingress, tokens, route claims

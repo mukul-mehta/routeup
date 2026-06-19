@@ -1,12 +1,20 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/mukul-mehta/routeup/internal/agentctl"
 	"github.com/mukul-mehta/routeup/internal/config"
+	"github.com/mukul-mehta/routeup/internal/ipc"
+	"github.com/mukul-mehta/routeup/internal/state"
 )
 
 // newServeCmd builds the `routeup serve` command.
@@ -14,7 +22,7 @@ import (
 // Flags:
 //
 //	--port    target port for the local service
-//	--dry-run print the resolved route and exit without exposing
+//	--dry-run print the resolved route and exit without registering
 //
 // Args:
 //
@@ -28,7 +36,7 @@ func newServeCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "serve [name]",
-		Short: "Serve a route (local; --expose in Phase 7 adds public)",
+		Short: "Serve a route locally via the routeup agent",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cwd, err := os.Getwd()
@@ -40,17 +48,19 @@ func newServeCmd() *cobra.Command {
 	}
 
 	cmd.Flags().IntVar(&portFlag, "port", 0, "target port for the local service")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print the resolved route and exit without exposing")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print the resolved route and exit without registering")
 
 	return cmd
 }
 
-// runServe is the testable body of `routeup serve`. cwd and getenv are
-// injected so tests can run against a temp directory and a fake env.
+// runServe is the body of `routeup serve`. cwd and getenv are parameters
+// rather than globals so route resolution stays deterministic.
 //
-// On --dry-run, it prints the resolved route, local URL, public URL, and target
-// to cmd.OutOrStdout(). Without --dry-run, it prints a "not implemented yet"
-// message (the real exposure path is Phase 3+).
+// Two paths:
+//
+//   - --dry-run: resolve the route + target, print local/public URLs, exit.
+//   - default:   ensure the agent is running, register the route, print
+//     status, block on SIGINT/SIGTERM, then unregister on the way out.
 func runServe(cmd *cobra.Command, args []string, cwd string, getenv func(string) string, port int, dryRun bool) error {
 	discovered, err := config.Discover(cwd)
 	if err != nil {
@@ -73,14 +83,65 @@ func runServe(cmd *cobra.Command, args []string, cwd string, getenv func(string)
 	}
 
 	out := cmd.OutOrStdout()
-	if !dryRun {
-		_, _ = fmt.Fprintln(out, "serve: not implemented yet (try --dry-run)")
+	if dryRun {
+		_, _ = fmt.Fprintf(out, "route: %s\n", resolved.Route)
+		_, _ = fmt.Fprintf(out, "local: https://%s\n", resolved.Route.LocalHost())
+		_, _ = fmt.Fprintf(out, "public: https://%s\n", resolved.Route.PublicHost())
+		_, _ = fmt.Fprintf(out, "target: http://localhost:%d\n", resolved.Port)
 		return nil
 	}
 
+	sockPath, err := state.AgentSocketPath()
+	if err != nil {
+		return err
+	}
+	client := agentctl.NewClient(sockPath, "", cmd.Root().Version)
+
+	parent := cmd.Context()
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	startCtx, cancelStart := context.WithTimeout(ctx, 12*time.Second)
+	defer cancelStart()
+	ensured, err := client.EnsureRunning(startCtx)
+	if err != nil {
+		return fmt.Errorf("start agent: %w", err)
+	}
+	if ensured == agentctl.EnsureRestarted {
+		_, _ = fmt.Fprintln(out, "note: restarted the local agent to pick up a new build")
+	}
+
+	claim := ipc.Claim{
+		Name:     resolved.Route.String(),
+		Port:     resolved.Port,
+		OwnerPID: os.Getpid(),
+		OwnerCWD: cwd,
+	}
+
+	if _, err := client.Register(startCtx, claim); err != nil {
+		if _, ok := errors.AsType[*ipc.ConflictError](err); ok {
+			return fmt.Errorf("%w\n  hint: stop the holding process or pick a different route name", err)
+		}
+		return err
+	}
+
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = client.Unregister(shutdownCtx, claim.Name)
+	}()
+
 	_, _ = fmt.Fprintf(out, "route: %s\n", resolved.Route)
-	_, _ = fmt.Fprintf(out, "local: https://%s\n", resolved.Route.LocalHost())
-	_, _ = fmt.Fprintf(out, "public: https://%s\n", resolved.Route.PublicHost())
-	_, _ = fmt.Fprintf(out, "target: http://127.0.0.1:%d\n", resolved.Port)
+	_, _ = fmt.Fprintf(out, "local: http://%s:%d\n", resolved.Route.LocalHost(), ipc.DefaultProxyPort)
+	_, _ = fmt.Fprintf(out, "target: http://localhost:%d\n", resolved.Port)
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "press Ctrl-C to stop")
+
+	// Keep the claim alive until Ctrl-C: re-register if the agent restarts or
+	// disappears while we run. Blocks until ctx is cancelled.
+	client.MaintainClaim(ctx, claim, cmd.ErrOrStderr())
 	return nil
 }

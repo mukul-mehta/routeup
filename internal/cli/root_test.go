@@ -37,7 +37,6 @@ func TestStubSubcommands(t *testing.T) {
 		cmd  string
 	}{
 		{name: "doctor", cmd: "doctor"},
-		{name: "routes", cmd: "routes"},
 		{name: "logs", cmd: "logs"},
 	}
 

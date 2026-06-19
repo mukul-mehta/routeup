@@ -22,6 +22,7 @@ OQ-012  Server observability and metrics
 OQ-013  Public server rate limiting
 OQ-014  DNS provider for wildcard ACME
 OQ-015  ACME library choice
+OQ-016  Dual-stack loopback for the agent listener
 ```
 
 ---
@@ -147,3 +148,14 @@ Options:
 - `caddyserver/certmagic`. Higher-level, batteries-included, opinionated.
 
 certmagic is faster to integrate. lego gives more control. Pick when the server cert flow becomes the active milestone.
+
+## OQ-016: Dual-stack loopback for the agent listener
+
+Status: deferred-to-phase-5
+Linked milestone: Phase 5
+
+The agent's proxy listener binds `127.0.0.1` (IPv4 only). The upstream dial was changed to `localhost` so it reaches dev servers on either loopback family, but the listen side was left as IPv4. A client that resolves `*.localhost` to `::1` only, and won't fall back to IPv4, can't reach the agent.
+
+This is low risk today: browsers and macOS `getaddrinfo` return both `127.0.0.1` and `::1` for `*.localhost` and try both, so the IPv4 listener is reachable. No real client has been observed failing.
+
+Binding both families properly needs two listeners (`127.0.0.1:7070` and `[::1]:7070`), since `localhost:7070` binds only one family and `:7070` would expose the agent on every interface. Phase 5 reworks the listener for TLS and port 443, so handle it there if it is still worth doing.

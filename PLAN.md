@@ -302,10 +302,16 @@ internal/route/
   route.go
   matcher.go
 
+internal/ipc/
+  ipc.go        wire types + path constants shared by agent and CLI
+
 internal/agent/
-  agent.go
+  agent.go           daemon lifecycle (server side of the IPC)
   api.go
   registry.go
+
+internal/agentctl/
+  client.go          CLI-side stub that talks to the agent
 
 internal/proxy/
   local.go
@@ -347,6 +353,8 @@ internal/state/
 ```
 
 Keep `internal/route` small and central. Route names are the core domain object.
+
+The CLI↔agent code is split by role: `internal/agent` is the daemon (registry, API handlers, reverse proxy), `internal/agentctl` is the CLI-side stub that calls it, and `internal/ipc` holds the wire types both import. This keeps the daemon out of the CLI's dependency graph and avoids confusing the two `Register` methods (one mutates the registry, one sends a request).
 
 Avoid generic packages like `utils`, `common`, or `helpers`.
 

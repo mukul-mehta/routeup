@@ -47,7 +47,7 @@ func TestServe_DryRun_Positional(t *testing.T) {
 		"route: api.myapp",
 		"local: https://api.myapp.localhost",
 		"public: https://api.myapp.routeup.dev",
-		"target: http://127.0.0.1:8080",
+		"target: http://localhost:8080",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("stdout missing %q\n--- got ---\n%s", want, stdout)
@@ -67,7 +67,7 @@ func TestServe_DryRun_FromConfig(t *testing.T) {
 	for _, want := range []string{
 		"route: myapp",
 		"local: https://myapp.localhost",
-		"target: http://127.0.0.1:7070",
+		"target: http://localhost:7070",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("stdout missing %q\n--- got ---\n%s", want, stdout)
@@ -106,15 +106,5 @@ func TestServe_NoName_Errors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no route name") {
 		t.Errorf("error %q does not contain %q", err.Error(), "no route name")
-	}
-}
-
-func TestServe_WithoutDryRun_Stubs(t *testing.T) {
-	stdout, _, err := runServeIn(t, t.TempDir(), "api.myapp", "--port", "8080")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(stdout, "not implemented") {
-		t.Errorf("stdout missing %q\n--- got ---\n%s", "not implemented", stdout)
 	}
 }
