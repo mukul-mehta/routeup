@@ -179,7 +179,7 @@ Or inside `package.json`:
 }
 ```
 
-There is no separate "project" concept; the `name` field on the config is the project name used for bare-name resolution. Shared settings like `server` and token references will live in a separate global config (Phase 6), not in the per-service file.
+There is no separate "project" concept; the `name` field on the config is the project name used for bare-name resolution. Shared settings like `server` and token references will live in a separate global config (Phase 5), not in the per-service file.
 
 ## Exposure Model
 

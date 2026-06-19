@@ -18,12 +18,12 @@ Phase definitions and acceptance criteria live in [docs/MILESTONES.md](docs/MILE
 - [x] **Phase 1 — Scaffolding & walking skeleton:** Go module, lint, CI, cobra root with `doctor`/`routes`/`logs` stubs
 - [x] **Phase 2 — Route names & config discovery:** parser, hostname mapping, dry-run expose
 - [x] **Phase 3 — Local agent on a high port:** registry, CLI↔agent IPC, reverse proxy by Host
-- [ ] **Phase 4 — Process runner:** child process with `PORT`/`HOST`/`ROUTEUP_*` env injection
-- [ ] **Phase 5 — Real local setup:** local CA, certificate generation, HTTPS on 443
-- [ ] **Phase 6 — Public server & tokens:** route claim API, token allow patterns, public namespace
-- [ ] **Phase 7 — Tunnel MVP:** WebSocket + yamux, one public request reaches a local port
-- [ ] **Phase 8 — Streaming, WebSockets, SSE:** real dev servers work through the tunnel
-- [ ] **Phase 9 — Path proxy:** frontend + API behind one route
+- [ ] **Phase 4 — Real local setup:** local CA, certificate generation, HTTPS on 443
+- [ ] **Phase 5 — Public server & tokens:** route claim API, token allow patterns, public namespace
+- [ ] **Phase 6 — Tunnel MVP:** WebSocket + yamux, one public request reaches a local port
+- [ ] **Phase 7 — Streaming, WebSockets, SSE:** real dev servers work through the tunnel
+- [ ] **Phase 8 — Path proxy:** frontend + API behind one route
+- [ ] **Phase 9 — Process runner:** child process with `PORT`/`HOST`/`ROUTEUP_*` env injection
 - [ ] **Phase 10 — Route logs:** local/public, `routeup logs --follow`
 - [ ] **Phase 11 — Inspect & replay:** opt-in header/body capture, `routeup inspect`/`replay`
 

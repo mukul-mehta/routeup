@@ -191,9 +191,187 @@ tunnel
 process runner
 ```
 
-## Phase 4: Process Runner
+## Phase 4: Real Local Setup
 
-Goal: get Portless-style script-runner usage working locally — `routeup` wraps your dev server and gives it a stable local route.
+Goal: remove visible local ports for `.localhost` routes.
+
+Build macOS and Linux together. Trust stores and port-443 strategies differ between them; both must work before this phase is done. See `docs/OPEN-QUESTIONS.md` OQ-002 and OQ-003 for the per-platform port-443 questions.
+
+Build:
+
+```txt
+routeup setup
+local CA creation
+local CA trust
+certificate generation
+local HTTPS listener
+port 443 handling
+doctor checks for setup state
+```
+
+Acceptance:
+
+```bash
+routeup setup
+routeup serve api.myapp --port 8080
+open https://api.myapp.localhost
+```
+
+Do not build yet:
+
+```txt
+public tunnel
+process runner
+Windows support
+```
+
+## Phase 5: Public Server And Tokens
+
+Goal: authenticate clients and reserve public routes.
+
+Build:
+
+```txt
+routeup server --domain routeup.dev
+token creation (sk_routeup_<random>, Argon2id-hashed in SQLite)
+token storage, list, revoke
+route claim API
+token allow pattern matching
+public namespace handling (opt-in via server config, session-only claims)
+reserved subdomain enforcement
+route conflict handling
+```
+
+No tunnel yet. This phase is only route claim control.
+
+Acceptance:
+
+```bash
+routeup server --domain routeup.dev --public-namespace try
+routeup token create mukul --allow "*.routeup.dev"
+ROUTEUP_TOKEN=... routeup expose api.myapp --port 8080 --dry-run-public
+routeup expose --port 8080 --dry-run-public  # no token, lands in try.routeup.dev
+```
+
+The server should:
+
+- accept token claims whose allow patterns match the requested host
+- reject token claims outside the allow pattern with a 403
+- accept token-less claims into the public namespace when enabled
+- reject token-less claims outside the public namespace with a 401
+- treat public-namespace claims as session-only with no grace window
+- refuse claims for any reserved subdomain
+
+Do not build yet:
+
+```txt
+request forwarding
+WebSocket tunnel
+public TLS automation
+accounts or OAuth
+```
+
+## Phase 6: Tunnel MVP
+
+Goal: one public HTTP request reaches a local port.
+
+Build:
+
+```txt
+WebSocket tunnel connection
+yamux stream multiplexing
+public request forwarding
+client stream handler
+basic request timeout
+basic cancellation on disconnect
+```
+
+Acceptance:
+
+```bash
+routeup server --domain routeup.dev
+routeup expose api.myapp --port 8080
+curl https://api.myapp.routeup.dev
+```
+
+The response should come from the local service on port `8080`.
+
+Do not build yet:
+
+```txt
+WebSocket upgrades
+SSE hardening
+large body tuning
+request replay
+```
+
+## Phase 7: Streaming, WebSockets, And SSE
+
+Goal: real dev servers work through the tunnel.
+
+Build:
+
+```txt
+WebSocket upgrades
+SSE streaming
+large request and response bodies
+request cancellation
+response streaming
+idle timeouts
+backpressure handling
+```
+
+Acceptance:
+
+```txt
+Vite HMR works
+Next dev works
+webhook POST bodies work
+long-lived SSE does not buffer forever
+client disconnect cancels upstream work
+```
+
+Do not build yet:
+
+```txt
+request body capture
+replay
+GUI inspection
+```
+
+## Phase 8: Path Proxy — Frontend + API Behind One Route
+
+Goal: support frontend and API behind a single route.
+
+Build:
+
+```txt
+path routing
+/api -> fixed API target
+/ -> dynamic app target
+configured project expose
+path-limited expose
+public-domain local mirror planning
+```
+
+Acceptance:
+
+```txt
+https://myapp.routeup.dev/      -> dev server (e.g. Vite, Next)
+https://myapp.routeup.dev/api/* -> API backend
+```
+
+Do not build yet:
+
+```txt
+replay
+advanced ACLs
+team namespaces
+```
+
+## Phase 9: Process Runner
+
+Goal: get Portless-style script-runner usage working — `routeup` wraps your dev server and gives it a stable local route, with the env vars pointing at the now-real local and public URLs from earlier phases.
 
 Build:
 
@@ -240,186 +418,9 @@ ROUTEUP_LOCAL_URL=https://myapp.localhost
 Do not build yet:
 
 ```txt
-TLS setup
-public exposure
-path proxy config
-```
-
-## Phase 5: Real Local Setup
-
-Goal: remove visible local ports for `.localhost` routes.
-
-Build macOS and Linux together. Trust stores and port-443 strategies differ between them; both must work before this phase is done. See `docs/OPEN-QUESTIONS.md` OQ-002 and OQ-003 for the per-platform port-443 questions.
-
-Build:
-
-```txt
-routeup setup
-local CA creation
-local CA trust
-certificate generation
-local HTTPS listener
-port 443 handling
-doctor checks for setup state
-```
-
-Acceptance:
-
-```bash
-routeup setup
-routeup serve api.myapp --port 8080
-open https://api.myapp.localhost
-```
-
-Do not build yet:
-
-```txt
-public tunnel
-Windows support
-```
-
-## Phase 6: Public Server And Tokens
-
-Goal: authenticate clients and reserve public routes.
-
-Build:
-
-```txt
-routeup server --domain routeup.dev
-token creation (sk_routeup_<random>, Argon2id-hashed in SQLite)
-token storage, list, revoke
-route claim API
-token allow pattern matching
-public namespace handling (opt-in via server config, session-only claims)
-reserved subdomain enforcement
-route conflict handling
-```
-
-No tunnel yet. This phase is only route claim control.
-
-Acceptance:
-
-```bash
-routeup server --domain routeup.dev --public-namespace try
-routeup token create mukul --allow "*.routeup.dev"
-ROUTEUP_TOKEN=... routeup expose api.myapp --port 8080 --dry-run-public
-routeup expose --port 8080 --dry-run-public  # no token, lands in try.routeup.dev
-```
-
-The server should:
-
-- accept token claims whose allow patterns match the requested host
-- reject token claims outside the allow pattern with a 403
-- accept token-less claims into the public namespace when enabled
-- reject token-less claims outside the public namespace with a 401
-- treat public-namespace claims as session-only with no grace window
-- refuse claims for any reserved subdomain
-
-Do not build yet:
-
-```txt
-request forwarding
-WebSocket tunnel
-public TLS automation
-accounts or OAuth
-```
-
-## Phase 7: Tunnel MVP
-
-Goal: one public HTTP request reaches a local port.
-
-Build:
-
-```txt
-WebSocket tunnel connection
-yamux stream multiplexing
-public request forwarding
-client stream handler
-basic request timeout
-basic cancellation on disconnect
-```
-
-Acceptance:
-
-```bash
-routeup server --domain routeup.dev
-routeup expose api.myapp --port 8080
-curl https://api.myapp.routeup.dev
-```
-
-The response should come from the local service on port `8080`.
-
-Do not build yet:
-
-```txt
-WebSocket upgrades
-SSE hardening
-large body tuning
-request replay
-```
-
-## Phase 8: Streaming, WebSockets, And SSE
-
-Goal: real dev servers work through the tunnel.
-
-Build:
-
-```txt
-WebSocket upgrades
-SSE streaming
-large request and response bodies
-request cancellation
-response streaming
-idle timeouts
-backpressure handling
-```
-
-Acceptance:
-
-```txt
-Vite HMR works
-Next dev works
-webhook POST bodies work
-long-lived SSE does not buffer forever
-client disconnect cancels upstream work
-```
-
-Do not build yet:
-
-```txt
-request body capture
+child stdio capture into agent logs
+request inspect
 replay
-GUI inspection
-```
-
-## Phase 9: Path Proxy — Frontend + API Behind One Route
-
-Goal: support frontend and API behind a single route.
-
-Build:
-
-```txt
-path routing
-/api -> fixed API target
-/ -> dynamic app target
-configured project expose
-path-limited expose
-public-domain local mirror planning
-```
-
-Acceptance:
-
-```txt
-https://myapp.routeup.dev/      -> dev server (e.g. Vite, Next)
-https://myapp.routeup.dev/api/* -> API backend
-```
-
-Do not build yet:
-
-```txt
-replay
-advanced ACLs
-team namespaces
 ```
 
 ## Phase 10: Route Logs
@@ -492,5 +493,7 @@ server claims before tunnel forwarding
 plain HTTP forwarding before WebSocket/SSE
 logs before inspect/replay
 ```
+
+Process Runner sits late on purpose: once TLS, public exposure, streaming, and path proxy are in, `ROUTEUP_URL` and `ROUTEUP_LOCAL_URL` are real working URLs the child can use without caveats, and the runner is just convenience over a complete routing stack.
 
 This keeps the project understandable and the implementation tractable, one usable slice at a time.

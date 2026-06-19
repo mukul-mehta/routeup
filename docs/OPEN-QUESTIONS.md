@@ -15,7 +15,7 @@ This file tracks unresolved product, architecture, and engineering questions for
 ```txt
 OQ-002  macOS port 443 strategy
 OQ-003  Linux port 443 strategy
-OQ-009  Agent autostart approach for Phase 5
+OQ-009  Agent autostart approach for Phase 4
 OQ-010  Tunnel reconnect tuning surface
 OQ-011  mDNS for same-LAN device testing
 OQ-012  Server observability and metrics
@@ -30,7 +30,7 @@ OQ-016  Dual-stack loopback for the agent listener
 ## OQ-002: macOS port 443 strategy
 
 Status: open
-Linked milestone: Phase 5
+Linked milestone: Phase 4
 
 How does the agent bind port 443 on macOS without a bad privileged-helper UX?
 
@@ -45,7 +45,7 @@ Decision criteria: which option survives reboot, system updates, and uninstall c
 ## OQ-003: Linux port 443 strategy
 
 Status: leaning `cap_net_bind_service`
-Linked milestone: Phase 5
+Linked milestone: Phase 4
 
 How does the agent bind 443 on Linux without sudo per run?
 
@@ -57,12 +57,12 @@ Options:
 
 Decision criteria: whether `setcap` survives package upgrades on common distros.
 
-## OQ-009: Agent autostart approach for Phase 5
+## OQ-009: Agent autostart approach for Phase 4
 
-Status: leaning on-demand fork for v1, user-level launch unit added in Phase 5
-Linked milestone: Phase 5
+Status: leaning on-demand fork for v1, user-level launch unit added in Phase 4
+Linked milestone: Phase 4
 
-v1 forks the agent on first CLI call. Phase 5 adds:
+v1 forks the agent on first CLI call. Phase 4 adds:
 
 - macOS: `LaunchAgent` plist in `~/Library/LaunchAgents/`. No sudo.
 - Linux: systemd user unit at `~/.config/systemd/user/routeup.service` enabled via `systemctl --user enable routeup`. No sudo.
@@ -71,8 +71,8 @@ Sudo is only required for port 443 binding and CA trust install, not for the age
 
 ## OQ-010: Tunnel reconnect tuning surface
 
-Status: deferred-to-phase-8
-Linked milestone: Phase 8
+Status: deferred-to-phase-7
+Linked milestone: Phase 7
 
 Initial implementation hard-codes reconnect parameters and offers no CLI flag or config knob. Surface as config only if real complaints justify it.
 
@@ -96,7 +96,7 @@ Library options when revisited: `hashicorp/mdns` or `grandcat/zeroconf`.
 ## OQ-012: Server observability and metrics
 
 Status: open
-Linked milestone: Phase 6+
+Linked milestone: Phase 5+
 
 What does the public server expose for operational visibility?
 
@@ -109,7 +109,7 @@ Options:
 ## OQ-013: Public server rate limiting
 
 Status: open
-Linked milestone: Phase 7
+Linked milestone: Phase 6
 
 Rate-limit per token, per route, per source IP?
 
@@ -125,7 +125,7 @@ A self-hosted operator must be able to disable rate limiting entirely.
 ## OQ-014: DNS provider for wildcard ACME
 
 Status: open
-Linked milestone: Phase 6+
+Linked milestone: Phase 5+
 
 The public server needs wildcard certificates for `*.<public-suffix>`. Wildcard certs require ACME DNS-01, which requires DNS API access.
 
@@ -140,7 +140,7 @@ Operator configures one provider; cert manager handles issuance and renewal.
 ## OQ-015: ACME library choice
 
 Status: open
-Linked milestone: Phase 6+
+Linked milestone: Phase 5+
 
 Options:
 
@@ -151,11 +151,11 @@ certmagic is faster to integrate. lego gives more control. Pick when the server 
 
 ## OQ-016: Dual-stack loopback for the agent listener
 
-Status: deferred-to-phase-5
-Linked milestone: Phase 5
+Status: deferred-to-phase-4
+Linked milestone: Phase 4
 
 The agent's proxy listener binds `127.0.0.1` (IPv4 only). The upstream dial was changed to `localhost` so it reaches dev servers on either loopback family, but the listen side was left as IPv4. A client that resolves `*.localhost` to `::1` only, and won't fall back to IPv4, can't reach the agent.
 
 This is low risk today: browsers and macOS `getaddrinfo` return both `127.0.0.1` and `::1` for `*.localhost` and try both, so the IPv4 listener is reachable. No real client has been observed failing.
 
-Binding both families properly needs two listeners (`127.0.0.1:7070` and `[::1]:7070`), since `localhost:7070` binds only one family and `:7070` would expose the agent on every interface. Phase 5 reworks the listener for TLS and port 443, so handle it there if it is still worth doing.
+Binding both families properly needs two listeners (`127.0.0.1:7070` and `[::1]:7070`), since `localhost:7070` binds only one family and `:7070` would expose the agent on every interface. Phase 4 reworks the listener for TLS and port 443, so handle it there if it is still worth doing.
