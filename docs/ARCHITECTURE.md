@@ -56,8 +56,10 @@ Commands:
 
 ```bash
 routeup
-routeup expose
-routeup expose --port 8080
+routeup serve
+routeup serve --port 8080
+routeup serve --port 8080 --expose
+routeup expose <name>
 routeup status
 routeup routes
 routeup logs
@@ -251,30 +253,31 @@ Config sources, highest precedence first:
 1. CLI flags
 2. Environment variables (ROUTEUP_*)
 3. Config files
-4. Inference (cwd, package.json name)
 ```
 
-Config files are discovered by walking up from the current working directory:
+Inference is config-driven only: the `name` field in `routeup.json` or the `routeup` block of `package.json` is the project name. There is no CWD-basename or top-level `package.json` `name` fallback.
+
+Config files are looked up in the current working directory only:
 
 ```txt
+routeup.json                       (preferred)
 package.json with a routeup block
-routeup.json
 ```
 
-The closest config wins. Monorepos work naturally: each service has its own config near its source, and each service gets its own route. A repo-root `routeup.json` may carry shared settings (token reference, public suffix, log retention); route identity lives at the service.
+`routeup.json` wins when both exist in the same directory. Multi-directory walk-up is not implemented in v1 and may be added later when monorepo workflows justify it. Per-language embeds beyond `package.json` (e.g. `pyproject.toml`, `Cargo.toml`) are out of scope for v1 — non-JS projects use `routeup.json` directly.
 
 Bare-name resolution:
 
 ```txt
 Any argument containing a dot is taken literally.
-A bare name is prefixed with the project name from the closest config.
-If no project is in scope, a bare name is used as-is.
+A bare name is prefixed with the project name from the config.
+If no project name is set, a bare name is used as-is.
 
-project = myapp (resolved from cwd config)
-  routeup expose                -> route myapp
-  routeup expose api            -> route api.myapp
-  routeup expose api.myapp    -> route api.myapp (literal)
-  routeup expose api.other      -> route api.other   (literal, not scoped under myapp)
+project = myapp (from routeup.json or package.json routeup.name)
+  routeup serve                 -> route myapp
+  routeup serve api             -> route api.myapp
+  routeup serve api.myapp       -> route api.myapp (literal)
+  routeup serve api.other       -> route api.other (literal, not scoped under myapp)
 ```
 
 ## Process Lifecycle
@@ -292,7 +295,7 @@ For `routeup` as a runner:
 8. CLI exits with the child process exit code.
 ```
 
-For `routeup expose --port 8080`:
+For `routeup serve --port 8080 --expose` (or standalone `routeup expose <name>` on an already-served route):
 
 ```txt
 1. CLI resolves the route name and target port.

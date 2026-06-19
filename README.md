@@ -6,17 +6,17 @@ It is an open source developer tool for local apps, APIs, webhooks, OAuth callba
 
 ## Status
 
-Phase 1 — Scaffolding & walking skeleton. The CLI builds, lints, tests, and exposes stub commands. No real networking behavior yet.
+Phase 2 — Route names & config discovery. `routeup serve <name> --port <p> --dry-run` resolves the route and prints local + public URLs. No real networking yet.
 
 ## Implementation Progress
 
-Currently: Phase 1 in flight — repo builds, `routeup --version` works, `doctor`/`routes`/`logs` are stubs.
+Currently: Phase 2 complete — route parser, single-dir config discovery, flag/env/config precedence, `expose --dry-run`.
 
 Phase definitions and acceptance criteria live in [docs/MILESTONES.md](docs/MILESTONES.md).
 
 - [x] **Phase 0 — Documentation:** PLAN, README, ARCHITECTURE, ENGINEERING-STANDARDS, MILESTONES, OPEN-QUESTIONS, AGENTS, LICENSE
-- [ ] **Phase 1 — Scaffolding & walking skeleton:** Go module, lint, CI, cobra root with `doctor`/`routes`/`logs` stubs
-- [ ] **Phase 2 — Route names & config discovery:** parser, hostname mapping, dry-run expose
+- [x] **Phase 1 — Scaffolding & walking skeleton:** Go module, lint, CI, cobra root with `doctor`/`routes`/`logs` stubs
+- [x] **Phase 2 — Route names & config discovery:** parser, hostname mapping, dry-run expose
 - [ ] **Phase 3 — Local agent on a high port:** registry, CLI↔agent IPC, reverse proxy by Host
 - [ ] **Phase 4 — Process runner:** child process with `PORT`/`HOST`/`ROUTEUP_*` env injection
 - [ ] **Phase 5 — Real local setup:** local CA, certificate generation, HTTPS on 443

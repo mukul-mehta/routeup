@@ -44,16 +44,16 @@ Name resolution rule:
 
 ```txt
 Any argument containing a dot is taken literally:
-  routeup expose api.myapp    -> route api.myapp
-  routeup expose api.other      -> route api.other (no myapp scope)
+  routeup serve api.myapp       -> route api.myapp
+  routeup serve api.other       -> route api.other (no myapp scope)
 
 A bare name (no dots) is prefixed with the project name from config:
   project = myapp
-  routeup expose                -> route myapp
-  routeup expose api            -> route api.myapp
+  routeup serve                 -> route myapp
+  routeup serve api             -> route api.myapp
 
 If no project is detected in scope, a bare name is used as-is:
-  routeup expose foo            -> route foo
+  routeup serve foo             -> route foo
 ```
 
 ## User Experience
@@ -61,11 +61,13 @@ If no project is detected in scope, a bare name is used as-is:
 The normal commands should be small:
 
 ```bash
-routeup
-routeup expose
-routeup expose --port 8080
-routeup expose api --port 8080
-routeup expose api.myapp --port 9080
+routeup                                # script-runner / Portless mode
+routeup serve                          # serve a local route (default local-only)
+routeup serve --port 8080
+routeup serve api --port 8080
+routeup serve api.myapp --port 9080
+routeup serve api.myapp --port 9080 --expose   # also expose publicly
+routeup expose api.myapp               # retrofit public exposure on an existing local route
 routeup status
 routeup routes
 routeup logs
@@ -74,6 +76,8 @@ routeup setup
 routeup update
 routeup uninstall
 ```
+
+The split: `serve` creates a route (local by default; `--expose` adds public exposure in one go). The standalone `expose` command retrofits public exposure to a route that's already being served locally. The bare `routeup` is the script-runner Portless mode and infers its intent (local or local+expose) from config.
 
 Operator-only commands:
 
@@ -130,7 +134,7 @@ ROUTEUP_SERVER=https://routeup.dev ROUTEUP_TOKEN=sk_routeup_xxx routeup expose -
 The token is optional. Two flows do not need one:
 
 ```txt
-local-only:        routeup setup + routeup expose --local-only
+local-only:        routeup setup + routeup serve
                    -> https://<name>.localhost
                    no server contact, no token
 
@@ -147,10 +151,12 @@ Do not add a separate `routeup login` or `routeup pair` command for v1. The auth
 
 Two sources are supported:
 
-- `routeup.json` at any directory level.
+- `routeup.json`.
 - A `routeup` block inside `package.json`.
 
-Discovery walks upward from the current working directory. The closest config wins. When both `routeup.json` and a `package.json` `routeup` block exist in the same directory, `routeup.json` takes precedence.
+Discovery looks in the current working directory only. When both `routeup.json` and a `package.json` `routeup` block exist in that directory, `routeup.json` takes precedence. Multi-directory walk-up is not implemented in v1; it may be added later when monorepo workflows justify it.
+
+Per-language embeds beyond `package.json` (e.g. `pyproject.toml`, `Cargo.toml`) are out of scope for v1 — non-JS projects use `routeup.json` directly. Adding a new embed format pulls in a parser dependency and is a deliberate later decision.
 
 A typical service config:
 
@@ -173,7 +179,7 @@ Or inside `package.json`:
 }
 ```
 
-An optional repo-root `routeup.json` may carry shared settings (public suffix, token reference) without confusing the model — closest-wins means service-level config still overrides repo-level. There is no separate "project" concept; the `name` field on the closest config is the project name used for bare-name resolution.
+There is no separate "project" concept; the `name` field on the config is the project name used for bare-name resolution. Shared settings like `server` and token references will live in a separate global config (Phase 6), not in the per-service file.
 
 ## Exposure Model
 

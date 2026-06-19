@@ -122,7 +122,7 @@ localhost suffix is not part of the route name
 Acceptance:
 
 ```bash
-routeup expose api.myapp --port 8080 --dry-run
+routeup serve api.myapp --port 8080 --dry-run
 ```
 
 Expected shape:
@@ -168,14 +168,14 @@ CLI-to-agent API
 register route
 unregister route
 reverse proxy by Host header
-routeup expose --port 8080 --local-only
+routeup serve --port 8080
 ```
 
 Acceptance:
 
 ```bash
 python3 -m http.server 8080
-routeup expose api.myapp --port 8080 --local-only
+routeup serve api.myapp --port 8080
 curl -H 'Host: api.myapp.localhost' http://127.0.0.1:7070
 ```
 
@@ -267,7 +267,7 @@ Acceptance:
 
 ```bash
 routeup setup
-routeup expose api.myapp --port 8080 --local-only
+routeup serve api.myapp --port 8080
 open https://api.myapp.localhost
 ```
 

@@ -1,0 +1,58 @@
+// Package config holds the per-service routeup configuration types and the
+// loaders for routeup.json and the package.json "routeup" block.
+package config
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+
+	"github.com/mukul-mehta/routeup/internal/route"
+)
+
+// Config holds settings loaded from a routeup.json or a package.json
+// "routeup" block. Zero values mean "unset" and are resolved later by the
+// precedence chain. Use Load* functions to populate; Validate at load time.
+type Config struct {
+	// Name is the service route name (e.g. "myapp"). Empty when unset.
+	Name string `json:"name,omitempty"`
+
+	// Port is the target port the local service listens on. Zero when unset.
+	Port int `json:"port,omitempty"`
+}
+
+// LoadRouteupJSON reads and decodes a routeup.json file at path
+func LoadRouteupJSON(path string) (Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Config{}, fmt.Errorf("reading %s: %w", path, err)
+	}
+
+	var c Config
+	if err := json.Unmarshal(data, &c); err != nil {
+		return Config{}, fmt.Errorf("could not parse %s: %w", path, err)
+	}
+
+	if err := c.Validate(); err != nil {
+		return Config{}, fmt.Errorf("could not validate %s: %w", path, err)
+	}
+
+	return c, nil
+}
+
+// Validate enforces field-level rules on a Config:
+//   - Name, if non-empty, must parse via route.Parse.
+//   - Port, if non-zero, must be in [1, 65535].
+func (c Config) Validate() error {
+	if c.Name != "" {
+		if _, err := route.Parse(c.Name); err != nil {
+			return fmt.Errorf("invalid name: %w", err)
+		}
+	}
+
+	if c.Port != 0 && (c.Port < 1 || c.Port > 65535) {
+		return fmt.Errorf("port %d out of range [1, 65535]", c.Port)
+	}
+
+	return nil
+}

@@ -18,6 +18,6 @@ func newRootCmd() *cobra.Command {
 		SilenceErrors: true,
 		Version:       "0.0.0-dev",
 	}
-	root.AddCommand(newDoctorCmd(), newRoutesCmd(), newLogsCmd())
+	root.AddCommand(newDoctorCmd(), newRoutesCmd(), newLogsCmd(), newServeCmd())
 	return root
 }
