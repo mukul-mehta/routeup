@@ -38,9 +38,6 @@ jobs:
 
       - uses: extractions/setup-just@v2
 
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
-
-      - name: just lint
-        run: just lint
+          version: v2.12.2
