@@ -11,12 +11,15 @@ import (
 	"time"
 )
 
-// DefaultProxyAddr is the high-port loopback address the local proxy binds to
-const DefaultProxyAddr = "127.0.0.1:7070"
-
-// DefaultProxyPort is the port half of DefaultProxyAddr, used when building
-// the user-facing local URL (e.g. http://api.myapp.localhost:7070).
-const DefaultProxyPort = 7070
+// DefaultTLSAddr/Port: the agent's internal high-port TLS listener. Chosen
+// to dodge common alt-HTTPS ports (7443/8443) and sit below the ephemeral
+// range so the OS won't reuse it as an outbound source port.
+// DefaultUserPort: the user-facing HTTPS port (what URLs default to).
+const (
+	DefaultTLSAddr  = "127.0.0.1:47443"
+	DefaultTLSPort  = 47443
+	DefaultUserPort = 443
+)
 
 // Control-plane paths, versioned under /v1/. Shared so the handler routes and
 // the client requests can never drift apart.
@@ -49,7 +52,7 @@ type Claim struct {
 type Status struct {
 	Version       string    `json:"version"`
 	UptimeSeconds int64     `json:"uptime_seconds"`
-	ProxyAddr     string    `json:"proxy_addr"`
+	TLSAddr       string    `json:"tls_addr,omitempty"`
 	BootID        string    `json:"boot_id"`
 	ExecPath      string    `json:"exec_path,omitempty"`
 	ExecModTime   time.Time `json:"exec_mod_time"`

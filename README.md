@@ -6,11 +6,11 @@ It is an open source developer tool for local apps, APIs, webhooks, OAuth callba
 
 ## Status
 
-Phase 3 — Local agent on a high port. `routeup serve <name> --port <p>` registers the route with a background agent that reverse-proxies by `Host` header on `127.0.0.1:7070`. No TLS or public exposure yet.
+Phase 4 — Real local setup. `routeup setup` creates a local CA, trusts it in the OS keychain, and binds port 443 (a root LaunchDaemon forwarder on macOS, `setcap` on Linux). `routeup serve <name> --port <p>` then serves the app on `https://<name>.localhost` with a CA-signed cert. No public exposure yet.
 
 ## Implementation Progress
 
-Currently: Phase 3 complete — background agent on `127.0.0.1:7070`, in-memory route registry, CLI↔agent IPC over a per-user Unix socket, reverse proxy by `Host`, plus `serve`, `routes`, and `agent` (status/start/stop/restart) commands. The agent auto-starts on demand; `serve` re-registers its route automatically if the agent restarts, and the agent restarts itself when the binary changes.
+Currently: Phase 4 complete — per-machine local CA with on-demand per-SNI leaf certs, OS trust install, HTTPS on port 443, plus `setup`, `serve`, `routes`, `doctor`, and `agent` commands. The agent terminates TLS on an internal high port; on macOS a tiny root forwarder bridges 443, on Linux the binary gets `cap_net_bind_service`. Phase 4.5 (packaging & lifecycle: `uninstall`, upgrade-safe paths, Homebrew) is in progress.
 
 Phase definitions and acceptance criteria live in [docs/MILESTONES.md](docs/MILESTONES.md).
 
@@ -18,7 +18,8 @@ Phase definitions and acceptance criteria live in [docs/MILESTONES.md](docs/MILE
 - [x] **Phase 1 — Scaffolding & walking skeleton:** Go module, lint, CI, cobra root with `doctor`/`routes`/`logs` stubs
 - [x] **Phase 2 — Route names & config discovery:** parser, hostname mapping, dry-run expose
 - [x] **Phase 3 — Local agent on a high port:** registry, CLI↔agent IPC, reverse proxy by Host
-- [ ] **Phase 4 — Real local setup:** local CA, certificate generation, HTTPS on 443
+- [x] **Phase 4 — Real local setup:** local CA, certificate generation, HTTPS on 443
+- [ ] **Phase 4.5 — Packaging & lifecycle:** `routeup uninstall`, upgrade-safe forwarder path, doctor bind check, Homebrew formula
 - [ ] **Phase 5 — Public server & tokens:** route claim API, token allow patterns, public namespace
 - [ ] **Phase 6 — Tunnel MVP:** WebSocket + yamux, one public request reaches a local port
 - [ ] **Phase 7 — Streaming, WebSockets, SSE:** real dev servers work through the tunnel
@@ -57,6 +58,42 @@ without a token:  https://<random>.try.routeup.dev               # ephemeral, wh
 ```
 
 Tokens are minted by the server operator. The local-only flow needs neither a server nor a token.
+
+## Local HTTPS, today
+
+Phase 4 is implemented: trusted HTTPS on `*.localhost`. Public exposure is not built yet.
+
+One-time setup creates a local certificate authority, adds it to your OS trust store, and binds port 443:
+
+```bash
+routeup setup
+```
+
+You'll be asked for Touch ID or your password once. Then serve any local app on a trusted route:
+
+```bash
+routeup serve myapp --port 3000      # https://myapp.localhost
+routeup serve api.myapp --port 8080  # https://api.myapp.localhost
+```
+
+Other commands:
+
+```bash
+routeup doctor      # check CA, OS trust, port 443, and agent health
+routeup routes      # list what's currently served
+routeup uninstall   # remove the cert, the port 443 helper, and ~/.routeup
+```
+
+### Non-browser clients
+
+Browsers, Safari, and `curl` trust the routeup CA from the system store automatically. Some language runtimes ship their own CA bundle and ignore the system store — point them at the routeup CA:
+
+```bash
+export REQUESTS_CA_BUNDLE=~/.routeup/ca.crt   # Python (requests / urllib3)
+export NODE_EXTRA_CA_CERTS=~/.routeup/ca.crt  # Node.js
+```
+
+Firefox uses its own trust store too: import `~/.routeup/ca.crt` under Settings → Privacy & Security → Certificates → View Certificates → Authorities.
 
 ## Inspirations
 

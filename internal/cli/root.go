@@ -17,8 +17,20 @@ const version = "0.0.0-dev"
 
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:           "routeup",
-		Short:         "Stable HTTPS route names for local services",
+		Use:   "routeup",
+		Short: "Stable HTTPS routes for local services",
+		Long: "routeup gives local services stable HTTPS names like\n" +
+			"https://myapp.localhost, and can expose those same routes publicly\n" +
+			"when you need to.\n\n" +
+			"Run `routeup setup` once to create and trust a local CA and bind\n" +
+			"port 443, then `routeup serve <name> --port <p>` to put a local app\n" +
+			"on a trusted HTTPS route.",
+		Example: "  # one-time machine setup: local CA, OS trust, port 443\n" +
+			"  routeup setup\n\n" +
+			"  # serve a local app on https://myapp.localhost\n" +
+			"  routeup serve myapp --port 3000\n\n" +
+			"  # list what's currently served\n" +
+			"  routeup routes",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       version,
@@ -29,6 +41,9 @@ func newRootCmd() *cobra.Command {
 		newLogsCmd(),
 		newServeCmd(),
 		newAgentCmd(),
+		newSetupCmd(),
+		newForwardCmd(),
+		newUninstallCmd(),
 	)
 	return root
 }

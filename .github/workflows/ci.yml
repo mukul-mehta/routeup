@@ -41,3 +41,54 @@ jobs:
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12.2
+
+  integration-debian:
+    name: integration (debian, :${{ matrix.port }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        port: [443, 47443]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: install setcap/getcap
+        run: sudo apt-get update && sudo apt-get install -y libcap2-bin
+
+      - name: build
+        run: go build -o bin/routeup ./cmd/routeup
+
+      # Native runner (real filesystem): both the privileged-bind path (443,
+      # setcap on the binary) and the high-port path (47443, no setcap) work.
+      - name: integration
+        run: bash scripts/integration-linux.sh ./bin/routeup ${{ matrix.port }}
+
+  integration-fedora:
+    name: integration (fedora, :${{ matrix.port }})
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        port: [443, 47443]
+    steps:
+      - name: install deps
+        run: dnf install -y git golang libcap ca-certificates sudo python3 curl
+
+      - uses: actions/checkout@v6
+
+      - name: build
+        run: go build -o bin/routeup ./cmd/routeup
+
+      # Fedora only exists here as a container, so :443 stresses setcap on an
+      # overlay filesystem (may reject the security.capability xattr); :47443
+      # skips setcap. fail-fast:false keeps the cells independent so a setcap
+      # limitation surfaces on its own.
+      - name: integration
+        run: bash scripts/integration-linux.sh ./bin/routeup ${{ matrix.port }}
+

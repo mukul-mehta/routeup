@@ -70,7 +70,7 @@ func (a *Agent) handleStatus(w http.ResponseWriter, r *http.Request) {
 	status := ipc.Status{
 		Version:       a.version,
 		UptimeSeconds: int64(time.Since(a.startedAt).Seconds()),
-		ProxyAddr:     a.proxyAddr,
+		TLSAddr:       a.tlsListenAddr,
 		BootID:        a.bootID,
 		ExecPath:      a.execPath,
 		ExecModTime:   a.execModTime,

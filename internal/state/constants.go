@@ -7,6 +7,8 @@ const (
 	AgentSocketName = "agent.sock"
 	AgentLogName    = "agent.log"
 	AgentPIDName    = "agent.pid"
+	CACertName      = "ca.crt"
+	CAKeyName       = "ca.key"
 )
 
 const (

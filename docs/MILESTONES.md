@@ -225,6 +225,41 @@ process runner
 Windows support
 ```
 
+## Phase 4.5: Packaging And Lifecycle
+
+Goal: make routeup installable and removable cleanly, and survive binary upgrades.
+
+Background: `routeup setup` installs a macOS LaunchDaemon (the port-443 forwarder) and, on Linux, a `setcap` capability on the binary. Both reference the binary by path/inode, so a package upgrade can break them. Distribution also needs a clean teardown story since `brew uninstall` knows nothing about the LaunchDaemon, the trusted CA, or `~/.routeup`.
+
+Build:
+
+```txt
+stable LaunchDaemon binary path (Homebrew opt/bin symlink, survives upgrades)
+setup marker records the configured binary path
+routeup uninstall (stop agent, remove forwarder/setcap, untrust CA, delete state)
+doctor port-binding check (missing forwarder on macOS, lost setcap on Linux)
+Homebrew formula (binary + caveat to run `routeup setup`)
+```
+
+Acceptance:
+
+```bash
+routeup setup
+brew upgrade routeup        # forwarder still works (plist points at the stable symlink)
+routeup doctor              # flags a lost setcap on Linux after upgrade
+routeup uninstall           # removes forwarder, untrusts CA, deletes ~/.routeup
+```
+
+The forwarder on macOS is unaffected by upgrades because the plist points at the stable Homebrew symlink. On Linux the capability is on the inode, so an upgrade drops it; `doctor` detects this via `getcap` and `routeup setup` reapplies.
+
+Do not build yet:
+
+```txt
+auto-update (routeup update)
+Windows packaging
+signed/notarized macOS binaries
+```
+
 ## Phase 5: Public Server And Tokens
 
 Goal: authenticate clients and reserve public routes.

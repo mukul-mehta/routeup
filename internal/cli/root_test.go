@@ -31,26 +31,13 @@ func TestRoot_Version(t *testing.T) {
 	}
 }
 
-func TestStubSubcommands(t *testing.T) {
-	cases := []struct {
-		name string
-		cmd  string
-	}{
-		{name: "doctor", cmd: "doctor"},
-		{name: "logs", cmd: "logs"},
+func TestLogs_StubMessage(t *testing.T) {
+	stdout, stderr, err := runRoot(t, "logs")
+	if err != nil {
+		t.Fatalf("logs returned error: %v\nstderr: %s", err, stderr)
 	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			stdout, stderr, err := runRoot(t, tc.cmd)
-			if err != nil {
-				t.Fatalf("%s returned error: %v\nstderr: %s", tc.cmd, err, stderr)
-			}
-
-			want := tc.cmd + ": not implemented yet"
-			if !strings.Contains(stdout, want) {
-				t.Errorf("%s output missing %q\n--- got ---\n%s", tc.cmd, want, stdout)
-			}
-		})
+	const want = "logs: not implemented yet"
+	if !strings.Contains(stdout, want) {
+		t.Errorf("logs output missing %q\n--- got ---\n%s", want, stdout)
 	}
 }

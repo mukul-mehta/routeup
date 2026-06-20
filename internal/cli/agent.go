@@ -13,16 +13,12 @@ import (
 
 	"github.com/mukul-mehta/routeup/internal/agent"
 	"github.com/mukul-mehta/routeup/internal/agentctl"
-	"github.com/mukul-mehta/routeup/internal/ipc"
+	"github.com/mukul-mehta/routeup/internal/privbind"
 	"github.com/mukul-mehta/routeup/internal/state"
 )
 
-// newAgentCmd builds the `routeup agent` command tree.
-//
-// The local agent starts automatically whenever a command needs it, so these
-// subcommands are debugging aids, not part of the normal flow. They are listed
-// in --help (unlike the daemon entrypoint `agent run`, which is hidden) so a
-// user who needs to inspect or recycle the agent can discover them.
+// newAgentCmd builds the `routeup agent` debug tree. The agent normally
+// starts on demand; these are for inspect/restart.
 func newAgentCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agent",
@@ -42,8 +38,7 @@ func newAgentCmd() *cobra.Command {
 	return cmd
 }
 
-// newAgentClient builds an agent client pointed at the resolved socket path,
-// carrying this CLI's version so staleness checks work.
+// newAgentClient builds an agent client carrying this CLI's version.
 func newAgentClient(cmd *cobra.Command) (*agentctl.Client, error) {
 	sockPath, err := state.AgentSocketPath()
 	if err != nil {
@@ -52,9 +47,7 @@ func newAgentClient(cmd *cobra.Command) (*agentctl.Client, error) {
 	return agentctl.NewClient(sockPath, "", cmd.Root().Version), nil
 }
 
-// newAgentRunCmd is the hidden daemon entrypoint. The CLI re-execs this with
-// `agent run` when it needs to spawn an agent; users should not run it
-// directly.
+// newAgentRunCmd is the hidden daemon entrypoint.
 func newAgentRunCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "run",
@@ -71,9 +64,13 @@ func newAgentRunCmd() *cobra.Command {
 				Level: slog.LevelInfo,
 			}))
 
+			tlsPort := state.TLSPortOrDefault()
+			bindPort := privbind.AgentBindPort(tlsPort)
+			tlsAddr := fmt.Sprintf("127.0.0.1:%d", bindPort)
+
 			a, err := agent.New(agent.Options{
 				SocketPath: sockPath,
-				ProxyAddr:  ipc.DefaultProxyAddr,
+				TLSAddr:    tlsAddr,
 				Version:    cmd.Root().Version,
 				Logger:     logger,
 			})
@@ -113,7 +110,7 @@ func newAgentStatusCmd() *cobra.Command {
 			_, _ = fmt.Fprintln(out, "agent:   running")
 			_, _ = fmt.Fprintf(out, "version: %s\n", status.Version)
 			_, _ = fmt.Fprintf(out, "uptime:  %ds\n", status.UptimeSeconds)
-			_, _ = fmt.Fprintf(out, "proxy:   %s\n", status.ProxyAddr)
+			_, _ = fmt.Fprintf(out, "tls:     %s\n", status.TLSAddr)
 			if status.ExecPath != "" {
 				_, _ = fmt.Fprintf(out, "binary:  %s\n", status.ExecPath)
 			}

@@ -9,6 +9,15 @@ import (
 	"runtime"
 )
 
+// Dir returns the routeup state directory (~/.routeup).
+func Dir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("locate home dir: %w", err)
+	}
+	return filepath.Join(home, StateDirName), nil
+}
+
 // AgentSocketPath returns the path at which the local agent listens for CLI IPC
 func AgentSocketPath() (string, error) {
 	if v := os.Getenv(AgentSocketEnv); v != "" {
@@ -47,6 +56,24 @@ func AgentPIDPath() (string, error) {
 		return "", fmt.Errorf("locate home dir: %w", err)
 	}
 	return filepath.Join(home, StateDirName, AgentPIDName), nil
+}
+
+// CACertPath returns the path of the local CA certificate file.
+func CACertPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("locate home dir: %w", err)
+	}
+	return filepath.Join(home, StateDirName, CACertName), nil
+}
+
+// CAKeyPath returns the path of the local CA private key file.
+func CAKeyPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("locate home dir: %w", err)
+	}
+	return filepath.Join(home, StateDirName, CAKeyName), nil
 }
 
 // EnsureParentDir creates the parent directory of path (mode 0700) if needed.

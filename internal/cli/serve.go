@@ -12,22 +12,13 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mukul-mehta/routeup/internal/agentctl"
+	"github.com/mukul-mehta/routeup/internal/certs"
 	"github.com/mukul-mehta/routeup/internal/config"
 	"github.com/mukul-mehta/routeup/internal/ipc"
 	"github.com/mukul-mehta/routeup/internal/state"
 )
 
-// newServeCmd builds the `routeup serve` command.
-//
-// Flags:
-//
-//	--port    target port for the local service
-//	--dry-run print the resolved route and exit without registering
-//
-// Args:
-//
-//	[name]    optional route name; bare names are prefixed with the project
-//	          name from the closest config (see config.Resolve).
+// newServeCmd builds `routeup serve`.
 func newServeCmd() *cobra.Command {
 	var (
 		portFlag int
@@ -36,8 +27,18 @@ func newServeCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "serve [name]",
-		Short: "Serve a route locally via the routeup agent",
-		Args:  cobra.MaximumNArgs(1),
+		Short: "Serve a local app on a stable HTTPS route",
+		Long: "Serve a local app on https://<name>.localhost.\n\n" +
+			"The route name comes from the argument, or from routeup.json or the\n" +
+			"package.json \"routeup\" block when omitted. A bare name is prefixed\n" +
+			"with the project name; a dotted name is taken literally:\n\n" +
+			"  serve myapp      ->  https://myapp.localhost\n" +
+			"  serve api        ->  https://api.<project>.localhost\n" +
+			"  serve api.myapp  ->  https://api.myapp.localhost",
+		Example: "  routeup serve myapp --port 3000\n" +
+			"  routeup serve api.myapp --port 8080\n" +
+			"  routeup serve myapp --port 3000 --dry-run",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cwd, err := os.Getwd()
 			if err != nil {
@@ -47,20 +48,14 @@ func newServeCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().IntVar(&portFlag, "port", 0, "target port for the local service")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print the resolved route and exit without registering")
+	cmd.Flags().IntVar(&portFlag, "port", 0, "port your local app listens on")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print the resolved route and exit")
 
 	return cmd
 }
 
 // runServe is the body of `routeup serve`. cwd and getenv are parameters
-// rather than globals so route resolution stays deterministic.
-//
-// Two paths:
-//
-//   - --dry-run: resolve the route + target, print local/public URLs, exit.
-//   - default:   ensure the agent is running, register the route, print
-//     status, block on SIGINT/SIGTERM, then unregister on the way out.
+// so route resolution stays deterministic.
 func runServe(cmd *cobra.Command, args []string, cwd string, getenv func(string) string, port int, dryRun bool) error {
 	discovered, err := config.Discover(cwd)
 	if err != nil {
@@ -82,13 +77,20 @@ func runServe(cmd *cobra.Command, args []string, cwd string, getenv func(string)
 		return err
 	}
 
+	tlsPort := state.TLSPortOrDefault()
+
 	out := cmd.OutOrStdout()
 	if dryRun {
 		_, _ = fmt.Fprintf(out, "route: %s\n", resolved.Route)
-		_, _ = fmt.Fprintf(out, "local: https://%s\n", resolved.Route.LocalHost())
+		_, _ = fmt.Fprintf(out, "local: %s\n", localURL(resolved.Route.LocalHost(), tlsPort))
 		_, _ = fmt.Fprintf(out, "public: https://%s\n", resolved.Route.PublicHost())
 		_, _ = fmt.Fprintf(out, "target: http://localhost:%d\n", resolved.Port)
 		return nil
+	}
+
+	// Preflight so we don't wait for an agent-spawn timeout on a missing CA.
+	if err := preflightCA(); err != nil {
+		return err
 	}
 
 	sockPath, err := state.AgentSocketPath()
@@ -135,13 +137,36 @@ func runServe(cmd *cobra.Command, args []string, cwd string, getenv func(string)
 	}()
 
 	_, _ = fmt.Fprintf(out, "route: %s\n", resolved.Route)
-	_, _ = fmt.Fprintf(out, "local: http://%s:%d\n", resolved.Route.LocalHost(), ipc.DefaultProxyPort)
+	_, _ = fmt.Fprintf(out, "local: %s\n", localURL(resolved.Route.LocalHost(), tlsPort))
 	_, _ = fmt.Fprintf(out, "target: http://localhost:%d\n", resolved.Port)
 	_, _ = fmt.Fprintln(out, "")
 	_, _ = fmt.Fprintln(out, "press Ctrl-C to stop")
 
-	// Keep the claim alive until Ctrl-C: re-register if the agent restarts or
-	// disappears while we run. Blocks until ctx is cancelled.
+	// Re-register if the agent restarts. Blocks until ctx cancels.
 	client.MaintainClaim(ctx, claim, cmd.ErrOrStderr())
+	return nil
+}
+
+// localURL omits :443.
+func localURL(host string, port int) string {
+	if port == 443 {
+		return fmt.Sprintf("https://%s", host)
+	}
+	return fmt.Sprintf("https://%s:%d", host, port)
+}
+
+// preflightCA wraps certs.EnsureCA with a "setup incomplete:" prefix.
+func preflightCA() error {
+	certPath, err := state.CACertPath()
+	if err != nil {
+		return err
+	}
+	keyPath, err := state.CAKeyPath()
+	if err != nil {
+		return err
+	}
+	if _, err := certs.EnsureCA(certPath, keyPath); err != nil {
+		return fmt.Errorf("setup incomplete: %w", err)
+	}
 	return nil
 }
