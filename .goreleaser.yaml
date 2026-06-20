@@ -58,3 +58,6 @@ release:
     name: routeup
   draft: false
   prerelease: auto
+  # Replace existing assets on a re-run instead of failing with 422
+  # already_exists, so a retried release is idempotent.
+  mode: replace
