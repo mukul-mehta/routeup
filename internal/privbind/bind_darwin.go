@@ -147,3 +147,9 @@ func agentBindPort(userPort int) int {
 	}
 	return userPort
 }
+
+// reapplyBind is a no-op on macOS: the LaunchDaemon references the binary by
+// path, which still resolves after an in-place update.
+func reapplyBind(_ context.Context, _ int, _ string) error {
+	return nil
+}

@@ -11,9 +11,10 @@ func Execute() error {
 }
 
 // version is the routeup build version. Overridden at release time via
-// -ldflags. The agent reports this string, and the CLI compares it against a
-// running agent to decide whether to restart a stale build.
-const version = "0.0.0-dev"
+// -ldflags -X (must be a var, not a const). The agent reports this string,
+// and the CLI compares it against a running agent to decide whether to
+// restart a stale build.
+var version = "0.0.0-dev"
 
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
@@ -44,6 +45,7 @@ func newRootCmd() *cobra.Command {
 		newSetupCmd(),
 		newForwardCmd(),
 		newUninstallCmd(),
+		newUpdateCmd(),
 	)
 	return root
 }

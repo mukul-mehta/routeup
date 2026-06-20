@@ -81,3 +81,22 @@ func realBinaryPath() (string, error) {
 func agentBindPort(userPort int) int {
 	return userPort
 }
+
+// reapplyBind re-runs setcap on an explicit binary path (used after an
+// update swaps the binary, when os.Executable() would point at the old,
+// now-unlinked inode).
+func reapplyBind(ctx context.Context, userPort int, binaryPath string) error {
+	if userPort >= 1024 {
+		return nil
+	}
+	real, err := filepath.EvalSymlinks(binaryPath)
+	if err != nil {
+		real = binaryPath
+	}
+	cmd := exec.CommandContext(ctx, "sudo", "setcap", "cap_net_bind_service=+ep", real)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("setcap on %s: %w", real, err)
+	}
+	return nil
+}

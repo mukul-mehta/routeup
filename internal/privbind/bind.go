@@ -36,6 +36,14 @@ func Uninstall(ctx context.Context) error {
 	return uninstall(ctx)
 }
 
+// ReapplyBind re-grants privileged-port binding on binaryPath after the
+// binary was replaced (e.g. by `routeup update`). Takes an explicit path
+// because os.Executable() is unreliable once the running binary is swapped.
+// No-op on macOS (the LaunchDaemon references the path) and for high ports.
+func ReapplyBind(ctx context.Context, userPort int, binaryPath string) error {
+	return reapplyBind(ctx, userPort, binaryPath)
+}
+
 // Check reports the health of the privileged-bind setup for userPort.
 // configuredBinPath is the binary path setup recorded (from the marker);
 // pass "" if unknown.

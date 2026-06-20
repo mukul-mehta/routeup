@@ -68,7 +68,7 @@ func newSetupCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&noStart, "no-start", false, "don't start the background agent")
 	cmd.Flags().BoolVar(&noTrust, "no-trust", false, "don't add the certificate to your system trust store")
 	cmd.Flags().BoolVar(&noBind, "no-bind", false, "don't claim port 443 (serve on a high port instead)")
-	cmd.Flags().BoolVar(&useSystem, "system", false, "macOS: trust the certificate system-wide (asks for your password)")
+	cmd.Flags().BoolVar(&useSystem, "system", false, "macOS: force system-wide trust (automatic when binding a privileged port)")
 	return cmd
 }
 
@@ -106,7 +106,8 @@ func runSetup(cmd *cobra.Command, opts runSetupOpts) error {
 	}
 
 	if opts.trust {
-		installCATrust(cmd, out, certPath, opts.useSystem)
+		useSystem := opts.useSystem || (opts.bind && privbind.Required(opts.tlsPort))
+		installCATrust(cmd, out, certPath, useSystem)
 	} else {
 		_, _ = fmt.Fprintln(out, "certificate: not trusted (--no-trust)")
 	}

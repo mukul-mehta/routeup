@@ -62,18 +62,36 @@ func verifyTrust(certPath string) (bool, error) {
 	return false, fmt.Errorf("security verify-cert: %w", err)
 }
 
-// uninstallTrust removes every CA named caCommonName from the login keychain
-// (no sudo) and the system keychain (sudo). Certs are matched and deleted by
-// SHA-1 hash, so duplicates — e.g. from repeated `routeup setup` runs that
-// each minted a fresh CA with the same name — are all removed. Deleting by
-// name fails when more than one matches ("ambiguous").
-func uninstallTrust(ctx context.Context, _ string) error {
+// uninstallTrust removes the routeup CA from the keychains. It first clears
+// the trust-settings record for the current CA (user + admin domains) so no
+// orphaned setting lingers once the cert is gone, then deletes the cert(s)
+// by SHA-1 hash — duplicates from repeated setups are all removed (deleting
+// by name fails when more than one matches, "ambiguous").
+func uninstallTrust(ctx context.Context, certPath string) error {
+	if certPath != "" {
+		removeTrustSetting(ctx, certPath, false)
+		removeTrustSetting(ctx, certPath, true)
+	}
 	if home, err := os.UserHomeDir(); err == nil {
 		login := filepath.Join(home, "Library", "Keychains", "login.keychain-db")
 		deleteCertsByName(ctx, caCommonName, login, false)
 	}
 	deleteCertsByName(ctx, caCommonName, "/Library/Keychains/System.keychain", true)
 	return nil
+}
+
+// removeTrustSetting clears the trust-settings record for the cert at
+// certPath. admin=true targets the system domain (sudo). Best-effort.
+func removeTrustSetting(ctx context.Context, certPath string, admin bool) {
+	var cmd *exec.Cmd
+	if admin {
+		cmd = exec.CommandContext(ctx, "sudo", "security", "remove-trusted-cert", "-d", certPath)
+	} else {
+		cmd = exec.CommandContext(ctx, "security", "remove-trusted-cert", certPath)
+	}
+	cmd.Stdin = os.Stdin
+	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
+	_ = cmd.Run()
 }
 
 // deleteCertsByName deletes every cert with common name cn from keychain.

@@ -1,0 +1,60 @@
+# GoReleaser config for routeup.
+# Validate locally:  goreleaser check
+# Dry-run a build:   goreleaser release --snapshot --clean
+# Real release:      git tag vX.Y.Z && git push origin vX.Y.Z  (CI runs it)
+version: 2
+
+project_name: routeup
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: routeup
+    main: ./cmd/routeup
+    binary: routeup
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/mukul-mehta/routeup/internal/cli.version={{ .Version }}
+
+archives:
+  # No version in the name so the curl installer can use the stable
+  # releases/latest/download/routeup_<os>_<arch>.tar.gz URL.
+  - id: routeup
+    formats: [tar.gz]
+    name_template: "routeup_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+homebrew_casks:
+  - name: routeup
+    directory: Casks
+    repository:
+      owner: mukul-mehta
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: "https://github.com/mukul-mehta/routeup"
+    description: "Stable HTTPS route names for local services"
+    caveats: |
+      Run `routeup setup` once to create and trust a local CA and bind port 443:
+        routeup setup
+
+release:
+  github:
+    owner: mukul-mehta
+    name: routeup
+  draft: false
+  prerelease: auto

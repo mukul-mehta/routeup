@@ -61,7 +61,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libcap2-bin
 
       - name: build
-        run: go build -o bin/routeup ./cmd/routeup
+        run: go build -buildvcs=false -o bin/routeup ./cmd/routeup
 
       # Native runner (real filesystem): both the privileged-bind path (443,
       # setcap on the binary) and the high-port path (47443, no setcap) work.
@@ -83,7 +83,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: build
-        run: go build -o bin/routeup ./cmd/routeup
+        run: go build -buildvcs=false -o bin/routeup ./cmd/routeup
 
       # Fedora only exists here as a container, so :443 stresses setcap on an
       # overlay filesystem (may reject the security.capability xattr); :47443
