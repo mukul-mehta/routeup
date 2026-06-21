@@ -10,7 +10,7 @@ Phase 4 — Real local setup. `routeup setup` creates a local CA, trusts it in t
 
 ## Implementation Progress
 
-Currently: Phase 4 complete — per-machine local CA with on-demand per-SNI leaf certs, OS trust install, HTTPS on port 443, plus `setup`, `serve`, `routes`, `doctor`, and `agent` commands. The agent terminates TLS on an internal high port; on macOS a tiny root forwarder bridges 443, on Linux the binary gets `cap_net_bind_service`. Phase 4.5 (packaging & lifecycle: `uninstall`, upgrade-safe paths, Homebrew) is in progress.
+Currently: Phases 4 and 4.5 complete — per-machine local CA with on-demand per-SNI leaf certs, OS trust install, HTTPS on port 443, plus `setup`, `serve`, `routes`, `doctor`, `uninstall`, `update`, and `agent` commands. The agent terminates TLS on an internal high port; on macOS a tiny root forwarder bridges 443, on Linux the binary gets `cap_net_bind_service`. Ships as a single binary via Homebrew (`brew install mukul-mehta/tap/routeup`) and a curl installer, built and released by GoReleaser on tag.
 
 Phase definitions and acceptance criteria live in [docs/MILESTONES.md](docs/MILESTONES.md).
 
@@ -19,7 +19,7 @@ Phase definitions and acceptance criteria live in [docs/MILESTONES.md](docs/MILE
 - [x] **Phase 2 — Route names & config discovery:** parser, hostname mapping, dry-run expose
 - [x] **Phase 3 — Local agent on a high port:** registry, CLI↔agent IPC, reverse proxy by Host
 - [x] **Phase 4 — Real local setup:** local CA, certificate generation, HTTPS on 443
-- [ ] **Phase 4.5 — Packaging & lifecycle:** `routeup uninstall`, upgrade-safe forwarder path, doctor bind check, Homebrew formula
+- [x] **Phase 4.5 — Packaging & lifecycle:** `routeup uninstall`/`update`, upgrade-safe forwarder path, doctor bind check, Homebrew + curl install, GoReleaser pipeline
 - [ ] **Phase 5 — Public server & tokens:** route claim API, token allow patterns, public namespace
 - [ ] **Phase 6 — Tunnel MVP:** WebSocket + yamux, one public request reaches a local port
 - [ ] **Phase 7 — Streaming, WebSockets, SSE:** real dev servers work through the tunnel
@@ -58,6 +58,26 @@ without a token:  https://<random>.try.routeup.dev               # ephemeral, wh
 ```
 
 Tokens are minted by the server operator. The local-only flow needs neither a server nor a token.
+
+## Install
+
+macOS and Linux (arm64/amd64).
+
+Homebrew:
+
+```bash
+brew install mukul-mehta/tap/routeup
+```
+
+Or curl:
+
+```bash
+curl -fsSL https://get.routeup.dev | sh
+```
+
+Then run `routeup setup` once. Later, `routeup update` upgrades in place (or via `brew upgrade` for Homebrew installs).
+
+> macOS: the binary is unsigned. `brew` and the `curl` installer run it fine; only a manual download from the Releases page is quarantined, cleared with `xattr -d com.apple.quarantine ./routeup`.
 
 ## Local HTTPS, today
 
