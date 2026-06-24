@@ -19,6 +19,8 @@ func (a *Agent) apiHandler() http.Handler {
 	mux.HandleFunc("GET "+ipc.PathRoutes, a.handleList)
 	mux.HandleFunc("GET "+ipc.PathStatus, a.handleStatus)
 	mux.HandleFunc("POST "+ipc.PathShutdown, a.handleShutdown)
+	mux.HandleFunc("POST "+ipc.PathExpose, a.handleExpose)
+	mux.HandleFunc("POST "+ipc.PathUnexpose, a.handleUnexpose)
 	return mux
 }
 
@@ -87,6 +89,42 @@ func (a *Agent) handleShutdown(w http.ResponseWriter, r *http.Request) {
 		f.Flush()
 	}
 	a.triggerShutdown()
+}
+
+func (a *Agent) handleExpose(w http.ResponseWriter, r *http.Request) {
+	defer func() { _ = r.Body.Close() }()
+
+	var in ipc.ExposeRequest
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid json: "+err.Error(), nil)
+		return
+	}
+	if in.Port == 0 || in.Server == "" || in.OwnerPID == 0 || (in.Name == "" && !in.Random) {
+		writeJSONError(w, http.StatusBadRequest, "port, server, owner_pid and a name (or random) are required", nil)
+		return
+	}
+
+	host, err := a.exposer.Expose(r.Context(), in)
+	if err != nil {
+		a.logger.Warn("expose failed", "name", in.Name, "err", err)
+		writeJSONError(w, http.StatusBadGateway, err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, ipc.ExposeResponse{Host: host})
+}
+
+func (a *Agent) handleUnexpose(w http.ResponseWriter, r *http.Request) {
+	defer func() { _ = r.Body.Close() }()
+
+	var in ipc.UnexposeRequest
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid json: "+err.Error(), nil)
+		return
+	}
+	if a.exposer.Unexpose(in.Host) {
+		a.logger.Info("exposure unexposed via api", "host", in.Host)
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

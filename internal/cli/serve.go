@@ -18,12 +18,19 @@ import (
 	"github.com/mukul-mehta/routeup/internal/state"
 )
 
+// serveOpts holds the resolved flags for `routeup serve`.
+type serveOpts struct {
+	port     int
+	expose   bool
+	random   bool
+	insecure bool
+	server   string
+	token    string
+}
+
 // newServeCmd builds `routeup serve`.
 func newServeCmd() *cobra.Command {
-	var (
-		portFlag int
-		dryRun   bool
-	)
+	var opts serveOpts
 
 	cmd := &cobra.Command{
 		Use:   "serve [name]",
@@ -34,29 +41,37 @@ func newServeCmd() *cobra.Command {
 			"with the project name; a dotted name is taken literally:\n\n" +
 			"  serve myapp      ->  https://myapp.localhost\n" +
 			"  serve api        ->  https://api.<project>.localhost\n" +
-			"  serve api.myapp  ->  https://api.myapp.localhost",
+			"  serve api.myapp  ->  https://api.myapp.localhost\n\n" +
+			"Add --expose to also publish it publicly through a routeup server (the\n" +
+			"same as `routeup expose`); the public name is a single label under your\n" +
+			"token's namespace.",
 		Example: "  routeup serve myapp --port 3000\n" +
 			"  routeup serve api.myapp --port 8080\n" +
-			"  routeup serve myapp --port 3000 --dry-run",
+			"  routeup serve myapp --port 3000 --expose",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cwd, err := os.Getwd()
 			if err != nil {
 				return fmt.Errorf("getting cwd: %w", err)
 			}
-			return runServe(cmd, args, cwd, os.Getenv, portFlag, dryRun)
+			return runServe(cmd, args, cwd, os.Getenv, opts)
 		},
 	}
 
-	cmd.Flags().IntVar(&portFlag, "port", 0, "port your local app listens on")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print the resolved route and exit")
+	cmd.Flags().IntVar(&opts.port, "port", 0, "port your local app listens on")
+	cmd.Flags().BoolVar(&opts.expose, "expose", false, "also expose this route publicly through a routeup server")
+	cmd.Flags().BoolVar(&opts.expose, "public", false, "alias for --expose")
+	cmd.Flags().BoolVar(&opts.random, "random", false, "with --expose, request a server-assigned public name")
+	cmd.Flags().BoolVar(&opts.insecure, "insecure", false, "with --expose, skip TLS verification (dev only)")
+	cmd.Flags().StringVar(&opts.server, "server", "", "with --expose, public server URL (or ROUTEUP_SERVER, or saved by setup)")
+	cmd.Flags().StringVar(&opts.token, "token", "", "with --expose, server token (or ROUTEUP_TOKEN, or saved by setup)")
 
 	return cmd
 }
 
 // runServe is the body of `routeup serve`. cwd and getenv are parameters
 // so route resolution stays deterministic.
-func runServe(cmd *cobra.Command, args []string, cwd string, getenv func(string) string, port int, dryRun bool) error {
+func runServe(cmd *cobra.Command, args []string, cwd string, getenv func(string) string, opts serveOpts) error {
 	discovered, err := config.Discover(cwd)
 	if err != nil {
 		return err
@@ -69,7 +84,7 @@ func runServe(cmd *cobra.Command, args []string, cwd string, getenv func(string)
 
 	resolved, err := config.Resolve(config.Inputs{
 		PositionalName: positional,
-		PortFlag:       port,
+		PortFlag:       opts.port,
 		Env:            getenv,
 		File:           discovered.Config,
 	})
@@ -80,13 +95,6 @@ func runServe(cmd *cobra.Command, args []string, cwd string, getenv func(string)
 	tlsPort := state.TLSPortOrDefault()
 
 	out := cmd.OutOrStdout()
-	if dryRun {
-		_, _ = fmt.Fprintf(out, "route: %s\n", resolved.Route)
-		_, _ = fmt.Fprintf(out, "local: %s\n", localURL(resolved.Route.LocalHost(), tlsPort))
-		_, _ = fmt.Fprintf(out, "public: https://%s\n", resolved.Route.PublicHost())
-		_, _ = fmt.Fprintf(out, "target: http://localhost:%d\n", resolved.Port)
-		return nil
-	}
 
 	// Preflight so we don't wait for an agent-spawn timeout on a missing CA.
 	if err := preflightCA(); err != nil {
@@ -136,8 +144,22 @@ func runServe(cmd *cobra.Command, args []string, cwd string, getenv func(string)
 		_ = client.Unregister(shutdownCtx, claim.Name)
 	}()
 
+	// Optional public exposure — same path as `routeup expose`.
+	var publicHost string
+	if opts.expose {
+		host, stopExpose, err := serveExpose(ctx, client, positional, getenv, discovered.Config, resolved.Port, opts)
+		if err != nil {
+			return err
+		}
+		defer stopExpose()
+		publicHost = host
+	}
+
 	_, _ = fmt.Fprintf(out, "route: %s\n", resolved.Route)
 	_, _ = fmt.Fprintf(out, "local: %s\n", localURL(resolved.Route.LocalHost(), tlsPort))
+	if publicHost != "" {
+		_, _ = fmt.Fprintf(out, "public: https://%s\n", publicHost)
+	}
 	_, _ = fmt.Fprintf(out, "target: http://localhost:%d\n", resolved.Port)
 	_, _ = fmt.Fprintln(out, "")
 	_, _ = fmt.Fprintln(out, "press Ctrl-C to stop")
@@ -145,6 +167,32 @@ func runServe(cmd *cobra.Command, args []string, cwd string, getenv func(string)
 	// Re-register if the agent restarts. Blocks until ctx cancels.
 	client.MaintainClaim(ctx, claim, cmd.ErrOrStderr())
 	return nil
+}
+
+// serveExpose starts the public tunnel for `serve --expose`, resolving the
+// server/token and the single-label public name the same way `expose` does.
+func serveExpose(ctx context.Context, client *agentctl.Client, positional string, getenv func(string) string, file config.Config, port int, opts serveOpts) (string, func(), error) {
+	serverURL, token := resolveServerToken(opts.server, opts.token, getenv)
+	if serverURL == "" {
+		return "", nil, errors.New("--expose needs a server — pass --server, set ROUTEUP_SERVER, or run `routeup setup --server …`")
+	}
+
+	label := exposeRouteName(positional, getenv, file)
+	if !opts.random {
+		if err := checkPublicLabel(label); err != nil {
+			return "", nil, err
+		}
+	}
+
+	return holdExposure(ctx, client, ipc.ExposeRequest{
+		Name:     label,
+		Port:     port,
+		Server:   serverURL,
+		Token:    token,
+		Random:   opts.random,
+		Insecure: opts.insecure,
+		OwnerPID: os.Getpid(),
+	})
 }
 
 // localURL omits :443.

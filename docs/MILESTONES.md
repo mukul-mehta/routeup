@@ -104,7 +104,6 @@ hostname mapping
 package.json name discovery
 routeup config discovery
 flag/env/config/inference precedence
-dry-run expose output
 ```
 
 Core route rules:
@@ -122,17 +121,11 @@ localhost suffix is not part of the route name
 Acceptance:
 
 ```bash
-routeup serve api.myapp --port 8080 --dry-run
+go test ./internal/route/... ./internal/config/...
 ```
 
-Expected shape:
-
-```txt
-route: api.myapp
-local: https://api.myapp.localhost
-public: https://api.myapp.routeup.dev
-target: http://localhost:8080
-```
+Route names parse and validate per the rules above, and the name and port
+resolve from flag, env, and config in precedence order.
 
 Do not build yet:
 
@@ -260,9 +253,27 @@ Windows packaging
 signed/notarized macOS binaries
 ```
 
-## Phase 5: Public Server And Tokens
+## Phase 5: Public Server, Tokens, And Tunnel
 
-Goal: authenticate clients and reserve public routes.
+Goal: authenticate clients, reserve public routes, and forward one public HTTPS
+request to a local port over a tunnel.
+
+> Implementation note: built and verified end-to-end over loopback (server +
+> agent tunnel client + local backend), reached via a `Host` header. The server
+> derives the public host from the token's allow pattern (the client sends only
+> a route name), so a scoped token cannot claim outside its namespace; an
+> out-of-scope route is rejected as the reserved-subtree / out-of-domain 403.
+> The agent owns the tunnel client and `routeup expose` holds the claim until
+> Ctrl-C. Public hosts are one label under a namespace base (`<label>.<base>`):
+> multi-label names are rejected, reserved names protect only the root tier, and
+> granting a namespace reserves its label at root. Claims are asserted over the
+> tunnel control channel; there is no separate HTTP claim API. The server serves
+> HTTPS: `--tls-mode acme` (default) auto-issues wildcards via Let's Encrypt +
+> Cloudflare DNS-01 (`certmagic`): `*.<domain>` and `*.try.<domain>` at startup,
+> and `*.<namespace>.<domain>` on first claim. `--tls-mode cert` serves an
+> operator cert (`expose --insecure` for self-signed dev certs). Real public DNS
+> and a deployed host are the remaining deployment step. Acceptance needs a
+> `--server`/`ROUTEUP_SERVER` pointing at the running server.
 
 Build:
 
@@ -270,49 +281,10 @@ Build:
 routeup server --domain routeup.dev
 token creation (sk_routeup_<random>, Argon2id-hashed in SQLite)
 token storage, list, revoke
-route claim API
 token allow pattern matching
 public namespace handling (opt-in via server config, session-only claims)
 reserved subdomain enforcement
 route conflict handling
-```
-
-No tunnel yet. This phase is only route claim control.
-
-Acceptance:
-
-```bash
-routeup server --domain routeup.dev --public-namespace try
-routeup token create mukul --allow "*.routeup.dev"
-ROUTEUP_TOKEN=... routeup expose api.myapp --port 8080 --dry-run-public
-routeup expose --port 8080 --dry-run-public  # no token, lands in try.routeup.dev
-```
-
-The server should:
-
-- accept token claims whose allow patterns match the requested host
-- reject token claims outside the allow pattern with a 403
-- accept token-less claims into the public namespace when enabled
-- reject token-less claims outside the public namespace with a 401
-- treat public-namespace claims as session-only with no grace window
-- refuse claims for any reserved subdomain
-
-Do not build yet:
-
-```txt
-request forwarding
-WebSocket tunnel
-public TLS automation
-accounts or OAuth
-```
-
-## Phase 6: Tunnel MVP
-
-Goal: one public HTTP request reaches a local port.
-
-Build:
-
-```txt
 WebSocket tunnel connection
 yamux stream multiplexing
 public request forwarding
@@ -324,12 +296,23 @@ basic cancellation on disconnect
 Acceptance:
 
 ```bash
-routeup server --domain routeup.dev
-routeup expose api.myapp --port 8080
+routeup server --domain routeup.dev --public-namespace try
+routeup token create mukul --allow "*.routeup.dev"
+ROUTEUP_TOKEN=... routeup expose api.myapp --port 8080
 curl https://api.myapp.routeup.dev
 ```
 
-The response should come from the local service on port `8080`.
+The server should:
+
+- accept token claims whose allow patterns match the requested host
+- reject token claims outside the allow pattern with a 403
+- accept token-less claims into the public namespace when enabled
+- reject token-less claims outside the public namespace with a 401
+- treat public-namespace claims as session-only with no grace window
+- refuse claims for any reserved subdomain
+- forward a public HTTPS request through the tunnel to the local port
+
+The response should come from the local service on the target port.
 
 Do not build yet:
 
@@ -338,9 +321,10 @@ WebSocket upgrades
 SSE hardening
 large body tuning
 request replay
+accounts or OAuth
 ```
 
-## Phase 7: Streaming, WebSockets, And SSE
+## Phase 6: Streaming, WebSockets, And SSE
 
 Goal: real dev servers work through the tunnel.
 
@@ -374,7 +358,7 @@ replay
 GUI inspection
 ```
 
-## Phase 8: Path Proxy — Frontend + API Behind One Route
+## Phase 7: Path Proxy — Frontend + API Behind One Route
 
 Goal: support frontend and API behind a single route.
 
@@ -404,7 +388,7 @@ advanced ACLs
 team namespaces
 ```
 
-## Phase 9: Process Runner
+## Phase 8: Process Runner
 
 Goal: get Portless-style script-runner usage working — `routeup` wraps your dev server and gives it a stable local route, with the env vars pointing at the now-real local and public URLs from earlier phases.
 
@@ -458,7 +442,7 @@ request inspect
 replay
 ```
 
-## Phase 10: Route Logs
+## Phase 9: Route Logs
 
 Goal: make local and public traffic visible.
 
@@ -493,7 +477,7 @@ inspect
 replay
 ```
 
-## Phase 11: Inspect And Replay
+## Phase 10: Inspect And Replay
 
 Goal: make webhook debugging excellent.
 

@@ -223,13 +223,21 @@ api.myapp
 docs.myapp
 ```
 
-The hostname mapping is mechanical:
+The hostname mapping is mechanical. Locally a route may be dotted (the local CA
+mints a per-SNI leaf for any depth). Publicly a route is a single label under a
+namespace base, so one wildcard certificate (`*.<base>`) covers it:
 
 ```txt
-<route>.localhost                local, served by the agent
-<route>.<namespace>.routeup.dev  public, requires a token whose allow pattern covers it
-<route>.try.routeup.dev          public, no token (ephemeral, when the server enables the public namespace)
+<route>.localhost            local, served by the agent (dotted ok)
+<label>.routeup.dev          public, root tier, *.routeup.dev token
+<label>.<ns>.routeup.dev     public, namespace tier, *.<ns>.routeup.dev token
+<label>.try.routeup.dev      public, no token (ephemeral, when the public namespace is enabled)
 ```
+
+Reserved names protect the root tier only; inside an owned namespace any label
+is allowed (`api.mukul.routeup.dev` is mukul's). Multi-label route names work
+locally but are rejected for public exposure. See PLAN.md → Public hostname
+model.
 
 Do not model `project`, `namespace`, and `service` as separate user concepts until real usage proves they are needed.
 

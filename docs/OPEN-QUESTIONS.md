@@ -20,11 +20,13 @@ OQ-010  Tunnel reconnect tuning surface
 OQ-011  mDNS for same-LAN device testing
 OQ-012  Server observability and metrics
 OQ-013  Public server rate limiting
-OQ-014  DNS provider for wildcard ACME
-OQ-015  ACME library choice
 OQ-016  Dual-stack loopback for the agent listener
 OQ-017  Release artifact signing / provenance
 ```
+
+Resolved and removed: OQ-014 (DNS provider → Cloudflare) and OQ-015 (ACME
+library → certmagic). The decision is recorded in `PLAN.md` under Public Server
+→ TLS; the implementation is `internal/server/tls.go`.
 
 ---
 
@@ -72,18 +74,14 @@ Sudo is only required for port 443 binding and CA trust install, not for the age
 
 ## OQ-010: Tunnel reconnect tuning surface
 
-Status: deferred-to-phase-7
-Linked milestone: Phase 7
+Status: implemented with hard-coded defaults; revisit a config surface only on complaints
+Linked milestone: Phase 6
 
-Initial implementation hard-codes reconnect parameters and offers no CLI flag or config knob. Surface as config only if real complaints justify it.
-
-Hard-coded defaults to start with:
-
-```txt
-backoff: 500ms..30s, multiplier 2, jitter +/-20%
-heartbeat: every 15s, drop after 3 missed
-server claim grace: 30s after disconnect
-```
+The initial implementation hard-codes reconnect parameters and offers no CLI
+flag or config knob. Now in use: the tunnel client backs off 500ms..30s (x2) in
+`internal/tunnel/client.go`, and the server holds a released token claim for a
+30s grace window in `internal/server/claims.go`. yamux keepalive covers
+heartbeat. Surface as config only if real complaints justify it.
 
 ## OQ-011: mDNS for same-LAN device testing
 
@@ -110,7 +108,7 @@ Options:
 ## OQ-013: Public server rate limiting
 
 Status: open
-Linked milestone: Phase 6
+Linked milestone: Phase 5
 
 Rate-limit per token, per route, per source IP?
 
@@ -122,33 +120,6 @@ Defaults to consider:
 - Public-namespace claims: per-IP rate limit on claim creation specifically. With no token to bind to, source IP is the only handle for abuse prevention. Important when the operator enables the public namespace on a hosted server.
 
 A self-hosted operator must be able to disable rate limiting entirely.
-
-## OQ-014: DNS provider for wildcard ACME
-
-Status: open
-Linked milestone: Phase 5+
-
-The public server needs wildcard certificates for `*.<public-suffix>`. Wildcard certs require ACME DNS-01, which requires DNS API access.
-
-Options:
-
-- Cloudflare. Free, fast API, widely used. Probably default.
-- Route 53. Solid, IAM-heavy.
-- Self-hosted PowerDNS or similar. For operators avoiding third-party DNS.
-
-Operator configures one provider; cert manager handles issuance and renewal.
-
-## OQ-015: ACME library choice
-
-Status: open
-Linked milestone: Phase 5+
-
-Options:
-
-- `go-acme/lego`. Direct ACME client, many DNS provider plugins, lower-level.
-- `caddyserver/certmagic`. Higher-level, batteries-included, opinionated.
-
-certmagic is faster to integrate. lego gives more control. Pick when the server cert flow becomes the active milestone.
 
 ## OQ-016: Dual-stack loopback for the agent listener
 

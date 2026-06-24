@@ -1,0 +1,10 @@
+{
+  "domain": "routeup.dev",
+  "listen": ":8443",
+  "public_namespace": "try",
+  "db": "/data/server.db",
+  "acme_email": "hello@mukul-mehta.in",
+  "acme_ca": "production",
+  "acme_storage": "/data/acme",
+  "reserved": ["edge", "get"]
+}

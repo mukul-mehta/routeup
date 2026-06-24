@@ -1,0 +1,59 @@
+# routeup public server on Fly.io.
+#
+# Validate after editing:  fly config validate -c deploy/fly.toml
+# fly.toml syntax drifts between flyctl versions; if a field is rejected, run
+# `fly config validate` and adjust.
+#
+# Deploy from the repository root:
+#   fly deploy -c deploy/fly.toml
+
+app            = "routeup-server"   # change to your Fly app name
+primary_region = "sin"             # Singapore — closest free-plan region to India. Volume must match.
+
+[build]
+  # Relative to THIS file's directory (deploy/), so just "Dockerfile".
+  # The build context stays at your cwd (the repo root) where go.mod lives.
+  dockerfile = "Dockerfile"
+
+# Persistent volume for the SQLite database and the certmagic certificate cache.
+# Losing the cache means re-issuing on every restart, which hits Let's Encrypt
+# rate limits — keep it on the volume. A volume also pins the app to one machine,
+# which is exactly what we want: the server is stateful (single instance).
+[mounts]
+  source      = "routeup_data"
+  destination = "/data"
+
+# Raw TCP passthrough on 443. Fly forwards the encrypted bytes and routeup
+# terminates TLS itself, because it holds the wildcard certificates. Do NOT add
+# "tls"/"http" handlers here — that would make Fly terminate TLS, and Fly has no
+# cert for your dynamic *.<namespace>.<domain> hosts.
+#
+# Passthrough requires a DEDICATED IPv4 (`fly ips allocate-v4`): Fly cannot
+# SNI-route a shared IP for traffic it does not decrypt.
+[[services]]
+  protocol             = "tcp"
+  internal_port        = 8443
+  auto_stop_machines   = false
+  auto_start_machines  = false
+  min_machines_running = 1
+
+  [[services.ports]]
+    port = 443
+
+  [[services.tcp_checks]]
+    interval     = "15s"
+    timeout      = "2s"
+    grace_period = "60s"
+
+# Keep Go's heap under the machine's RAM so the VM doesn't OOM. Set to ~85% of
+# `memory`; raise both together if you scale up.
+[env]
+  GOMEMLIMIT = "220MiB"
+
+[[vm]]
+  size   = "shared-cpu-1x"
+  # 256MB rides the Legacy Hobby free allowance (3x shared-cpu-1x-256mb free).
+  # Resize anytime without redeploying:
+  #   fly scale memory 512           (then GOMEMLIMIT 440MiB; ~$3/mo compute)
+  #   fly scale vm shared-cpu-2x     (more CPU, if Metrics shows CPU pegged)
+  memory = "256mb"

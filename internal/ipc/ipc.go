@@ -27,6 +27,8 @@ const (
 	PathStatus   = "/v1/status"
 	PathRoutes   = "/v1/routes"
 	PathShutdown = "/v1/shutdown"
+	PathExpose   = "/v1/expose"
+	PathUnexpose = "/v1/unexpose"
 )
 
 // Claim is one active route registration. The same shape is used for the
@@ -77,4 +79,27 @@ type ErrorBody struct {
 	Error    string `json:"error"`
 	OwnerPID int    `json:"owner_pid,omitempty"`
 	OwnerCWD string `json:"owner_cwd,omitempty"`
+}
+
+// ExposeRequest asks the agent to open a public tunnel for a route. The agent
+// dials Server, authenticates with Token, claims the route, and forwards
+// inbound public requests to the local Port. OwnerPID lets the agent reap the
+// exposure if the requesting CLI dies.
+type ExposeRequest struct {
+	Name     string `json:"name"`
+	Port     int    `json:"port"`
+	Server   string `json:"server"`
+	Token    string `json:"token,omitempty"`
+	Random   bool   `json:"random,omitempty"`
+	OwnerPID int    `json:"owner_pid"`
+}
+
+// ExposeResponse is the agent's reply: the public host the server granted.
+type ExposeResponse struct {
+	Host string `json:"host"`
+}
+
+// UnexposeRequest tears down a public tunnel by its granted host.
+type UnexposeRequest struct {
+	Host string `json:"host"`
 }
