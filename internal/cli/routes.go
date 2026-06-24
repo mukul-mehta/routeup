@@ -46,11 +46,17 @@ func newRoutesCmd() *cobra.Command {
 			}
 
 			tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-			_, _ = fmt.Fprintln(tw, "NAME\tPORT\tPID\tAGE\tCWD")
+			_, _ = fmt.Fprintln(tw, "NAME\tPORT\tPUBLIC\tPATHS\tPID\tAGE\tCWD")
 			now := time.Now()
 			for _, c := range claims {
-				_, _ = fmt.Fprintf(tw, "%s\t%d\t%d\t%s\t%s\n",
-					c.Name, c.Port, c.OwnerPID, humanDuration(now.Sub(c.RegisteredAt)), c.OwnerCWD)
+				public, paths := "-", "-"
+				if c.PublicHost != "" {
+					// Whole-route tunnel today; path-scoped exposure isn't a thing yet.
+					public, paths = "https://"+c.PublicHost, "/*"
+				}
+				_, _ = fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%d\t%s\t%s\n",
+					c.Name, c.Port, public, paths, c.OwnerPID,
+					humanDuration(now.Sub(c.RegisteredAt)), c.OwnerCWD)
 			}
 			return tw.Flush()
 		},

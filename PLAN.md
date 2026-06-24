@@ -14,15 +14,26 @@ api.myapp
 docs.myapp
 ```
 
-Routes map directly to hostnames:
+Routes map to hostnames. Locally, a route can be dotted — the local CA mints a
+per-SNI leaf for any depth:
 
 ```txt
 local:   https://myapp.localhost
-public:  https://myapp.routeup.dev
-
 local:   https://api.myapp.localhost
-public:  https://api.myapp.routeup.dev
 ```
+
+Publicly, a route is exposed as **a single label under a namespace**, because a
+publicly-trusted wildcard certificate (`*.<namespace>.routeup.dev`) only covers
+one label. There are three public tiers (see Public Server → Public hostname
+model):
+
+```txt
+public (no token):       https://<label>.try.routeup.dev
+public (root token):     https://<label>.routeup.dev
+public (namespace token):https://<label>.mukul.routeup.dev
+```
+
+A multi-label route name is fine locally but is rejected for public exposure.
 
 `.localhost` is the local TLD because RFC 6761 reserves it and modern browsers and resolvers short-circuit it to `127.0.0.1` without any DNS plumbing. `routeup.dev` is the public domain. Note that `.dev` is HSTS-preloaded by Chromium, so public hostnames are HTTPS-only by design — there is no HTTP fallback for the public side, which is the desired behavior.
 
@@ -266,7 +277,7 @@ Stream multiplexing: github.com/hashicorp/yamux
 Server persistence:  modernc.org/sqlite (pure Go, no cgo)
 SQL access:          database/sql (no sqlc until query count grows)
 Logging:             log/slog
-Token hashing:       golang.org/x/crypto/argon2 (Argon2id)
+Token hashing:       crypto/sha256 (tokens are high-entropy; no KDF needed)
 ```
 
 Avoid `viper` at first. Config needs are still unsettled, so a small explicit config loader is better than a large config framework.
@@ -407,6 +418,27 @@ routeup.dev   -> server IP
 *.routeup.dev -> server IP
 ```
 
+### Public hostname model
+
+Every public host is **one label under a namespace base**: `<label>.<base>`.
+This is what keeps hosts coverable by a single wildcard certificate
+(`*.<base>`), since publicly-trusted wildcards match exactly one label. There
+are three tiers, all expressed by a token's allow patterns:
+
+```txt
+tier        token            allow pattern         public host
+try         none             — (public_namespace)  <label>.try.routeup.dev
+root        required         *.routeup.dev         <label>.routeup.dev
+namespace   required         *.mukul.routeup.dev   <label>.mukul.routeup.dev
+```
+
+Reserved names (`api`, `admin`, `www`, …, the control host) protect only the
+**root** tier — inside an owned namespace the tenant may use any label, so
+`api.mukul.routeup.dev` belongs to mukul. Granting a namespace also reserves
+its label at the root tier, so a `*.routeup.dev` token cannot grab
+`mukul.routeup.dev` out from under it. The token's allow `*` and the TLS
+wildcard `*` therefore mean the same thing: exactly one label.
+
 ### Reserved subdomains
 
 The server refuses to claim:
@@ -449,7 +481,7 @@ Shape:
 sk_routeup_<43-char base64url>
 ```
 
-The `sk_` prefix is the Stripe-style "secret key" convention; SAST tools (gitleaks, trufflehog, GitHub secret scanning) recognize the pattern and flag accidental commits. The random part is 32 bytes from `crypto/rand`, base64url-encoded without padding. The server stores only the Argon2id hash in SQLite; plaintext is shown once at creation and never again.
+The `sk_` prefix is the Stripe-style "secret key" convention; SAST tools (gitleaks, trufflehog, GitHub secret scanning) recognize the pattern and flag accidental commits. The random part is 32 bytes from `crypto/rand`, base64url-encoded without padding. The server stores only a SHA-256 hash of the secret in SQLite; plaintext is shown once at creation and never again. The secret is 256-bit random, so a fast hash without salt or KDF is sufficient — a KDF would only add verification cost.
 
 Operator commands:
 
@@ -472,7 +504,11 @@ For v1, token minting is **out-of-band**: a friend asks, the operator runs `rout
 
 ### TLS
 
-TLS for the public ingress uses wildcard certificates issued via ACME DNS-01. The operator configures one DNS provider API token; the cert manager handles initial issuance and renewal automatically. DNS provider and cert manager library choices are tracked in `docs/OPEN-QUESTIONS.md` as OQ-014 and OQ-015.
+The public server always serves HTTPS — there is no plaintext mode. By default it obtains and renews wildcard certificates automatically via Let's Encrypt using the **ACME DNS-01** challenge, driven by **`caddyserver/certmagic`** with the **Cloudflare** DNS provider (`libdns/cloudflare`). The operator supplies one scoped Cloudflare API token (`CLOUDFLARE_API_TOKEN`, Zone.DNS:Edit on the zone); certmagic handles issuance, renewal, storage, and locking.
+
+Following the one-label-per-namespace model, the server manages a wildcard per namespace base: `*.<domain>` (the root tier and the control host) and `*.<public-namespace>.<domain>` are obtained at startup; `*.<namespace>.<domain>` is obtained lazily on the first claim into a token namespace. Per-namespace wildcards (rather than per-host certs) keep the certificate count bounded and Let's Encrypt rate limits comfortable.
+
+The other mode is `cert`: an operator-provided certificate/key (e.g. a Cloudflare origin cert, or a self-signed cert for local development). DNS provider and ACME library choices (formerly OQ-014/OQ-015) are decided as above.
 
 ## Logs, Inspect, And Replay
 

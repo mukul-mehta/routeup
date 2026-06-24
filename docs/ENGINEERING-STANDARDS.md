@@ -60,7 +60,6 @@ Required practices:
 - Every command must have useful `--help` text.
 - Prefer flags that describe user intent, such as `--port`, `--server`, `--token`, and `--local-only`.
 - Do not expose implementation lifecycle commands in normal docs, such as `proxy start` or `proxy stop`.
-- Dry-run style commands must print the resolved route, local URL, public URL, and target.
 
 Avoid:
 

@@ -18,7 +18,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"time"
 
 	"github.com/mukul-mehta/routeup/internal/ipc"
 )
@@ -38,13 +37,16 @@ type Client struct {
 //	         os.Executable().
 //	version  is the CLI's own build version, used to detect a stale running
 //	         agent. Pass "" to disable the version half of staleness checks.
+//
+// The HTTP client sets no timeout of its own: every call is bounded by the
+// context passed to it, so callers control deadlines per request (see
+// timeouts.go).
 func NewClient(socketPath, execPath, version string) *Client {
 	return &Client{
 		socketPath: socketPath,
 		execPath:   execPath,
 		version:    version,
 		httpClient: &http.Client{
-			Timeout: 5 * time.Second,
 			Transport: &http.Transport{
 				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 					return (&net.Dialer{}).DialContext(ctx, "unix", socketPath)

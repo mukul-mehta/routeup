@@ -27,6 +27,8 @@ const (
 	PathStatus   = "/v1/status"
 	PathRoutes   = "/v1/routes"
 	PathShutdown = "/v1/shutdown"
+	PathExpose   = "/v1/expose"
+	PathUnexpose = "/v1/unexpose"
 )
 
 // Claim is one active route registration. The same shape is used for the
@@ -37,6 +39,12 @@ type Claim struct {
 	OwnerPID     int       `json:"owner_pid"`
 	OwnerCWD     string    `json:"owner_cwd"`
 	RegisteredAt time.Time `json:"registered_at"`
+
+	// PublicHost is the granted public host when this route is also exposed
+	// through a tunnel by the same owner process. Response-only: the agent
+	// fills it on GET /v1/routes by joining live tunnels on OwnerPID;
+	// registration ignores it.
+	PublicHost string `json:"public_host,omitempty"`
 }
 
 // Status is the response shape for GET /v1/status.
@@ -77,4 +85,27 @@ type ErrorBody struct {
 	Error    string `json:"error"`
 	OwnerPID int    `json:"owner_pid,omitempty"`
 	OwnerCWD string `json:"owner_cwd,omitempty"`
+}
+
+// ExposeRequest asks the agent to open a public tunnel for a route. The agent
+// dials Server, authenticates with Token, claims the route, and forwards
+// inbound public requests to the local Port. OwnerPID lets the agent reap the
+// tunnel if the requesting CLI dies. A --random name is resolved by the CLI
+// before this request, so Name is always a concrete label here.
+type ExposeRequest struct {
+	Name     string `json:"name"`
+	Port     int    `json:"port"`
+	Server   string `json:"server"`
+	Token    string `json:"token,omitempty"`
+	OwnerPID int    `json:"owner_pid"`
+}
+
+// ExposeResponse is the agent's reply: the public host the server granted.
+type ExposeResponse struct {
+	Host string `json:"host"`
+}
+
+// UnexposeRequest tears down a public tunnel by its granted host.
+type UnexposeRequest struct {
+	Host string `json:"host"`
 }

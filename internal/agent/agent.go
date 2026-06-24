@@ -40,6 +40,7 @@ type Options struct {
 // Agent is the local routeup daemon. New binds nothing; Run does the work.
 type Agent struct {
 	reg           *Registry
+	tunnels       *tunnelManager
 	sockPath      string
 	tlsAddr       string
 	tlsListenAddr string
@@ -135,6 +136,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	defer a.removePIDFile()
 
 	a.startedAt = time.Now()
+	a.tunnels = newTunnelManager(ctx, a.logger)
 	a.logger.Info("agent started",
 		"socket", a.sockPath,
 		"tls_addr", a.tlsListenAddr,
@@ -239,6 +241,11 @@ func (a *Agent) runReap(ctx context.Context) {
 		case <-t.C:
 			if n := a.reg.Reap(); n > 0 {
 				a.logger.Info("reaped stale claims", "count", n)
+			}
+			if a.tunnels != nil {
+				if n := a.tunnels.ReapDeadOwners(); n > 0 {
+					a.logger.Info("reaped orphaned tunnels", "count", n)
+				}
 			}
 		}
 	}

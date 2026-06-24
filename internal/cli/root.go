@@ -46,6 +46,9 @@ func newRootCmd() *cobra.Command {
 		newForwardCmd(),
 		newUninstallCmd(),
 		newUpdateCmd(),
+		newTokenCmd(),
+		newServerCmd(),
+		newExposeCmd(),
 	)
 	return root
 }

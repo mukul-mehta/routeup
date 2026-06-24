@@ -21,6 +21,8 @@ type runSetupOpts struct {
 	bind       bool
 	useSystem  bool
 	tlsPort    int
+	server     string
+	token      string
 }
 
 func newSetupCmd() *cobra.Command {
@@ -30,6 +32,8 @@ func newSetupCmd() *cobra.Command {
 		noBind    bool
 		useSystem bool
 		tlsPort   int
+		server    string
+		token     string
 	)
 
 	cmd := &cobra.Command{
@@ -60,6 +64,8 @@ func newSetupCmd() *cobra.Command {
 				bind:       !noBind,
 				useSystem:  useSystem,
 				tlsPort:    tlsPort,
+				server:     server,
+				token:      token,
 			})
 		},
 	}
@@ -69,6 +75,8 @@ func newSetupCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&noTrust, "no-trust", false, "don't add the certificate to your system trust store")
 	cmd.Flags().BoolVar(&noBind, "no-bind", false, "don't claim port 443 (serve on a high port instead)")
 	cmd.Flags().BoolVar(&useSystem, "system", false, "macOS: force system-wide trust (automatic when binding a privileged port)")
+	cmd.Flags().StringVar(&server, "server", "", "public server URL to save for expose (e.g. https://edge.routeup.dev)")
+	cmd.Flags().StringVar(&token, "token", "", "server token to save for expose")
 	return cmd
 }
 
@@ -129,12 +137,40 @@ func runSetup(cmd *cobra.Command, opts runSetupOpts) error {
 		_, _ = fmt.Fprintf(out, "warning: failed to write setup marker: %v\n", err)
 	}
 
+	saveClientCreds(out, opts.server, opts.token)
+
 	if !opts.startAgent {
 		_, _ = fmt.Fprintln(out, "agent: not started (--no-start)")
 		return nil
 	}
 
 	return startLocalAgent(cmd, out)
+}
+
+// saveClientCreds persists the server URL and/or token to the client config so
+// `expose` and `serve --expose` need no flags. It merges, leaving unset fields
+// untouched, and never prints the token.
+func saveClientCreds(out io.Writer, server, token string) {
+	if server == "" && token == "" {
+		return
+	}
+	cc, _ := state.ReadClientConfig()
+	if server != "" {
+		cc.Server = server
+	}
+	if token != "" {
+		cc.Token = token
+	}
+	if err := state.WriteClientConfig(cc); err != nil {
+		_, _ = fmt.Fprintf(out, "warning: couldn't save server/token: %v\n", err)
+		return
+	}
+	if server != "" {
+		_, _ = fmt.Fprintf(out, "server: saved (%s)\n", server)
+	}
+	if token != "" {
+		_, _ = fmt.Fprintln(out, "token: saved")
+	}
 }
 
 // installPrivBind delegates to privbind.Install. No-op for >=1024. Non-fatal.

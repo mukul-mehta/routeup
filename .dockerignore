@@ -1,0 +1,11 @@
+.git
+.github
+bin/
+*.db
+*.db-shm
+*.db-wal
+*.heapsnapshot
+trace.json
+trace.json.gz
+*.network-request
+*.network-response

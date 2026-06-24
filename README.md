@@ -6,27 +6,28 @@ It is an open source developer tool for local apps, APIs, webhooks, OAuth callba
 
 ## Status
 
-Phase 4 — Real local setup. `routeup setup` creates a local CA, trusts it in the OS keychain, and binds port 443 (a root LaunchDaemon forwarder on macOS, `setcap` on Linux). `routeup serve <name> --port <p>` then serves the app on `https://<name>.localhost` with a CA-signed cert. No public exposure yet.
+Phase 5 — Public server, tokens, and tunnel. A self-hostable `routeup server` issues token-scoped public route claims (SQLite, SHA-256 token hashing), and `routeup expose` opens a WebSocket + yamux tunnel so a public request reaches a local port. The server always serves HTTPS: by default it obtains and renews a wildcard certificate automatically via Let's Encrypt + Cloudflare DNS-01 (`certmagic`), with a `cert` (bring-your-own) mode for an operator-provided certificate. Verified end-to-end over loopback; a hosted deployment with real DNS is the remaining step.
 
 ## Implementation Progress
 
-Currently: Phases 4 and 4.5 complete — per-machine local CA with on-demand per-SNI leaf certs, OS trust install, HTTPS on port 443, plus `setup`, `serve`, `routes`, `doctor`, `uninstall`, `update`, and `agent` commands. The agent terminates TLS on an internal high port; on macOS a tiny root forwarder bridges 443, on Linux the binary gets `cap_net_bind_service`. Ships as a single binary via Homebrew (`brew install mukul-mehta/tap/routeup`) and a curl installer, built and released by GoReleaser on tag.
+Currently: Phases 4 and 4.5 (local HTTPS, packaging) plus Phase 5 (public server, tokens, and the request tunnel) are implemented. The server authorizes claims against token allow patterns, enforces reserved subdomains and an optional public namespace, and persists claims with a 30s grace window. The agent owns the tunnel client; `routeup expose <name> --port <p> --server <url>` claims a public host and forwards traffic to the local app over WebSocket + yamux. Public TLS is automatic by default (ACME DNS-01 via Cloudflare, `CLOUDFLARE_API_TOKEN`); `--tls-mode cert` serves an operator-provided cert. Standing up the hosted `routeup.dev` deployment (DNS + a server host) is what remains.
+
+
 
 Phase definitions and acceptance criteria live in [docs/MILESTONES.md](docs/MILESTONES.md).
 
 - [x] **Phase 0 — Documentation:** PLAN, README, ARCHITECTURE, ENGINEERING-STANDARDS, MILESTONES, OPEN-QUESTIONS, AGENTS, LICENSE
 - [x] **Phase 1 — Scaffolding & walking skeleton:** Go module, lint, CI, cobra root with `doctor`/`routes`/`logs` stubs
-- [x] **Phase 2 — Route names & config discovery:** parser, hostname mapping, dry-run expose
+- [x] **Phase 2 — Route names & config discovery:** parser, hostname mapping, config discovery
 - [x] **Phase 3 — Local agent on a high port:** registry, CLI↔agent IPC, reverse proxy by Host
 - [x] **Phase 4 — Real local setup:** local CA, certificate generation, HTTPS on 443
 - [x] **Phase 4.5 — Packaging & lifecycle:** `routeup uninstall`/`update`, upgrade-safe forwarder path, doctor bind check, Homebrew + curl install, GoReleaser pipeline
-- [ ] **Phase 5 — Public server & tokens:** route claim API, token allow patterns, public namespace
-- [ ] **Phase 6 — Tunnel MVP:** WebSocket + yamux, one public request reaches a local port
-- [ ] **Phase 7 — Streaming, WebSockets, SSE:** real dev servers work through the tunnel
-- [ ] **Phase 8 — Path proxy:** frontend + API behind one route
-- [ ] **Phase 9 — Process runner:** child process with `PORT`/`HOST`/`ROUTEUP_*` env injection
-- [ ] **Phase 10 — Route logs:** local/public, `routeup logs --follow`
-- [ ] **Phase 11 — Inspect & replay:** opt-in header/body capture, `routeup inspect`/`replay`
+- [x] **Phase 5 — Public server, tokens & tunnel:** token allow patterns, public namespace, WebSocket + yamux tunnel so one public request reaches a local port
+- [ ] **Phase 6 — Streaming, WebSockets, SSE:** real dev servers work through the tunnel
+- [ ] **Phase 7 — Path proxy:** frontend + API behind one route
+- [ ] **Phase 8 — Process runner:** child process with `PORT`/`HOST`/`ROUTEUP_*` env injection
+- [ ] **Phase 9 — Route logs:** local/public, `routeup logs --follow`
+- [ ] **Phase 10 — Inspect & replay:** opt-in header/body capture, `routeup inspect`/`replay`
 
 ## Quick Look
 
@@ -81,7 +82,7 @@ Then run `routeup setup` once. Later, `routeup update` upgrades in place (or via
 
 ## Local HTTPS, today
 
-Phase 4 is implemented: trusted HTTPS on `*.localhost`. Public exposure is not built yet.
+Phase 4 is implemented: trusted HTTPS on `*.localhost`. Public exposure (Phase 5) is implemented too; a hosted deployment with real DNS is the remaining step.
 
 One-time setup creates a local certificate authority, adds it to your OS trust store, and binds port 443:
 

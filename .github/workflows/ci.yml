@@ -22,8 +22,8 @@ jobs:
 
       - uses: extractions/setup-just@v4
 
-      - name: just test
-        run: just test
+      - name: just test-race
+        run: just test-race
 
   lint:
     name: lint

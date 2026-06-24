@@ -108,7 +108,7 @@ Path:        ~/.routeup/agent.sock (default), $XDG_RUNTIME_DIR/routeup/agent.soc
 Permissions: 0700 directory, 0600 socket
 Wire format: JSON over HTTP/1.1
 Auth:        filesystem permissions only (no token on the local socket)
-Versioning:  /v1/ URL prefix; GET /version returns agent version for friendly mismatch errors
+Versioning:  /v1/ URL prefix; GET /v1/status returns the agent version for friendly mismatch errors
 ```
 
 Initial API surface:
@@ -119,7 +119,7 @@ DELETE /v1/routes/{name}        release a claim
 GET    /v1/routes               list active routes
 GET    /v1/status               agent status, version, uptime, boot id
 POST   /v1/shutdown             graceful shutdown (used by `agent stop`/restart)
-GET    /v1/logs?route=&follow=  SSE stream of access logs
+GET    /v1/logs?route=&follow=  SSE stream of access logs (planned, Phase 9; not yet served)
 POST   /v1/expose               start public exposure for a claimed route
 POST   /v1/unexpose             stop public exposure
 ```
@@ -161,7 +161,7 @@ Responsibilities:
 ```txt
 connect outbound to the public server
 authenticate with a routeup token
-claim one or more public routes
+claim a public route (one route per tunnel session)
 receive request streams from the server
 forward those streams to the matching local target
 propagate cancellation and timeouts
@@ -198,20 +198,237 @@ No server contact, no token required. This is the zero-network path that `routeu
 
 ## Public Request Flow
 
-When exposed:
+When exposed, a public request reaches a local port over the tunnel. The summary
+path:
 
 ```txt
 Webhook provider or external browser
-  -> https://api.myapp.routeup.dev
+  -> https://myapp.mukul.routeup.dev
   -> public DNS
   -> routeup public server
-  -> token/claim lookup
+  -> token/hold lookup
   -> tunnel stream
   -> local tunnel client
   -> local agent
   -> local target
   -> response returns over the same path
 ```
+
+### Transport stack
+
+One outbound WebSocket carries everything; yamux multiplexes it into streams;
+each stream is one HTTP exchange. Crucially the **HTTP roles are inverted from
+the transport roles** — that inversion is what makes a reverse tunnel work:
+
+```txt
+  Agent (dev machine)                          Public server
+  ───────────────────                          ─────────────
+  HTTP   http.Server.Serve(session)  ◄── req ── http.Transport + ReverseProxy
+         └─ newTunnelProxy → :PORT    ── resp ─► (one yamux stream per request)
+  ── yamux ──────────────────────────────────────────────────────────────────
+         client (opens stream 0)                server
+  ── WebSocket ───────────────────────────────────────────────────────────────
+         dials wss://…/_routeup/tunnel ───────► accepts upgrade
+  ── TLS, port 443 ────────────────────────────────────────────────────────────
+```
+
+- The agent **dials** (transport client) but **serves** HTTP; the server
+  **accepts** (transport server) but is the HTTP **client**. yamux lets the side
+  that accepted the connection still open streams back toward the dialer.
+- **Stream 0** is the control channel (the claim handshake; it stays open as the
+  liveness signal — its EOF is how the server learns the agent disconnected).
+- Every public request opens a **new** stream: the server dials it
+  (`session.Open`), the agent accepts it (`http.Server` over the session).
+
+### Establishing the tunnel
+
+Before any public request can be served, the agent opens and holds a tunnel.
+This happens once, when `expose` (or `serve --expose`) runs:
+
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant Registry as TunnelRegistry (server)
+    participant Broker as routeBroker
+    participant Store as SQLite
+
+    Agent->>Registry: WebSocket dial /_routeup/tunnel (Bearer token, version header)
+    Note over Agent,Registry: yamux over the WebSocket — agent = client, server = server
+    Agent->>Registry: stream 0 (control): HandshakeMessage{claim, ClaimSpec{route}}
+    Registry->>Broker: Hold(token, spec)
+    Broker->>Store: VerifyToken → authorize → HoldRoute
+    Store-->>Broker: RouteHold
+    Broker->>Broker: ensureNamespaceCert(base) — lazy wildcard
+    Broker-->>Registry: public host
+    Note over Registry: register host → per-session ReverseProxy<br/>(its Transport dials session.Open())
+    Registry-->>Agent: stream 0: HandshakeMessage{claim_ok, granted host}
+    Note over Agent: onGranted(host): Expose returns host to CLI;<br/>agent now runs http.Server.Serve(session)
+```
+
+### Serving a request
+
+Once the session is live, each public request is one yamux stream:
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Ingress as Server ingress (http.Server)
+    participant Proxy as Per-session ReverseProxy
+    participant Trans as http.Transport
+    participant AgentSrv as Agent http.Server
+    participant LocalProxy as newTunnelProxy
+    participant App as localhost:PORT
+
+    User->>Ingress: GET https://myapp.mukul.routeup.dev/
+    Note over Ingress: serveIngress: Handler(host) → proxy.ServeHTTP
+    Ingress->>Proxy: ServeHTTP(w, req)
+    Proxy->>Trans: RoundTrip(req)
+    Trans->>AgentSrv: DialContext = session.Open() → NEW yamux stream;<br/>write HTTP request onto it
+    Note over Trans,AgentSrv: the stream rides the one WebSocket / TLS
+    AgentSrv->>LocalProxy: ServeHTTP (reads the request off the stream)
+    LocalProxy->>App: reverse proxy to localhost:PORT (preserves Host)
+    App-->>LocalProxy: HTTP response
+    LocalProxy-->>AgentSrv: write response
+    AgentSrv-->>Trans: response bytes back on the same stream
+    Trans-->>Proxy: *http.Response
+    Proxy-->>User: stream status, headers, body (flushed)
+```
+
+Step by step, with the code path:
+
+1. **DNS** — `*.mukul.routeup.dev` resolves to the server's dedicated IP (a
+   grey-cloud Cloudflare A record).
+2. **TLS** — the server's `GetCertificate` (certmagic) serves the
+   `*.mukul.routeup.dev` wildcard, issued lazily on the first hold into that
+   namespace and cached on the volume.
+3. **HTTP routing** — the request hits `Server.handler` (`internal/server/api.go`).
+   The path is not under `/_routeup`, so it goes to `serveIngress`.
+4. **Handler lookup** — `serveIngress` calls `TunnelRegistry.Handler(host)`
+   (`internal/tunnel/server.go`), which returns the per-session
+   `httputil.ReverseProxy` registered for that host (or 503 if none is live).
+5. **Round trip** — `serveIngress` calls `proxy.ServeHTTP(w, r)`. The proxy's
+   `http.Transport` has a `DialContext` returning `session.Open()`, so the round
+   trip opens a fresh yamux stream and writes the request onto it. The server is
+   the HTTP *client* here.
+6. **Agent serves** — the agent runs `http.Server.Serve(session)` (a
+   `*yamux.Session` is a `net.Listener`), so it accepts that stream as one
+   request, parses it with the standard library, and dispatches to its handler
+   `newTunnelProxy` (`internal/agent/expose.go`). The agent is the HTTP *server*.
+7. **Local proxy** — `newTunnelProxy` forwards to `http://localhost:<port>`,
+   preserving the public Host header so the local app sees its real hostname; the
+   agent's `http.Server` serializes the response back onto the stream.
+8. **Response back** — the server's `Transport` reads the response off the
+   stream; `ReverseProxy` streams (and flushes) status, headers, and body to the
+   public client.
+
+The hard part lives in `internal/tunnel/`: `protocol.go` (wire types +
+lifecycle diagram), `client.go` (agent side: `handshake` + `http.Server.Serve`),
+and `server.go` (the `TunnelRegistry` + `newSessionProxy`). The `RouteBroker`
+interface keeps the tunnel decoupled from tokens, storage, and TLS — the
+server's `routeBroker` (`internal/server/broker.go`) implements it. Because both
+ends are stdlib HTTP over a yamux stream, streaming/flushing (SSE) and WebSocket
+upgrades work without bespoke framing.
+
+## Design Clarifications
+
+### Why `routeBroker` is separate from `TunnelRegistry`
+
+The tunnel package (`internal/tunnel/`) is imported by **both** the agent and
+the server. If `TunnelRegistry` held the authorizer and store directly, the
+tunnel package would need to import `database/sql`, certmagic, the route/allow
+parsers, and the whole authorization layer. The agent would then transitively
+import all that server machinery just to create a tunnel client.
+
+The `RouteBroker` interface (`internal/tunnel/protocol.go`) breaks that
+dependency. The tunnel package defines who it needs (something that can Hold and
+Release routes), and the server wires in its real implementation (`routeBroker`
+in `internal/server/broker.go`). The agent never sees the server-side
+implementation.
+
+So `TunnelRegistry` is purely about connection management:
+
+```txt
+TunnelRegistry (tunnel/server.go)
+  - accepts WebSocket upgrades and runs the claim handshake
+  - holds one per-session reverse proxy per public host
+  - hands each public request to the holding session's proxy (Handler)
+  - knows nothing about tokens, DB, TLS, authorization
+```
+
+`routeBroker` (server/broker.go) is the bridge:
+
+```txt
+routeBroker (server/broker.go)
+  - calls Authorizer to turn a ClaimAttempt into a Decision
+  - calls Store.HoldRoute to persist the hold
+  - calls ensureNamespace to lazy-issue a wildcard cert
+  - implements tunnel.RouteBroker so TunnelRegistry can call it
+```
+
+### Where the token travels
+
+The bearer token does **not** ride in the `HandshakeMessage` body. It travels in the
+**WebSocket upgrade HTTP headers**, just like any other bearer auth:
+
+| Step | What carries the token |
+|---|---|
+| Agent dials | `client.go` (`handshake`) sets `Authorization: Bearer <token>` on the WebSocket dial headers |
+| Server reads | `server.go` (`AcceptHandler`) calls `bearerToken(r.Header.Get("Authorization"))` on the incoming HTTP upgrade request |
+| Control stream | `HandshakeMessage` carries only the `ClaimSpec` (route name), never the token |
+
+This keeps the control message a simple JSON struct and lets HTTP-level
+middleware (e.g. request logging) inspect the token without decoding yamux.
+
+### Why the tunnel runs under `m.parent`, not the IPC request context
+
+In `agent/expose.go`, `Expose` receives `reqCtx` (the IPC HTTP request's
+context) and creates `tunnelCtx` from `m.parent` (the agent's lifetime context):
+
+```go
+tunnelCtx, cancel := context.WithCancel(m.parent)
+go func() { errCh <- client.Run(tunnelCtx) }()
+```
+
+The `select` that follows waits for one of three outcomes:
+
+- **grantedCh** — the server accepted the claim. `Expose` returns the host.
+- **errCh** — the tunnel died before granting. `Expose` returns the error.
+- **reqCtx.Done()** — the CLI cancelled the IPC request (timeout, disconnect).
+  `Expose` cancels the tunnel and returns.
+
+In all three cases `Expose` returns and the IPC handler sends its JSON response
+back over the Unix socket. The CLI receives the host and returns to the user.
+**At this point `reqCtx` is done**, but the tunnel goroutine keeps running
+because it was born from `m.parent`, which only ends when the agent itself
+shuts down.
+
+This is the critical separation: the IPC request is just the **claim
+handshake** — the caller blocks until the server says yes or no. The actual
+tunnel (accepting yamux streams, proxying requests) runs for the agent's
+lifetime, independently of whichever CLI process kicked it off.
+
+Without this split, the tunnel would die as soon as the `routeup expose`
+command returned, defeating the whole point.
+
+### Warm proxies are not needed
+
+In `agent/expose.go`, each call to `tunnelManager.Expose` constructs a new
+`httputil.ReverseProxy` (the `Handler` the agent's `http.Server` runs for that
+session's request streams):
+
+```go
+target := &url.URL{Scheme: "http", Host: net.JoinHostPort("localhost", strconv.Itoa(req.Port))}
+handler := newTunnelProxy(target, m.logger)
+```
+
+This is a lightweight struct allocation — the `ReverseProxy` has no startup
+cost, no goroutines, no connection pools to warm. It is a config object holding
+the target URL, an error handler, and a `Rewrite` func. Actual HTTP connections
+to the local target are established lazily by `http.DefaultTransport` (which
+has a shared connection pool across all proxies).
+
+Building a new proxy per tunnel is free. Keeping them around would add
+bookkeeping for zero benefit.
 
 ## Route Model
 
@@ -223,13 +440,21 @@ api.myapp
 docs.myapp
 ```
 
-The hostname mapping is mechanical:
+The hostname mapping is mechanical. Locally a route may be dotted (the local CA
+mints a per-SNI leaf for any depth). Publicly a route is a single label under a
+namespace base, so one wildcard certificate (`*.<base>`) covers it:
 
 ```txt
-<route>.localhost                local, served by the agent
-<route>.<namespace>.routeup.dev  public, requires a token whose allow pattern covers it
-<route>.try.routeup.dev          public, no token (ephemeral, when the server enables the public namespace)
+<route>.localhost            local, served by the agent (dotted ok)
+<label>.routeup.dev          public, root tier, *.routeup.dev token
+<label>.<ns>.routeup.dev     public, namespace tier, *.<ns>.routeup.dev token
+<label>.try.routeup.dev      public, no token (ephemeral, when the public namespace is enabled)
 ```
+
+Reserved names protect the root tier only; inside an owned namespace any label
+is allowed (`api.mukul.routeup.dev` is mukul's). Multi-label route names work
+locally but are rejected for public exposure. See PLAN.md → Public hostname
+model.
 
 Do not model `project`, `namespace`, and `service` as separate user concepts until real usage proves they are needed.
 
@@ -418,3 +643,4 @@ path not exposed
 ```
 
 `routeup doctor` should eventually diagnose most of these.
+

@@ -33,4 +33,4 @@ dev *args:
     @go run ./cmd/routeup {{args}}
 
 # CI pipeline used in GitHub Actions
-ci: test lint
+ci: test-race lint

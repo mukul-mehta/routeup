@@ -101,7 +101,7 @@ func (c *Client) Stop(ctx context.Context) (bool, error) {
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
 	}
-	if err := c.waitDown(ctx, 5*time.Second); err != nil {
+	if err := c.waitDown(ctx, agentStopBudget); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -124,7 +124,7 @@ func (c *Client) stopByPIDFile(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("signal agent process %d: %w", pid, err)
 	}
 
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(agentStopBudget)
 	for processAlive(pid) {
 		if time.Now().After(deadline) {
 			return false, fmt.Errorf("agent process %d did not exit after SIGTERM", pid)
@@ -132,7 +132,7 @@ func (c *Client) stopByPIDFile(ctx context.Context) (bool, error) {
 		select {
 		case <-ctx.Done():
 			return false, ctx.Err()
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(readinessProbeInterval):
 		}
 	}
 	removeAgentPIDFile()
@@ -168,7 +168,7 @@ func (c *Client) spawnAndWait(ctx context.Context) error {
 	if err := c.spawn(); err != nil {
 		return fmt.Errorf("spawn agent: %w", err)
 	}
-	if err := c.waitReady(ctx, 5*time.Second); err != nil {
+	if err := c.waitReady(ctx, agentReadyBudget); err != nil {
 		// The agent runs detached and logs its own startup failure, so a port
 		// clash or similar would otherwise be invisible behind the timeout.
 		if tail := agentLogTail(); tail != "" {
@@ -222,7 +222,7 @@ func (c *Client) spawn() error {
 func (c *Client) waitReady(ctx context.Context, budget time.Duration) error {
 	deadline := time.Now().Add(budget)
 	for {
-		probeCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+		probeCtx, cancel := context.WithTimeout(ctx, readinessProbeTimeout)
 		_, err := c.Status(probeCtx)
 		cancel()
 		if err == nil {
@@ -234,7 +234,7 @@ func (c *Client) waitReady(ctx context.Context, budget time.Duration) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(readinessProbeInterval):
 		}
 	}
 }
@@ -242,7 +242,7 @@ func (c *Client) waitReady(ctx context.Context, budget time.Duration) error {
 func (c *Client) waitDown(ctx context.Context, budget time.Duration) error {
 	deadline := time.Now().Add(budget)
 	for {
-		probeCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+		probeCtx, cancel := context.WithTimeout(ctx, readinessProbeTimeout)
 		_, err := c.Status(probeCtx)
 		cancel()
 		if err != nil {
@@ -254,7 +254,7 @@ func (c *Client) waitDown(ctx context.Context, budget time.Duration) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(readinessProbeInterval):
 		}
 	}
 }
