@@ -13,6 +13,8 @@ import (
 // t.Chdir auto-restores the previous working directory at the end of the test.
 func runServeIn(t *testing.T, dir string, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	writeLocalCA(t)
 	if dir != "" {
 		t.Chdir(dir)
 	}

@@ -1,6 +1,6 @@
 package route
 
-import "github.com/dustinkirkland/golang-petname"
+import petname "github.com/dustinkirkland/golang-petname"
 
 // RandomName returns a random two-word name like "frosty-fox" — DNS-safe,
 // lowercase, dashed. Used by --random on serve/expose.
