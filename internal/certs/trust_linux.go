@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // installTrust copies the CA into the distro anchor dir and runs the
@@ -55,25 +56,42 @@ type linuxInstallPlan struct {
 	refreshArgs []string
 }
 
-// planLinuxInstall detects the distro family from path existence.
+// linuxTrustStores are the per-distro-family CA anchor dirs and their refresh
+// command, in detection order: the first whose anchorDir exists wins. Paths and
+// commands track mkcert's matrix.
+var linuxTrustStores = []linuxInstallPlan{
+	// RHEL / Fedora / CentOS.
+	{anchorDir: "/etc/pki/ca-trust/source/anchors", refreshCmd: "update-ca-trust", refreshArgs: []string{"extract"}},
+	// Debian / Ubuntu.
+	{anchorDir: "/usr/local/share/ca-certificates", refreshCmd: "update-ca-certificates"},
+	// Arch (p11-kit). update-ca-trust there is just a wrapper around
+	// `trust extract-compat` and isn't always installed, so call trust(1).
+	{anchorDir: "/etc/ca-certificates/trust-source/anchors", refreshCmd: "trust", refreshArgs: []string{"extract-compat"}},
+}
+
+// planLinuxInstall picks the trust store for this machine by anchor-dir existence.
 func planLinuxInstall() (linuxInstallPlan, error) {
-	if _, err := os.Stat("/etc/pki/ca-trust/source/anchors"); err == nil {
-		return linuxInstallPlan{
-			anchorDir:   "/etc/pki/ca-trust/source/anchors",
-			refreshCmd:  "update-ca-trust",
-			refreshArgs: []string{"extract"},
-		}, nil
+	return selectLinuxTrustStore(linuxTrustStores, func(p string) bool {
+		_, err := os.Stat(p)
+		return err == nil
+	})
+}
+
+// selectLinuxTrustStore returns the first store whose anchorDir reports present.
+// The exists probe is injected so the selection is unit-testable off-distro.
+func selectLinuxTrustStore(stores []linuxInstallPlan, exists func(string) bool) (linuxInstallPlan, error) {
+	for _, s := range stores {
+		if exists(s.anchorDir) {
+			return s, nil
+		}
 	}
-	if _, err := os.Stat("/usr/local/share/ca-certificates"); err == nil {
-		return linuxInstallPlan{
-			anchorDir:  "/usr/local/share/ca-certificates",
-			refreshCmd: "update-ca-certificates",
-		}, nil
+	dirs := make([]string, len(stores))
+	for i, s := range stores {
+		dirs[i] = s.anchorDir
 	}
-	return linuxInstallPlan{}, errors.New(
-		"unsupported linux distribution: neither " +
-			"/etc/pki/ca-trust/source/anchors (rhel-family) nor " +
-			"/usr/local/share/ca-certificates (debian-family) exists")
+	return linuxInstallPlan{}, fmt.Errorf(
+		"unsupported linux distribution: none of the known CA trust anchor directories exist (%s)",
+		strings.Join(dirs, ", "))
 }
 
 func runSudo(ctx context.Context, args ...string) error {

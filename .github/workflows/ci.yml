@@ -92,3 +92,32 @@ jobs:
       - name: integration
         run: bash scripts/integration-linux.sh ./bin/routeup ${{ matrix.port }}
 
+  # The public server ships on every push to main. The CLI releases separately
+  # (goreleaser, on v* tags), so the server tracks main while the CLI cuts
+  # versioned releases on its own cadence.
+  deploy:
+    name: deploy (fly)
+    # Gate on the deterministic checks only. The integration cells are
+    # environment-sensitive by design (setcap on overlayfs, fail-fast:false), so
+    # gating a production deploy on them would block ships on infra flakes.
+    needs: [test, lint]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    # The server is a single stateful instance — never two deploys at once. Let
+    # an in-flight rollout finish rather than cancelling it midway.
+    concurrency:
+      group: fly-deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # Run from the repo root (the default cwd): the Docker build context needs
+      # go.mod and the source, while fly.toml resolves its Dockerfile relative
+      # to deploy/. --remote-only builds on Fly's builders, so no local Docker.
+      - name: flyctl deploy
+        run: flyctl deploy --remote-only -c deploy/fly.toml
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+

@@ -127,6 +127,25 @@ routeup expose cool --port 8080 --server https://edge.routeup.dev
 #  -> https://cool.try.routeup.dev  (ephemeral)
 ```
 
+## Continuous deployment
+
+After this one-time bring-up, you don't run `fly deploy` by hand: every push to
+`main` deploys the server automatically (the `deploy` job in
+`.github/workflows/ci.yml`), once `test` and `lint` pass. The CLI is separate —
+it releases from `v*` tags via goreleaser, on its own cadence.
+
+Enable it once by giving Actions a scoped deploy token:
+
+```bash
+fly tokens create deploy -a routeup-server     # prints a "FlyV1 ..." token
+gh secret set FLY_API_TOKEN                     # paste it when prompted
+# or: GitHub → Settings → Secrets and variables → Actions → new secret FLY_API_TOKEN
+```
+
+The job runs `flyctl deploy --remote-only -c deploy/fly.toml` (builds on Fly's
+remote builders, no Docker on the runner) and serializes deploys
+(`concurrency: fly-deploy`) because the server is a single stateful instance.
+
 ## Operations
 
 ```bash

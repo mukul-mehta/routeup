@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/mukul-mehta/routeup/internal/agentctl"
 	"github.com/mukul-mehta/routeup/internal/certs"
@@ -49,6 +53,10 @@ func newSetupCmd() *cobra.Command {
 			"  3. Starts the background agent that routes requests to your apps.\n\n" +
 			"You'll confirm once with Touch ID or your password so these\n" +
 			"changes can be made. After that, serving a route never asks again.\n\n" +
+			"In a terminal, setup first asks for a public server and token so\n" +
+			"`expose` needs no flags later. The server defaults to\n" +
+			"https://edge.routeup.dev — press Enter to accept, or type 'none' to\n" +
+			"stay local. Pass --server/--token to skip those questions.\n\n" +
 			"Re-running setup is safe — it skips anything already done.",
 		Example: "  routeup setup                # the usual: HTTPS on port 443\n" +
 			"  routeup setup --port 8443    # use a high port (no password needed)\n" +
@@ -91,6 +99,11 @@ func runSetup(cmd *cobra.Command, opts runSetupOpts) error {
 	}
 
 	out := cmd.OutOrStdout()
+
+	// Ask up front (interactive terminals only) where to publish routes, so the
+	// rest of setup runs unattended. Flags and non-interactive runs skip this.
+	promptServerCreds(cmd, out, &opts)
+
 	caState, _, _ := certs.Inspect(certPath, keyPath)
 
 	needCreate := false
@@ -145,6 +158,102 @@ func runSetup(cmd *cobra.Command, opts runSetupOpts) error {
 	}
 
 	return startLocalAgent(cmd, out)
+}
+
+// defaultPublicServer is the hosted routeup server offered as the default answer
+// to the setup server prompt, so a fresh machine just presses Enter to publish
+// through it. It's the edge control host that expose talks to, not the apex.
+const defaultPublicServer = "https://edge.routeup.dev"
+
+// serverCredPrompter reads the interactive setup answers. readSecret reads the
+// token without echoing it; it's a field so tests can supply a fake.
+type serverCredPrompter struct {
+	in         *bufio.Reader
+	out        io.Writer
+	readSecret func() (string, error)
+}
+
+// promptServerCreds asks, at the top of setup, where to publish routes. It runs
+// only on a real terminal and only for fields the user didn't already pass as
+// flags, so scripts, CI, and tests keep using flags and never block on input.
+// The token is read masked. See collect for the question flow.
+func promptServerCreds(cmd *cobra.Command, out io.Writer, opts *runSetupOpts) {
+	serverFromFlag := cmd.Flags().Changed("server")
+	tokenFromFlag := cmd.Flags().Changed("token")
+	if serverFromFlag && tokenFromFlag {
+		return // nothing left to ask
+	}
+	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
+		return // non-interactive: flags are the only input
+	}
+
+	cc, _ := state.ReadClientConfig()
+	p := serverCredPrompter{
+		in:  bufio.NewReader(cmd.InOrStdin()),
+		out: out,
+		readSecret: func() (string, error) {
+			b, err := term.ReadPassword(int(os.Stdin.Fd()))
+			_, _ = fmt.Fprintln(out) // ReadPassword swallows the Enter; print it back
+			return string(b), err
+		},
+	}
+	p.collect(cc, serverFromFlag, tokenFromFlag, opts)
+}
+
+// collect runs the question flow: ask for the server (offering any saved value
+// as the default); only if a server results does it ask for the token, read
+// masked. Blank answers keep saved values. Flag-provided fields are left as-is.
+func (p serverCredPrompter) collect(cc state.ClientConfig, serverFromFlag, tokenFromFlag bool, opts *runSetupOpts) {
+	if !serverFromFlag {
+		def := cc.Server
+		if def == "" {
+			def = defaultPublicServer
+		}
+		answer := p.line("Public server URL for `expose` (leave empty for default, 'none' to stay local)", def)
+		if strings.EqualFold(answer, "none") {
+			answer = "" // explicit opt-out of a public server
+		}
+		opts.server = answer
+	}
+	if opts.server == "" {
+		return // no server, so a token has nothing to authenticate against
+	}
+	if tokenFromFlag {
+		return
+	}
+	tok, err := p.secret(fmt.Sprintf("Token for %s (blank to keep current)", opts.server))
+	if err != nil {
+		_, _ = fmt.Fprintf(p.out, "  (skipping token: %v)\n", err)
+		return
+	}
+	switch {
+	case tok != "":
+		opts.token = tok
+	case cc.Token != "":
+		opts.token = cc.Token // kept the saved one
+	}
+}
+
+// line prompts with an optional [default] and returns the trimmed answer, or
+// def when the user just presses Enter.
+func (p serverCredPrompter) line(label, def string) string {
+	if def != "" {
+		_, _ = fmt.Fprintf(p.out, "%s [%s]: ", label, def)
+	} else {
+		_, _ = fmt.Fprintf(p.out, "%s: ", label)
+	}
+	line, _ := p.in.ReadString('\n')
+	if line = strings.TrimSpace(line); line != "" {
+		return line
+	}
+	return def
+}
+
+// secret prompts for and returns a value read without echo.
+func (p serverCredPrompter) secret(label string) (string, error) {
+	_, _ = fmt.Fprintf(p.out, "%s: ", label)
+	s, err := p.readSecret()
+	return strings.TrimSpace(s), err
 }
 
 // saveClientCreds persists the server URL and/or token to the client config so
