@@ -6,6 +6,8 @@ It is an open source developer tool for local apps, APIs, webhooks, OAuth callba
 
 ## Status
 
+Phase 6 — Streaming, WebSockets, and SSE. Real dev servers work through the tunnel: WebSocket upgrades (Vite HMR), SSE (Next.js HMR), large request/response bodies, and client-disconnect cancellation are covered by tests, and the yamux transport is tuned for streaming. This milestone was generated with the help of Claude — see [AI assistance](#ai-assistance).
+
 Phase 5 — Public server, tokens, and tunnel. A self-hostable `routeup server` issues token-scoped public route claims (SQLite, SHA-256 token hashing), and `routeup expose` opens a WebSocket + yamux tunnel so a public request reaches a local port. The server always serves HTTPS: by default it obtains and renews a wildcard certificate automatically via Let's Encrypt + Cloudflare DNS-01 (`certmagic`), with a `cert` (bring-your-own) mode for an operator-provided certificate. Verified end-to-end over loopback; a hosted deployment with real DNS is the remaining step.
 
 ## Implementation Progress
@@ -23,11 +25,21 @@ Phase definitions and acceptance criteria live in [docs/MILESTONES.md](docs/MILE
 - [x] **Phase 4 — Real local setup:** local CA, certificate generation, HTTPS on 443
 - [x] **Phase 4.5 — Packaging & lifecycle:** `routeup uninstall`/`update`, upgrade-safe forwarder path, doctor bind check, Homebrew + curl install, GoReleaser pipeline
 - [x] **Phase 5 — Public server, tokens & tunnel:** token allow patterns, public namespace, WebSocket + yamux tunnel so one public request reaches a local port
-- [ ] **Phase 6 — Streaming, WebSockets, SSE:** real dev servers work through the tunnel
+- [x] **Phase 6 — Streaming, WebSockets, SSE:** real dev servers work through the tunnel — yamux streaming tuning, WS/SSE/large-body/cancellation tests, real Vite/Next integration tests _(generated with Claude — see [AI assistance](#ai-assistance))_
 - [ ] **Phase 7 — Path proxy:** frontend + API behind one route
 - [ ] **Phase 8 — Process runner:** child process with `PORT`/`HOST`/`ROUTEUP_*` env injection
 - [ ] **Phase 9 — Route logs:** local/public, `routeup logs --follow`
 - [ ] **Phase 10 — Inspect & replay:** opt-in header/body capture, `routeup inspect`/`replay`
+
+## AI assistance
+
+Most of `routeup` is written by hand. **Phase 6 (Streaming, WebSockets, and SSE) is the exception: it was generated with the help of Claude, but was reviewed and run by me.**
+
+The AI-generated M6 work is:
+
+- the synthetic streaming backends and tests (`internal/streamtest/`, plus the WebSocket/SSE/large-body/cancellation tests in `internal/tunnel`, `internal/server`, and `internal/proxy`),
+- the real Vite/Next.js dev-server integration tests (`internal/server/integration_test.go`, build tag `integration`),
+- the accompanying docs updates.
 
 ## Quick Look
 

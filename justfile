@@ -15,6 +15,11 @@ test:
 test-race:
     go test -race {{pkg}}
 
+# Run the build-tagged real-dev-server integration tests (needs node + npm +
+# network; spins up real Vite and Next dev servers). Excluded from `test`/`ci`.
+test-integration:
+    go test -tags integration -run TestIntegration -timeout 15m ./internal/server
+
 # Run golangci-lint
 lint:
     golangci-lint run

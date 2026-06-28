@@ -327,7 +327,9 @@ and `server.go` (the `TunnelRegistry` + `newSessionProxy`). The `RouteBroker`
 interface keeps the tunnel decoupled from tokens, storage, and TLS — the
 server's `routeBroker` (`internal/server/broker.go`) implements it. Because both
 ends are stdlib HTTP over a yamux stream, streaming/flushing (SSE) and WebSocket
-upgrades work without bespoke framing.
+upgrades work without bespoke framing. M6 tests this explicitly with synthetic
+Vite-style WebSocket HMR, Next-style SSE HMR, large-body, and cancellation
+scenarios across the tunnel, public ingress, and local `.localhost` paths.
 
 ## Design Clarifications
 
@@ -643,4 +645,3 @@ path not exposed
 ```
 
 `routeup doctor` should eventually diagnose most of these.
-

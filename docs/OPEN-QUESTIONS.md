@@ -77,11 +77,13 @@ Sudo is only required for port 443 binding and CA trust install, not for the age
 Status: implemented with hard-coded defaults; revisit a config surface only on complaints
 Linked milestone: Phase 6
 
-The initial implementation hard-codes reconnect parameters and offers no CLI
-flag or config knob. Now in use: the tunnel client backs off 500ms..30s (x2) in
-`internal/tunnel/client.go`, and the server holds a released token claim for a
-30s grace window in `internal/server/holds.go`. yamux keepalive covers
-heartbeat. Surface as config only if real complaints justify it.
+The implementation hard-codes tunnel parameters and offers no CLI flag or config
+knob. Now in use: the tunnel client backs off 500ms..30s (x2) in
+`internal/tunnel/client.go`; yamux uses a 1MiB per-stream flow-control window
+and a 30s connection write timeout in `internal/tunnel/utils.go`; and the server
+holds a released token claim for a 30s grace window in
+`internal/server/holds.go`. yamux keepalive covers heartbeat. Surface as config
+only if real complaints justify it.
 
 ## OQ-011: mDNS for same-LAN device testing
 

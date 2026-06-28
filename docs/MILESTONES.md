@@ -328,6 +328,27 @@ accounts or OAuth
 
 Goal: real dev servers work through the tunnel.
 
+> Implementation note: the M5 stdlib-over-yamux tunnel was kept. M6 tuned yamux
+> for streaming workloads (`MaxStreamWindowSize=1MiB`,
+> `ConnectionWriteTimeout=30s`) and added two layers of tests.
+>
+> Fast synthetic tests (`go test ./...`, `internal/streamtest`) assert the
+> transport-invariant properties a real dev server can't be instrumented to show
+> deterministically: a WebSocket upgrade/echo, SSE incremental (non-buffered)
+> delivery, large-body integrity, slow-first-byte, and client-disconnect
+> cancellation — across the tunnel path (`TunnelRegistry`), the real ingress path
+> (`serveIngress`), and the local `.localhost` path (`proxy.New`).
+>
+> Real end-to-end tests (`just test-integration`,
+> `internal/server/integration_test.go`, `//go:build integration`) spin up an
+> actual Vite and Next.js dev server, expose each through `serveIngress`, and
+> drive its real HMR channel: Vite over a `vite-hmr` WebSocket, Next over its
+> `/_next/webpack-hmr` WebSocket (Next switched HMR from SSE to WebSocket in v12).
+> Both assert a file edit produces a live HMR push through the tunnel. They are
+> excluded from the default suite/CI (need node + npm + network) and Skip when
+> node is absent.
+
+
 Build:
 
 ```txt

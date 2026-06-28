@@ -62,6 +62,8 @@ internal/
     server.go              #   TunnelRegistry: accept, per-session ReverseProxy
     timeouts.go            #   dial / backoff / request-header timeouts
 
+  streamtest/              # Synthetic WS/SSE/large-body backends for M6 tests
+
   server/                  # Public routeup server
     doc.go                 #   Package doc
     config.go              #   ServerConfig, validation
@@ -600,7 +602,9 @@ yamux is unchanged and more central than ever — it's literally the `net.Listen
 the agent serves and the `net.Conn` source the server dials. This deleted the
 hand-rolled `streamResponseWriter`, `serveStream`, `Forward`, `streamBody`, and
 the manual header copy (~150 lines), and — because `ReverseProxy` flushes —
-SSE/streaming and WebSocket upgrades now work, the groundwork for M6.
+SSE/streaming and WebSocket upgrades work without bespoke framing. M6 keeps that
+shape and tests it with synthetic WebSocket HMR, SSE HMR, large-body, and
+cancellation scenarios.
 
 ---
 
@@ -613,6 +617,12 @@ end-to-end:
 |---|---|---|
 | `TestIngress_EndToEnd` | `server/ingress_test.go:20` | The whole public path: real store + authorizer + registry, a live `tunnel.Client`, and a public request routed by `Host` reaching the agent's backend. The single best place to start. |
 | `TestIngress_NoTunnel503` | `server/ingress_test.go:88` | Ingress returns 503 when no tunnel holds the host. |
+| `TestTunnel_WebSocketHMR` | `tunnel/tunnel_test.go` | Synthetic Vite-style WebSocket HMR through yamux: upgrade, subprotocol, server push, and client echo. |
+| `TestTunnel_SSEStreamsIncrementally` | `tunnel/tunnel_test.go` | Synthetic Next-style SSE through yamux; proves events flush before stream close. |
+| `TestTunnel_LargeBodyEcho` | `tunnel/tunnel_test.go` | Large request and response body streaming through one tunnel stream, hash-checked end-to-end. |
+| `TestIngress_ClientDisconnectCancelsUpstream` | `server/ingress_test.go` | Public client disconnect propagates cancellation back to the agent-side backend. |
+| `TestLocalProxy_WebSocketHMR` / `TestLocalProxy_SSEStreamsIncrementally` | `proxy/local_test.go` | The local `.localhost` proxy path handles the same HMR-style WS/SSE traffic. |
+| `TestIntegration_ViteHMR` / `TestIntegration_NextHMR` | `server/integration_test.go` | Real Vite and Next dev servers exposed through `serveIngress`; drives the actual HMR WebSocket and asserts a file edit produces a live HMR push. Build-tagged (`integration`), excluded from the default suite — run with `just test-integration`. |
 | `TestAuthorize_*` | `server/authorize_test.go` | Placement rules: root vs namespace tier, reserved labels, out-of-domain and multi-label rejection. |
 | `TestHold_*` | `server/holds_test.go` | The hold/grace state machine: active conflict, token grace resume, grace expiry, ephemeral namespace holds. |
 | `TestCreateAndVerifyToken` | `server/tokens_test.go:30` | Token mint → SHA-256 store → verify round trip. |
