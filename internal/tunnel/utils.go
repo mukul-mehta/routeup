@@ -5,15 +5,25 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/yamux"
 )
 
-// yamuxConfig returns the shared yamux config: default tuning with yamux's own
+// Tuned for large requests - Need to be verified against actual data
+const (
+	maxStreamWindow        = 1 << 20
+	connectionWriteTimeout = 30 * time.Second
+)
+
+// yamuxConfig returns the shared yamux config: default tuning with the stream
+// window and write timeout raised for streaming workloads, and yamux's own
 // logging silenced (session errors surface through Run/ServeConn instead).
 func yamuxConfig() *yamux.Config {
 	c := yamux.DefaultConfig()
 	c.LogOutput = io.Discard
+	c.MaxStreamWindowSize = maxStreamWindow
+	c.ConnectionWriteTimeout = connectionWriteTimeout
 	return c
 }
 
