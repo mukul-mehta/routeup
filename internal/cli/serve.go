@@ -20,11 +20,12 @@ import (
 )
 
 type serveOpts struct {
-	port   int
-	expose bool
-	random bool
-	server string
-	token  string
+	port    int
+	targets []string
+	expose  bool
+	random  bool
+	server  string
+	token   string
 }
 
 func newServeCmd() *cobra.Command {
@@ -57,6 +58,7 @@ func newServeCmd() *cobra.Command {
 	}
 
 	cmd.Flags().IntVar(&opts.port, "port", 0, "port your local app listens on")
+	cmd.Flags().StringArrayVar(&opts.targets, "target", nil, "path target in /path=port form (repeatable)")
 	cmd.Flags().BoolVar(&opts.expose, "expose", false, "also expose this route publicly through a routeup server")
 	cmd.Flags().BoolVar(&opts.expose, "public", false, "alias for --expose")
 	cmd.Flags().BoolVar(&opts.random, "random", false, "use a random route name")
@@ -84,9 +86,15 @@ func runServe(cmd *cobra.Command, args []string, cwd string, opts serveOpts) err
 		positional = route.RandomName()
 	}
 
+	targetFlags, err := parseTargetFlags(opts.targets)
+	if err != nil {
+		return err
+	}
+
 	resolved, err := config.Resolve(config.Inputs{
 		PositionalName: positional,
 		PortFlag:       opts.port,
+		TargetFlags:    targetFlags,
 		Env:            os.Getenv,
 		File:           discovered.Config,
 	})
@@ -123,6 +131,7 @@ func runServe(cmd *cobra.Command, args []string, cwd string, opts serveOpts) err
 	claim := ipc.Claim{
 		Name:     resolved.Route.String(),
 		Port:     resolved.Port,
+		Targets:  resolved.Targets,
 		OwnerPID: os.Getpid(),
 		OwnerCWD: cwd,
 	}
@@ -140,9 +149,14 @@ func runServe(cmd *cobra.Command, args []string, cwd string, opts serveOpts) err
 		_ = client.Unregister(shutdownCtx, claim.Name)
 	}()
 
+	exposePaths, err := route.NormalizePathPatterns(discovered.Config.Expose.Paths)
+	if err != nil {
+		return err
+	}
+
 	var publicHost string
 	if opts.expose {
-		host, stopExpose, err := serveExpose(ctx, client, positional, discovered.Config, resolved.Port, opts)
+		host, stopExpose, err := serveExpose(ctx, client, positional, discovered.Config, resolved.Targets, exposePaths, opts)
 		if err != nil {
 			return err
 		}
@@ -154,8 +168,9 @@ func runServe(cmd *cobra.Command, args []string, cwd string, opts serveOpts) err
 	_, _ = fmt.Fprintf(out, "local: %s\n", localURL(resolved.Route.LocalHost(), tlsPort))
 	if publicHost != "" {
 		_, _ = fmt.Fprintf(out, "public: https://%s\n", publicHost)
+		_, _ = fmt.Fprintf(out, "expose: %s\n", formatExposePaths(exposePaths))
 	}
-	_, _ = fmt.Fprintf(out, "target: http://localhost:%d\n", resolved.Port)
+	printTargets(out, resolved.Targets)
 	_, _ = fmt.Fprintln(out, "")
 	_, _ = fmt.Fprintln(out, "press Ctrl-C to stop")
 
@@ -163,7 +178,7 @@ func runServe(cmd *cobra.Command, args []string, cwd string, opts serveOpts) err
 	return nil
 }
 
-func serveExpose(ctx context.Context, client *agentctl.Client, positional string, file config.Config, port int, opts serveOpts) (string, func(), error) {
+func serveExpose(ctx context.Context, client *agentctl.Client, positional string, file config.Config, targets []route.Target, paths []string, opts serveOpts) (string, func(), error) {
 	serverURL, token := resolveServerToken(opts.server, opts.token)
 	if serverURL == "" {
 		return "", nil, errors.New("--expose needs a server — pass --server, set ROUTEUP_SERVER, or run `routeup setup --server …`")
@@ -174,7 +189,9 @@ func serveExpose(ctx context.Context, client *agentctl.Client, positional string
 
 	return holdExposure(ctx, client, ipc.ExposeRequest{
 		Name:     normalizedName,
-		Port:     port,
+		Port:     route.PrimaryPort(targets),
+		Targets:  targets,
+		Paths:    paths,
 		Server:   serverURL,
 		Token:    token,
 		OwnerPID: os.Getpid(),

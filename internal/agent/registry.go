@@ -9,10 +9,11 @@ import (
 	"time"
 
 	"github.com/mukul-mehta/routeup/internal/ipc"
+	"github.com/mukul-mehta/routeup/internal/route"
 )
 
 // Registry holds the agent's active route claims in memory. Mutating methods
-// take the write lock; LookupPort and List take the read lock.
+// take the write lock; LookupTargets and List take the read lock.
 //
 // A claim whose owning PID has exited is an orphan. Register replaces an orphan
 // in place, and Reap drops orphans on a timer. There is no persistence: the
@@ -38,16 +39,21 @@ func (r *Registry) Register(c ipc.Claim) (ipc.Claim, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if existing, ok := r.claims[c.Name]; ok {
-		differentOwner := existing.OwnerPID != c.OwnerPID
+	normalized, err := normalizeClaim(c)
+	if err != nil {
+		return ipc.Claim{}, err
+	}
+
+	if existing, ok := r.claims[normalized.Name]; ok {
+		differentOwner := existing.OwnerPID != normalized.OwnerPID
 		if differentOwner && defaultPIDAlive(existing.OwnerPID) {
-			return ipc.Claim{}, &ipc.ConflictError{Name: c.Name, Existing: existing}
+			return ipc.Claim{}, &ipc.ConflictError{Name: normalized.Name, Existing: existing}
 		}
 	}
 
-	c.RegisteredAt = time.Now()
-	r.claims[c.Name] = c
-	return c, nil
+	normalized.RegisteredAt = time.Now()
+	r.claims[normalized.Name] = normalized
+	return normalized, nil
 }
 
 // Unregister removes the claim for name. It returns true if a claim was
@@ -75,16 +81,31 @@ func (r *Registry) List() []ipc.Claim {
 	return out
 }
 
-// LookupPort returns the target port for name, if registered. Used by the
-// reverse proxy to translate Host -> upstream.
-func (r *Registry) LookupPort(name string) (int, bool) {
+// LookupTargets returns the configured targets for name, if registered. Used by
+// the reverse proxy to translate Host + path -> upstream.
+func (r *Registry) LookupTargets(name string) ([]route.Target, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	c, ok := r.claims[name]
 	if !ok {
-		return 0, false
+		return nil, false
 	}
-	return c.Port, true
+	targets := make([]route.Target, len(c.Targets))
+	copy(targets, c.Targets)
+	return targets, true
+}
+
+// Lookup returns a registered claim snapshot for name.
+func (r *Registry) Lookup(name string) (ipc.Claim, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	c, ok := r.claims[name]
+	if !ok {
+		return ipc.Claim{}, false
+	}
+	c.Targets = append([]route.Target(nil), c.Targets...)
+	c.PublicPaths = append([]string(nil), c.PublicPaths...)
+	return c, true
 }
 
 // Reap removes claims whose owning PID is no longer alive. It returns the
@@ -123,4 +144,28 @@ func defaultPIDAlive(pid int) bool {
 		return true
 	}
 	return false
+}
+
+func normalizeClaim(c ipc.Claim) (ipc.Claim, error) {
+	if c.Name == "" {
+		return ipc.Claim{}, errors.New("name is required")
+	}
+	if c.OwnerPID == 0 {
+		return ipc.Claim{}, errors.New("owner_pid is required")
+	}
+	targets := c.Targets
+	if len(targets) == 0 && c.Port != 0 {
+		targets = []route.Target{{Path: "/", Port: c.Port}}
+	}
+	normalized, err := route.NormalizeTargets(targets)
+	if err != nil {
+		return ipc.Claim{}, err
+	}
+	if len(normalized) == 0 {
+		return ipc.Claim{}, errors.New("at least one target is required")
+	}
+	c.Targets = normalized
+	c.Port = route.PrimaryPort(normalized)
+	c.PublicPaths = nil
+	return c, nil
 }

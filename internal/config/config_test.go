@@ -4,8 +4,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/mukul-mehta/routeup/internal/route"
 )
 
 // TestConfig_Validate runs valid and invalid Config values through Validate.
@@ -20,12 +23,14 @@ func TestConfig_Validate(t *testing.T) {
 		{name: "name-only config", cfg: Config{Name: "myapp"}, errSubstr: ""},
 		{name: "port-only config", cfg: Config{Port: 8080}, errSubstr: ""},
 		{name: "name+port config", cfg: Config{Name: "myapp", Port: 8080}, errSubstr: ""},
+		{name: "targets config", cfg: Config{Targets: []route.Target{{Path: "/", Port: 3000}, {Path: "/api", Port: 8080}}}, errSubstr: ""},
 
 		// Invalid cases
 		{name: "double dot in name", cfg: Config{Name: "api..myapp"}, errSubstr: "invalid name"},
 		{name: "name ends in reserved suffix", cfg: Config{Name: "myapp.localhost"}, errSubstr: "invalid name"},
 		{name: "negative port", cfg: Config{Port: -1}, errSubstr: "port -1 out of range"},
 		{name: "port above limit", cfg: Config{Port: 72000}, errSubstr: "port 72000 out of range"},
+		{name: "duplicate root port", cfg: Config{Port: 3000, Targets: []route.Target{{Path: "/", Port: 8080}}}, errSubstr: "port and targets path"},
 	}
 
 	for _, tc := range cases {
@@ -73,6 +78,7 @@ func TestLoadRouteupJSON(t *testing.T) {
 		{name: "valid name+port", content: `{"name":"myapp","port":8080}`, want: Config{Name: "myapp", Port: 8080}, errSubstr: ""},
 		{name: "name-only", content: `{"name":"myapp"}`, want: Config{Name: "myapp"}, errSubstr: ""},
 		{name: "port-only", content: `{"port": 8080}`, want: Config{Port: 8080}, errSubstr: ""},
+		{name: "targets", content: `{"name":"myapp","targets":[{"path":"/","port":3000},{"path":"/api","port":8080}]}`, want: Config{Name: "myapp", Targets: []route.Target{{Path: "/", Port: 3000}, {Path: "/api", Port: 8080}}}, errSubstr: ""},
 		{name: "valid name+port+unknown field", content: `{"name":"myapp","port":8080,"paths":["/api/webhooks"]}`, want: Config{Name: "myapp", Port: 8080}, errSubstr: ""},
 
 		// Invalid cases
@@ -90,7 +96,7 @@ func TestLoadRouteupJSON(t *testing.T) {
 				if err != nil {
 					t.Fatalf("LoadRouteupJSON unexpected error: %v", err)
 				}
-				if got != tc.want {
+				if !reflect.DeepEqual(got, tc.want) {
 					t.Errorf("LoadRouteupJSON = %+v, want %+v", got, tc.want)
 				}
 				return

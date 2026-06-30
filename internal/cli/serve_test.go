@@ -29,13 +29,13 @@ func runServeIn(t *testing.T, dir string, args ...string) (stdout, stderr string
 	return outBuf.String(), errBuf.String(), err
 }
 
-func TestServe_NoPort_Errors(t *testing.T) {
+func TestServe_NoTargets_Errors(t *testing.T) {
 	_, _, err := runServeIn(t, t.TempDir(), "api.myapp")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "no port") {
-		t.Errorf("error %q does not contain %q", err.Error(), "no port")
+	if !strings.Contains(err.Error(), "no targets") {
+		t.Errorf("error %q does not contain %q", err.Error(), "no targets")
 	}
 }
 

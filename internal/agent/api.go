@@ -32,8 +32,8 @@ func (a *Agent) handleRegister(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid json: "+err.Error(), nil)
 		return
 	}
-	if in.Name == "" || in.Port == 0 || in.OwnerPID == 0 {
-		writeJSONError(w, http.StatusBadRequest, "name, port, owner_pid are required", nil)
+	if in.Name == "" || in.OwnerPID == 0 || (in.Port == 0 && len(in.Targets) == 0) {
+		writeJSONError(w, http.StatusBadRequest, "name, owner_pid and at least one target are required", nil)
 		return
 	}
 
@@ -48,7 +48,7 @@ func (a *Agent) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.logger.Info("route registered",
-		"name", claim.Name, "port", claim.Port, "owner_pid", claim.OwnerPID)
+		"name", claim.Name, "targets", len(claim.Targets), "owner_pid", claim.OwnerPID)
 	writeJSON(w, http.StatusCreated, claim)
 }
 
@@ -69,10 +69,11 @@ func (a *Agent) handleList(w http.ResponseWriter, r *http.Request) {
 	// (joined from live tunnels by owner PID) does not touch the registry.
 	claims := a.reg.List()
 	if a.tunnels != nil {
-		hosts := a.tunnels.publicHosts()
+		exposures := a.tunnels.publicExposures()
 		for i := range claims {
-			if host, ok := hosts[claims[i].OwnerPID]; ok {
-				claims[i].PublicHost = host
+			if exposure, ok := exposures[claims[i].OwnerPID]; ok {
+				claims[i].PublicHost = exposure.host
+				claims[i].PublicPaths = exposure.paths
 			}
 		}
 	}
@@ -110,8 +111,8 @@ func (a *Agent) handleExpose(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid json: "+err.Error(), nil)
 		return
 	}
-	if in.Port == 0 || in.Server == "" || in.OwnerPID == 0 || in.Name == "" {
-		writeJSONError(w, http.StatusBadRequest, "port, server, owner_pid and name are required", nil)
+	if (in.Port == 0 && len(in.Targets) == 0) || in.Server == "" || in.OwnerPID == 0 || in.Name == "" {
+		writeJSONError(w, http.StatusBadRequest, "targets, server, owner_pid and name are required", nil)
 		return
 	}
 

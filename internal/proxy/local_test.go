@@ -6,8 +6,9 @@ package proxy
 // streaming behaviors the tunnel path has also hold on the local proxy, since
 // real Vite/Next HMR run over this path during ordinary local development too.
 //
-// Test double: testPortLookup is a map implementing proxy.PortLookup, so the
-// proxy resolves route "hmr" to the backend's port without the agent registry.
+// Test double: testTargetLookup is a map implementing proxy.TargetLookup, so
+// the proxy resolves route "hmr" to the backend's targets without the agent
+// registry.
 //
 // Harness (startLocalProxy): starts the streaming backend on one httptest server,
 // extracts its port, and starts a second httptest server running proxy.New with a
@@ -42,14 +43,36 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/mukul-mehta/routeup/internal/route"
 	"github.com/mukul-mehta/routeup/internal/streamtest"
 )
 
-type testPortLookup map[string]int
+type testTargetLookup map[string][]route.Target
 
-func (l testPortLookup) LookupPort(name string) (int, bool) {
-	port, ok := l[name]
-	return port, ok
+func (l testTargetLookup) LookupTargets(name string) ([]route.Target, bool) {
+	targets, ok := l[name]
+	return targets, ok
+}
+
+func TestLocalProxy_PathTargets(t *testing.T) {
+	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "app")
+	}))
+	defer app.Close()
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "api")
+	}))
+	defer api.Close()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	proxyServer := httptest.NewServer(New(testTargetLookup{"myapp": {
+		{Path: "/", Port: testServerPort(t, app.URL)},
+		{Path: "/api", Port: testServerPort(t, api.URL)},
+	}}, logger))
+	defer proxyServer.Close()
+
+	assertLocalBody(t, proxyServer.URL+"/", "myapp.localhost", "app")
+	assertLocalBody(t, proxyServer.URL+"/api/ping", "myapp.localhost", "api")
 }
 
 func TestLocalProxy_WebSocketHMR(t *testing.T) {
@@ -130,12 +153,30 @@ func startLocalProxy(t *testing.T, backend http.Handler) (proxyURL string, clean
 	backendServer := httptest.NewServer(backend)
 	backendPort := testServerPort(t, backendServer.URL)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	proxyServer := httptest.NewServer(New(testPortLookup{"hmr": backendPort}, logger))
+	proxyServer := httptest.NewServer(New(testTargetLookup{"hmr": {{Path: "/", Port: backendPort}}}, logger))
 	cleanup = func() {
 		proxyServer.Close()
 		backendServer.Close()
 	}
 	return proxyServer.URL, cleanup
+}
+
+func assertLocalBody(t *testing.T, url, host, want string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Host = host
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || string(body) != want {
+		t.Fatalf("status/body = %d %q, want 200 %q", resp.StatusCode, body, want)
+	}
 }
 
 func testServerPort(t *testing.T, raw string) int {

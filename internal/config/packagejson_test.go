@@ -4,8 +4,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/mukul-mehta/routeup/internal/route"
 )
 
 // TestStripScope covers the npm-scope prefix stripping helper directly so
@@ -61,6 +64,7 @@ func TestLoadPackageJSON(t *testing.T) {
 		{name: "top-level name only", content: `{"name":"app-web"}`, want: Config{}, wantHasBlock: false},
 		{name: "routeup block name only", content: `{"routeup":{"name":"myapp"}}`, want: Config{Name: "myapp"}, wantHasBlock: true},
 		{name: "routeup block name+port", content: `{"routeup":{"name":"myapp","port":8080}}`, want: Config{Name: "myapp", Port: 8080}, wantHasBlock: true},
+		{name: "routeup block targets", content: `{"routeup":{"name":"myapp","targets":[{"path":"/","port":3000},{"path":"/api","port":8080}]}}`, want: Config{Name: "myapp", Targets: []route.Target{{Path: "/", Port: 3000}, {Path: "/api", Port: 8080}}}, wantHasBlock: true},
 		{name: "scoped name stripped", content: `{"routeup":{"name":"@org/myapp"}}`, want: Config{Name: "myapp"}, wantHasBlock: true},
 		{name: "sibling top-level name tolerated", content: `{"name":"app-web","routeup":{"name":"myapp"}}`, want: Config{Name: "myapp"}, wantHasBlock: true},
 		{name: "routeup null treated as absent", content: `{"routeup":null}`, want: Config{}, wantHasBlock: false},
@@ -81,7 +85,7 @@ func TestLoadPackageJSON(t *testing.T) {
 				if err != nil {
 					t.Fatalf("LoadPackageJSON unexpected error: %v", err)
 				}
-				if got != tc.want {
+				if !reflect.DeepEqual(got, tc.want) {
 					t.Errorf("LoadPackageJSON config = %+v, want %+v", got, tc.want)
 				}
 				if gotHasBlock != tc.wantHasBlock {

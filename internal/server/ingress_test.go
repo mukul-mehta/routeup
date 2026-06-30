@@ -48,15 +48,20 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
 
+	"github.com/mukul-mehta/routeup/internal/proxy"
+	"github.com/mukul-mehta/routeup/internal/route"
 	"github.com/mukul-mehta/routeup/internal/streamtest"
 	"github.com/mukul-mehta/routeup/internal/tunnel"
 )
@@ -152,6 +157,27 @@ func TestIngress_NoTunnel503(t *testing.T) {
 	}
 }
 
+func TestIngress_PathTargetsAndExposePaths(t *testing.T) {
+	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "app")
+	}))
+	defer app.Close()
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "api")
+	}))
+	defer api.Close()
+
+	targets := []route.Target{
+		{Path: "/", Port: testServerPort(t, app.URL)},
+		{Path: "/api", Port: testServerPort(t, api.URL)},
+	}
+	publicURL, host, cleanup := startIngressTunnel(t, proxy.NewTargets(targets, []string{"/api/*"}, nil))
+	defer cleanup()
+
+	assertIngressBody(t, publicURL+"/api/ping", host, http.StatusOK, "api")
+	assertIngressBody(t, publicURL+"/", host, http.StatusNotFound, "routeup: path is not exposed\n")
+}
+
 func TestIngress_WebSocketHMR(t *testing.T) {
 	publicURL, host, cleanup := startIngressTunnel(t, streamtest.WSHMR(streamtest.WSOptions{
 		Subprotocols: []string{"vite-hmr"},
@@ -191,6 +217,41 @@ func TestIngress_WebSocketHMR(t *testing.T) {
 	if typ != websocket.MessageText || string(msg) != "echo:ping" {
 		t.Fatalf("echo = type %v %q, want text echo:ping", typ, msg)
 	}
+}
+
+func assertIngressBody(t *testing.T, url, host string, wantStatus int, wantBody string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Host = host
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != wantStatus || string(body) != wantBody {
+		t.Fatalf("status/body = %d %q, want %d %q", resp.StatusCode, body, wantStatus, wantBody)
+	}
+}
+
+func testServerPort(t *testing.T, raw string) int {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatalf("parse test server url %q: %v", raw, err)
+	}
+	_, portText, err := net.SplitHostPort(u.Host)
+	if err != nil {
+		t.Fatalf("split test server host %q: %v", u.Host, err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatalf("parse test server port %q: %v", portText, err)
+	}
+	return port
 }
 
 func TestIngress_SSEStreamsIncrementally(t *testing.T) {

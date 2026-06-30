@@ -6,13 +6,13 @@ It is an open source developer tool for local apps, APIs, webhooks, OAuth callba
 
 ## Status
 
-Phase 6 — Streaming, WebSockets, and SSE. Real dev servers work through the tunnel: WebSocket upgrades (Vite HMR), SSE (Next.js HMR), large request/response bodies, and client-disconnect cancellation are covered by tests, and the yamux transport is tuned for streaming. This milestone was generated with the help of Claude — see [AI assistance](#ai-assistance).
+Phase 7 — Path proxy. A single route can now serve multiple local targets by path, so a frontend and API can sit behind one local/public hostname. `routeup.json` supports `targets`, `expose.paths` can limit which paths are public, and `routeup expose <name>` can reuse an already-registered local route.
 
 Phase 5 — Public server, tokens, and tunnel. A self-hostable `routeup server` issues token-scoped public route claims (SQLite, SHA-256 token hashing), and `routeup expose` opens a WebSocket + yamux tunnel so a public request reaches a local port. The server always serves HTTPS: by default it obtains and renews a wildcard certificate automatically via Let's Encrypt + Cloudflare DNS-01 (`certmagic`), with a `cert` (bring-your-own) mode for an operator-provided certificate. Verified end-to-end over loopback; a hosted deployment with real DNS is the remaining step.
 
 ## Implementation Progress
 
-Currently: Phases 4 and 4.5 (local HTTPS, packaging) plus Phase 5 (public server, tokens, and the request tunnel) are implemented. The server authorizes claims against token allow patterns, enforces reserved subdomains and an optional public namespace, and persists claims with a 30s grace window. The agent owns the tunnel client; `routeup expose <name> --port <p> --server <url>` claims a public host and forwards traffic to the local app over WebSocket + yamux. Public TLS is automatic by default (ACME DNS-01 via Cloudflare, `CLOUDFLARE_API_TOKEN`); `--tls-mode cert` serves an operator-provided cert. Standing up the hosted `routeup.dev` deployment (DNS + a server host) is what remains.
+Currently: Phases 4 through 7 are implemented: local HTTPS, packaging/lifecycle, public server/tokens/tunnel, streaming/HMR behavior, and path routing for frontend + API behind one route. Public TLS is automatic by default (ACME DNS-01 via Cloudflare, `CLOUDFLARE_API_TOKEN`); `--tls-mode cert` serves an operator-provided cert. Standing up the hosted `routeup.dev` deployment (DNS + a server host) is what remains.
 
 
 
@@ -26,7 +26,7 @@ Phase definitions and acceptance criteria live in [docs/MILESTONES.md](docs/MILE
 - [x] **Phase 4.5 — Packaging & lifecycle:** `routeup uninstall`/`update`, upgrade-safe forwarder path, doctor bind check, Homebrew + curl install, GoReleaser pipeline
 - [x] **Phase 5 — Public server, tokens & tunnel:** token allow patterns, public namespace, WebSocket + yamux tunnel so one public request reaches a local port
 - [x] **Phase 6 — Streaming, WebSockets, SSE:** real dev servers work through the tunnel — yamux streaming tuning, WS/SSE/large-body/cancellation tests, real Vite/Next integration tests _(generated with Claude — see [AI assistance](#ai-assistance))_
-- [ ] **Phase 7 — Path proxy:** frontend + API behind one route
+- [x] **Phase 7 — Path proxy:** frontend + API behind one route
 - [ ] **Phase 8 — Process runner:** child process with `PORT`/`HOST`/`ROUTEUP_*` env injection
 - [ ] **Phase 9 — Route logs:** local/public, `routeup logs --follow`
 - [ ] **Phase 10 — Inspect & replay:** opt-in header/body capture, `routeup inspect`/`replay`
@@ -116,6 +116,34 @@ routeup doctor      # check CA, OS trust, port 443, and agent health
 routeup routes      # list what's currently served
 routeup uninstall   # remove the cert, the port 443 helper, and ~/.routeup
 ```
+
+### Frontend + API
+
+Configure multiple targets behind one route:
+
+```json
+{
+  "name": "myapp",
+  "targets": [
+    { "path": "/", "port": 5173 },
+    { "path": "/api", "port": 8080 }
+  ],
+  "expose": {
+    "paths": ["/api/*"]
+  }
+}
+```
+
+Then:
+
+```bash
+routeup serve --expose
+```
+
+Routes `/` to the frontend and `/api/*` to the API. `expose.paths` limits public exposure only; local `.localhost` routing still serves all configured targets.
+
+Runnable versions of this setup live in [`examples/`](examples/), with Go,
+Node.js, and Python variants.
 
 ### Non-browser clients
 

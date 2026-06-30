@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -186,7 +187,7 @@ func TestDiscover(t *testing.T) {
 				if got.Source != SourceNone && got.Path == "" {
 					t.Errorf("Path is empty but Source = %q", got.Source)
 				}
-				if got.Source == SourceNone && (got.Path != "" || got.Config != (Config{})) {
+				if got.Source == SourceNone && (got.Path != "" || !reflect.DeepEqual(got.Config, Config{})) {
 					t.Errorf("SourceNone result must have empty Path and zero Config; got %+v", got)
 				}
 				return

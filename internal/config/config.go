@@ -17,8 +17,20 @@ type Config struct {
 	// Name is the service route name (e.g. "myapp"). Empty when unset.
 	Name string `json:"name,omitempty"`
 
-	// Port is the target port the local service listens on. Zero when unset.
+	// Port is shorthand for a root target at "/". Zero when unset.
 	Port int `json:"port,omitempty"`
+
+	// Targets are path-routed local upstreams behind this route.
+	Targets []route.Target `json:"targets,omitempty"`
+
+	// Expose configures public exposure for this route.
+	Expose ExposeConfig `json:"expose,omitempty"`
+}
+
+// ExposeConfig holds public exposure constraints loaded from config.
+type ExposeConfig struct {
+	// Paths limits which request paths are exposed publicly. Empty means all paths.
+	Paths []string `json:"paths,omitempty"`
 }
 
 // LoadRouteupJSON reads and decodes a routeup.json file at path
@@ -43,6 +55,8 @@ func LoadRouteupJSON(path string) (Config, error) {
 // Validate enforces field-level rules on a Config:
 //   - Name, if non-empty, must parse via route.Parse.
 //   - Port, if non-zero, must be in [1, 65535].
+//   - Targets, if non-empty, must have valid unique path prefixes and ports.
+//   - Expose paths, if non-empty, must be valid public path patterns.
 func (c Config) Validate() error {
 	if c.Name != "" {
 		if _, err := route.Parse(c.Name); err != nil {
@@ -52,6 +66,22 @@ func (c Config) Validate() error {
 
 	if c.Port != 0 && (c.Port < 1 || c.Port > 65535) {
 		return fmt.Errorf("port %d out of range [1, 65535]", c.Port)
+	}
+
+	targets, err := route.NormalizeTargets(c.Targets)
+	if err != nil {
+		return fmt.Errorf("invalid targets: %w", err)
+	}
+	if c.Port != 0 {
+		for _, target := range targets {
+			if target.Path == "/" {
+				return fmt.Errorf("port and targets path %q both configure the root target", target.Path)
+			}
+		}
+	}
+
+	if _, err := route.NormalizePathPatterns(c.Expose.Paths); err != nil {
+		return fmt.Errorf("invalid expose paths: %w", err)
 	}
 
 	return nil

@@ -16,6 +16,7 @@ internal/
     name.go                #   Name struct, Parse, LocalHost, PublicHost
     constants.go           #   LocalSuffix ("localhost"), PublicSuffix ("routeup.dev")
     random.go              #   RandomName() via golang-petname
+    target.go              #   path-routed targets and expose path matching
 
   config/                  # Config file discovery and value resolution
     discovery.go           #   Discover: routeup.json or package.json lookup
@@ -41,7 +42,7 @@ internal/
     clientconfig.go        #   ClientConfig (saved server URL + token)
 
   proxy/                   # Local HTTPS reverse proxy
-    local.go               #   PortLookup interface, New handler
+    local.go               #   TargetLookup interface, path-routing handlers
 
   agentctl/                # CLI-side agent IPC client stub
     client.go              #   Client: Status, Register, Unregister, List
@@ -54,7 +55,7 @@ internal/
     registry.go            #   Registry: in-memory route claims, conflict detection
     api.go                 #   HTTP handlers: register, unregister, list, status,
                            #   shutdown, expose, unexpose
-    expose.go              #   tunnelManager, tunnelSession, newTunnelProxy
+    expose.go              #   tunnelManager, tunnelSession, public expose wiring
 
   tunnel/                  # Tunnel protocol (shared by agent + server)
     protocol.go            #   HandshakeMessage, ClaimSpec, RouteBroker interface
@@ -129,9 +130,24 @@ Constants (`constants.go`):
 `package.json` with a `"routeup"` block (`discovery.go`). Returns the first
 match or an empty `Config`.
 
-`config.Resolve(inputs)` resolves a route name and port by precedence:
-flag > env var > file config. Bare names are prefixed with the project name;
-dotted names are taken literally (`resolve.go`).
+`config.Resolve(inputs)` resolves a route name and target set by precedence:
+config targets/port, overridden by `ROUTEUP_PORT`, `--port`, and repeatable
+`--target /path=port`. Bare names are prefixed with the project name; dotted
+names are taken literally (`resolve.go`). `port` remains shorthand for the root
+`/` target.
+
+Example M7 path-proxy config:
+
+```json
+{
+  "name": "myapp",
+  "targets": [
+    { "path": "/", "port": 5173 },
+    { "path": "/api", "port": 8080 }
+  ],
+  "expose": { "paths": ["/api/*"] }
+}
+```
 
 ---
 
@@ -189,10 +205,13 @@ types:
 ```go
 type Claim struct {
     Name         string    // dotted route name
-    Port         int       // local app port
+    Port         int       // root target shorthand / display port
+    Targets      []route.Target
     OwnerPID     int       // CLI's PID (for reap)
     OwnerCWD     string    // (for conflict messages)
     RegisteredAt time.Time
+    PublicHost   string    // response-only, when exposed
+    PublicPaths  []string  // response-only expose paths
 }
 
 type Status struct {
@@ -205,6 +224,8 @@ type Status struct {
 type ExposeRequest struct {
     Name, Server, Token string
     Port, OwnerPID      int
+    Targets             []route.Target
+    Paths               []string
 }
 
 type ExposeResponse struct {
@@ -258,7 +279,7 @@ In-memory `map[string]ipc.Claim`. Key methods:
   returns `ipc.ConflictError`. Same PID can update in place.
 - `Unregister(name)`: idempotent delete.
 - `List()`: sorted snapshot.
-- `LookupPort(name)`: used by the proxy to find the upstream port.
+- `LookupTargets(name)`: used by the proxy to find path-routed upstreams.
 - `Reap()`: drops claims whose PID is dead (signal-0 probe).
 
 The registry is purely in-memory because the CLI's `MaintainClaim` loop
@@ -268,13 +289,15 @@ re-registers after any agent restart.
 
 The agent wires `proxy.New(a.reg, a.logger)` onto its TLS listener. For each
 incoming HTTPS request, `proxy.New` extracts the route name from the Host
-header (strip port, strip `.localhost`), looks up the port via `a.reg`, and
-reverse-proxies to `localhost:<port>`. Unknown hosts get a `text/plain` 404.
+header (strip port, strip `.localhost`), looks up targets via `a.reg`, chooses
+the longest path-prefix match (`/api` beats `/`), and reverse-proxies to that
+target's `localhost:<port>`. Unknown hosts or paths get a `text/plain` 404.
 
 ### Tunnel manager (M5: `expose.go`)
 
-See the M5 section below for `tunnelManager`, `tunnelSession`, and
-`newTunnelProxy`.
+See the M5 section below for `tunnelManager` and `tunnelSession`. Since M7, the
+tunnel handler uses the same target path router as the local proxy, optionally
+with public `expose.paths` filtering.
 
 ### API handlers (`api.go`)
 
@@ -333,13 +356,15 @@ bounds it.
 
 ## Proxy (`internal/proxy/`)
 
-`PortLookup` interface (`local.go:35`): breaks the import cycle between
+`TargetLookup` interface (`local.go:35`): breaks the import cycle between
 `agent` (which imports proxy) and `proxy` (which needs the registry).
 
 `New(lookup, logger)`: extracts the route name from `Host` by stripping
-`.localhost` (and any port), looks up the port, and creates a one-shot
-`httputil.ReverseProxy` per request. The `Rewrite` func preserves the
-incoming Host header and sets `X-Forwarded-*`.
+`.localhost` (and any port), looks up the route's targets, chooses the longest
+matching path prefix, and creates a one-shot `httputil.ReverseProxy` per
+request. The `Rewrite` func preserves the incoming Host header and sets
+`X-Forwarded-*`. `NewTargets` is the same path router used by the agent-side
+public tunnel handler, with optional public `expose.paths` filtering.
 
 Unknown hosts return a `text/plain` 404 with a hint to run `routeup routes`.
 
@@ -399,8 +424,8 @@ Browser
   -> agent's TLS listener (per-SNI leaf via Issuer, cached by SNI)
   -> proxy.New handler
   -> stripPort → strip ".localhost" suffix → "api.myapp"
-  -> reg.LookupPort("api.myapp") → port 3000
-  -> httputil.ReverseProxy -> http://localhost:3000 (preserves Host, sets X-Forwarded-*)
+  -> reg.LookupTargets("api.myapp") → match request path to target
+  -> httputil.ReverseProxy -> http://localhost:<target-port> (preserves Host, sets X-Forwarded-*)
   <- response
 ```
 
@@ -501,9 +526,8 @@ HTTP roles are inverted from the yamux roles (agent = HTTP server, public server
 - `serve(ctx, session, ctrl)`: hands the session straight to a standard
   `http.Server` via **`srv.Serve(session)`** — `*yamux.Session` satisfies
   `net.Listener`. The server reads each request off its stream, runs it through
-  the agent's local reverse proxy (`newTunnelProxy` → `localhost:<port>`), and
-  serializes the response back. A ctx-cancel watcher closes the session so
-  `Serve` returns.
+  the agent's path-routing target handler (`proxy.NewTargets`), and serializes
+  the response back. A ctx-cancel watcher closes the session so `Serve` returns.
 
 **TunnelRegistry / server side** (`server.go`):
 - `AcceptHandler()`: checks version, extracts the Bearer token, upgrades to
@@ -571,12 +595,13 @@ host. `Expose(reqCtx, req)` splits the IPC context from the tunnel context
 (derived from the agent's lifetime), creates `tunnel.NewClient`, and awaits the
 grant or an error — the tunnel keeps serving after the IPC reply returns.
 `Unexpose(host)` cancels the tunnel context; `ReapDeadOwners` (10s, signal-0
-probe) tears down tunnels whose owning CLI died; `publicHosts()` maps owner PID →
-host so `routeup routes` can show a `PUBLIC` column.
+probe) tears down tunnels whose owning CLI died; `publicExposures()` maps owner
+PID to host and exposed paths so `routeup routes` can show `PUBLIC` and `PATHS`
+columns.
 
-**newTunnelProxy**: a single-target `httputil.ReverseProxy` to `localhost:<port>`
-that preserves the public Host header. It is the `Handler` the agent's
-`http.Server` runs for each request stream.
+The tunnel handler uses `proxy.NewTargets`: it optionally rejects paths outside
+`expose.paths`, then chooses the longest target path prefix and reverse-proxies
+to that local port while preserving the public Host header.
 
 ---
 
@@ -592,7 +617,7 @@ inverted from the yamux roles**, and yamux objects satisfy the stdlib interfaces
 
 - **Agent**: `*yamux.Session` *is* a `net.Listener` (its `Accept` yields one
   stream per inbound request), so `serve` is just `http.Server.Serve(session)`.
-  The stdlib parses each request, runs `newTunnelProxy`, and serializes the
+  The stdlib parses each request, runs the path-routing target handler, and serializes the
   response — framing, flushing, and cancellation all handled for you.
 - **Public server**: `newSessionProxy` is an `httputil.ReverseProxy` whose
   `http.Transport.DialContext` returns `session.Open()` — "to reach this agent,
@@ -617,11 +642,13 @@ end-to-end:
 |---|---|---|
 | `TestIngress_EndToEnd` | `server/ingress_test.go:20` | The whole public path: real store + authorizer + registry, a live `tunnel.Client`, and a public request routed by `Host` reaching the agent's backend. The single best place to start. |
 | `TestIngress_NoTunnel503` | `server/ingress_test.go:88` | Ingress returns 503 when no tunnel holds the host. |
+| `TestIngress_PathTargetsAndExposePaths` | `server/ingress_test.go` | Public ingress routes `/api/*` to the API target and returns 404 for paths excluded by `expose.paths`. |
 | `TestTunnel_WebSocketHMR` | `tunnel/tunnel_test.go` | Synthetic Vite-style WebSocket HMR through yamux: upgrade, subprotocol, server push, and client echo. |
 | `TestTunnel_SSEStreamsIncrementally` | `tunnel/tunnel_test.go` | Synthetic Next-style SSE through yamux; proves events flush before stream close. |
 | `TestTunnel_LargeBodyEcho` | `tunnel/tunnel_test.go` | Large request and response body streaming through one tunnel stream, hash-checked end-to-end. |
 | `TestIngress_ClientDisconnectCancelsUpstream` | `server/ingress_test.go` | Public client disconnect propagates cancellation back to the agent-side backend. |
 | `TestLocalProxy_WebSocketHMR` / `TestLocalProxy_SSEStreamsIncrementally` | `proxy/local_test.go` | The local `.localhost` proxy path handles the same HMR-style WS/SSE traffic. |
+| `TestLocalProxy_PathTargets` | `proxy/local_test.go` | The local proxy routes `/` and `/api/*` on one host to different targets. |
 | `TestIntegration_ViteHMR` / `TestIntegration_NextHMR` | `server/integration_test.go` | Real Vite and Next dev servers exposed through `serveIngress`; drives the actual HMR WebSocket and asserts a file edit produces a live HMR push. Build-tagged (`integration`), excluded from the default suite — run with `just test-integration`. |
 | `TestAuthorize_*` | `server/authorize_test.go` | Placement rules: root vs namespace tier, reserved labels, out-of-domain and multi-label rejection. |
 | `TestHold_*` | `server/holds_test.go` | The hold/grace state machine: active conflict, token grace resume, grace expiry, ephemeral namespace holds. |
@@ -631,7 +658,7 @@ end-to-end:
 Suggested reading order — **follow a live public request**: `server/api.go`
 (`serveIngress`) → `tunnel/server.go` (`Handler` + `newSessionProxy`) →
 `tunnel/client.go` (`serve`: `http.Server.Serve(session)`) → `agent/expose.go`
-(`newTunnelProxy` → `localhost:<port>`). Then **how the tunnel was established**:
+(`proxy.NewTargets` → path-matched `localhost:<port>`). Then **how the tunnel was established**:
 `tunnel/protocol.go` (wire types + lifecycle diagram) → `tunnel/client.go`
 (`handshake`) → `tunnel/server.go` (`ServeConn`) → `server/broker.go` (the
 `RouteBroker` bridge) → `server/authorize.go` (policy) → `server/holds.go`

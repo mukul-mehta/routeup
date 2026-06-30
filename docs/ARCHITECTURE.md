@@ -224,7 +224,7 @@ the transport roles** — that inversion is what makes a reverse tunnel work:
   Agent (dev machine)                          Public server
   ───────────────────                          ─────────────
   HTTP   http.Server.Serve(session)  ◄── req ── http.Transport + ReverseProxy
-         └─ newTunnelProxy → :PORT    ── resp ─► (one yamux stream per request)
+         └─ path router → target port ─ resp ─► (one yamux stream per request)
   ── yamux ──────────────────────────────────────────────────────────────────
          client (opens stream 0)                server
   ── WebSocket ───────────────────────────────────────────────────────────────
@@ -276,8 +276,8 @@ sequenceDiagram
     participant Proxy as Per-session ReverseProxy
     participant Trans as http.Transport
     participant AgentSrv as Agent http.Server
-    participant LocalProxy as newTunnelProxy
-    participant App as localhost:PORT
+    participant LocalProxy as Path target router
+    participant App as localhost:target-port
 
     User->>Ingress: GET https://myapp.mukul.routeup.dev/
     Note over Ingress: serveIngress: Handler(host) → proxy.ServeHTTP
@@ -286,7 +286,7 @@ sequenceDiagram
     Trans->>AgentSrv: DialContext = session.Open() → NEW yamux stream;<br/>write HTTP request onto it
     Note over Trans,AgentSrv: the stream rides the one WebSocket / TLS
     AgentSrv->>LocalProxy: ServeHTTP (reads the request off the stream)
-    LocalProxy->>App: reverse proxy to localhost:PORT (preserves Host)
+    LocalProxy->>App: reverse proxy to matched target port (preserves Host)
     App-->>LocalProxy: HTTP response
     LocalProxy-->>AgentSrv: write response
     AgentSrv-->>Trans: response bytes back on the same stream
@@ -312,11 +312,12 @@ Step by step, with the code path:
    the HTTP *client* here.
 6. **Agent serves** — the agent runs `http.Server.Serve(session)` (a
    `*yamux.Session` is a `net.Listener`), so it accepts that stream as one
-   request, parses it with the standard library, and dispatches to its handler
-   `newTunnelProxy` (`internal/agent/expose.go`). The agent is the HTTP *server*.
-7. **Local proxy** — `newTunnelProxy` forwards to `http://localhost:<port>`,
-   preserving the public Host header so the local app sees its real hostname; the
-   agent's `http.Server` serializes the response back onto the stream.
+   request, parses it with the standard library, and dispatches to its path target
+   handler (`proxy.NewTargets`). The agent is the HTTP *server*.
+7. **Local proxy** — the handler optionally applies `expose.paths`, chooses the
+   longest target path prefix (`/api` beats `/`), and forwards to the matched
+   `http://localhost:<port>` while preserving the public Host header; the agent's
+   `http.Server` serializes the response back onto the stream.
 8. **Response back** — the server's `Transport` reads the response off the
    stream; `ReverseProxy` streams (and flushes) status, headers, and body to the
    public client.
@@ -415,22 +416,13 @@ command returned, defeating the whole point.
 ### Warm proxies are not needed
 
 In `agent/expose.go`, each call to `tunnelManager.Expose` constructs a new
-`httputil.ReverseProxy` (the `Handler` the agent's `http.Server` runs for that
-session's request streams):
+path-routing handler (`proxy.NewTargets`) for that tunnel's target set. The
+handler creates a one-shot `httputil.ReverseProxy` for the matched target per
+request, the same way the local `.localhost` proxy does.
 
-```go
-target := &url.URL{Scheme: "http", Host: net.JoinHostPort("localhost", strconv.Itoa(req.Port))}
-handler := newTunnelProxy(target, m.logger)
-```
-
-This is a lightweight struct allocation — the `ReverseProxy` has no startup
-cost, no goroutines, no connection pools to warm. It is a config object holding
-the target URL, an error handler, and a `Rewrite` func. Actual HTTP connections
-to the local target are established lazily by `http.DefaultTransport` (which
-has a shared connection pool across all proxies).
-
-Building a new proxy per tunnel is free. Keeping them around would add
-bookkeeping for zero benefit.
+These proxy structs are lightweight configuration objects: no startup cost, no
+goroutines, and no connection pools to warm. Actual HTTP connections to local
+targets are established lazily by the standard transport.
 
 ## Route Model
 
@@ -460,7 +452,7 @@ model.
 
 Do not model `project`, `namespace`, and `service` as separate user concepts until real usage proves they are needed.
 
-Initial route shape:
+Single-port shorthand:
 
 ```txt
 name: api.myapp
@@ -468,7 +460,7 @@ target: http://localhost:9080
 public: exposed or not exposed
 ```
 
-Later route shape:
+Current path-proxy route shape:
 
 ```txt
 name: myapp
@@ -500,6 +492,11 @@ package.json with a routeup block
 ```
 
 `routeup.json` wins when both exist in the same directory. Multi-directory walk-up is not implemented in v1 and may be added later when monorepo workflows justify it. Per-language embeds beyond `package.json` (e.g. `pyproject.toml`, `Cargo.toml`) are out of scope for v1 — non-JS projects use `routeup.json` directly.
+
+Targets are configured with either the single-port shorthand or explicit path
+targets. `port: 5173` means `targets: [{path: "/", port: 5173}]`; explicit
+targets support frontend/API routing behind one route. `expose.paths` limits
+public exposure only and defaults to all paths.
 
 Bare-name resolution:
 

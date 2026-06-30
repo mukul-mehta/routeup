@@ -383,6 +383,20 @@ GUI inspection
 
 Goal: support frontend and API behind a single route.
 
+> Implementation note: M7 changed the route shape from one port to path-routed
+> targets. `routeup.json` and the package.json `routeup` block now accept
+> `targets: [{"path":"/","port":5173},{"path":"/api","port":8080}]`; the
+> existing `port` field remains shorthand for the root `/` target. The CLI also
+> accepts repeatable `--target /path=port` overrides. The agent registry stores
+> one owner per route with multiple targets, and both the local `.localhost`
+> proxy and agent-side tunnel handler choose the upstream by longest path-prefix
+> match. Public exposure can be limited with `expose.paths` (for example
+> `["/api/*"]`); blocked public paths return 404 while local routes still serve
+> all configured targets. `routeup expose <name>` first reuses an already-
+> registered local route's targets when no explicit target override is passed,
+> then falls back to config/flags. Public-domain local mirror work is planning-
+> only for this milestone; no DNS or resolver behavior was added.
+
 Build:
 
 ```txt

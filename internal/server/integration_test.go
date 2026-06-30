@@ -64,7 +64,7 @@
 //   - waitForHTTP: poll until the dev server returns 200 (Next compiles on first
 //     request, so the caller passes a generous timeout).
 //   - devServerProxy: the agent-side reverse proxy to the dev server; mirrors the
-//     real agent's newTunnelProxy by preserving the public Host header.
+//     real agent tunnel handler's public Host preservation.
 //   - getThroughTunnel: GET a public URL with the granted Host and return the body.
 //   - readHMRField: read one HMR JSON message off the WebSocket and return the
 //     value at a key — Vite tags messages "type", Next tags them "action", so one
@@ -314,8 +314,8 @@ func waitForHTTP(t *testing.T, url string, timeout time.Duration, logs *safeBuff
 	t.Fatalf("dev server not ready at %s after %s: %v\n--- logs ---\n%s", url, timeout, lastErr, logs.String())
 }
 
-// devServerProxy mirrors the agent's newTunnelProxy: a reverse proxy to the
-// local dev server that preserves the public Host header end-to-end.
+// devServerProxy mirrors the agent tunnel handler's reverse proxy to the local
+// dev server, preserving the public Host header end-to-end.
 func devServerProxy(port int) http.Handler {
 	target := &url.URL{Scheme: "http", Host: net.JoinHostPort("127.0.0.1", strconv.Itoa(port))}
 	return &httputil.ReverseProxy{

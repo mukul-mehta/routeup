@@ -190,6 +190,20 @@ Or inside `package.json`:
 }
 ```
 
+For frontend + API behind one route, use path targets:
+
+```json
+{
+  "name": "myapp",
+  "targets": [
+    { "path": "/", "port": 5173 },
+    { "path": "/api", "port": 8080 }
+  ]
+}
+```
+
+The older `port` field remains shorthand for `{ "path": "/", "port": <port> }`.
+
 There is no separate "project" concept; the `name` field on the config is the project name used for bare-name resolution. Shared settings like `server` and token references will live in a separate global config (Phase 5), not in the per-service file.
 
 ## Exposure Model
@@ -228,7 +242,7 @@ Expose: all paths
 
 `--random` is the explicit override for "I have a config name but want a throwaway URL for this run." Without `--random`, the route name comes from config or the CLI argument and follows the resolution rule in Product Shape.
 
-Path-limited exposure can come from config later:
+Path-limited exposure comes from config:
 
 ```json
 {

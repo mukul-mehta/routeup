@@ -30,9 +30,9 @@ func envFor(vars map[string]string) func(string) string {
 //	  - "file used when no flag or env"
 //	      Inputs{PositionalName:"myapp", File: Config{Port:7070}}
 //	      -> wantRoute "myapp", wantPort 7070
-//	  - "missing port errors"
-//	      Inputs{PositionalName:"myapp"}
-//	      -> errSubstr "no port"     (or your wording)
+	//	  - "missing targets errors"
+	//	      Inputs{PositionalName:"myapp"}
+	//	      -> errSubstr "no targets"     (or your wording)
 //	  - "invalid ROUTEUP_PORT errors"
 //	      Inputs{PositionalName:"myapp", Env: envFor({"ROUTEUP_PORT":"notanint"})}
 //	      -> errSubstr "ROUTEUP_PORT"
@@ -109,9 +109,9 @@ func TestResolve(t *testing.T) {
 			wantPort:  7070,
 		},
 		{
-			name:      "missing port errors",
+			name:      "missing targets errors",
 			in:        Inputs{PositionalName: "myapp"},
-			errSubstr: "no port",
+			errSubstr: "no targets",
 		},
 		{
 			name: "invalid ROUTEUP_PORT errors",

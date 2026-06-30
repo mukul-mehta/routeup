@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -23,10 +22,11 @@ import (
 )
 
 type exposeOpts struct {
-	port   int
-	random bool
-	server string
-	token  string
+	port    int
+	targets []string
+	random  bool
+	server  string
+	token   string
 }
 
 func newExposeCmd() *cobra.Command {
@@ -51,6 +51,7 @@ func newExposeCmd() *cobra.Command {
 	}
 
 	cmd.Flags().IntVar(&opts.port, "port", 0, "local app port")
+	cmd.Flags().StringArrayVar(&opts.targets, "target", nil, "path target in /path=port form (repeatable)")
 	cmd.Flags().BoolVar(&opts.random, "random", false, "use a random route name")
 	cmd.Flags().StringVar(&opts.server, "server", "", "public server URL (or ROUTEUP_SERVER)")
 	cmd.Flags().StringVar(&opts.token, "token", "", "server token (or ROUTEUP_TOKEN)")
@@ -75,6 +76,10 @@ func runExpose(cmd *cobra.Command, args []string, cwd string, opts exposeOpts) e
 	if err != nil {
 		return err
 	}
+	targetFlags, err := parseTargetFlags(opts.targets)
+	if err != nil {
+		return err
+	}
 
 	routeName := resolveExposeRouteName(positional, discovered.Config)
 	if opts.random {
@@ -85,18 +90,17 @@ func runExpose(cmd *cobra.Command, args []string, cwd string, opts exposeOpts) e
 	}
 
 	normalizedName := normalizePublicName(routeName)
-
-	port := resolveExposePort(opts.port, discovered.Config)
-	if port == 0 {
-		return errors.New("set --port to the local app's port")
+	exposePaths, err := route.NormalizePathPatterns(discovered.Config.Expose.Paths)
+	if err != nil {
+		return err
 	}
 
-	return startTunnel(cmd, serverURL, token, normalizedName, port)
+	return startTunnel(cmd, serverURL, token, routeName, normalizedName, opts.port, targetFlags, discovered.Config, exposePaths)
 }
 
 // startTunnel ensures the agent is running, sends the expose request, prints
 // the route info, and blocks until Ctrl-C.
-func startTunnel(cmd *cobra.Command, serverURL, token, routeName string, port int) error {
+func startTunnel(cmd *cobra.Command, serverURL, token, localRouteName, publicRouteName string, portFlag int, targetFlags []route.Target, file config.Config, exposePaths []string) error {
 	sockPath, err := state.AgentSocketPath()
 	if err != nil {
 		return err
@@ -116,9 +120,16 @@ func startTunnel(cmd *cobra.Command, serverURL, token, routeName string, port in
 		return fmt.Errorf("start agent: %w", err)
 	}
 
+	targets, port, err := exposeTargets(startCtx, client, localRouteName, portFlag, targetFlags, file)
+	if err != nil {
+		return err
+	}
+
 	host, stopExpose, err := holdExposure(ctx, client, ipc.ExposeRequest{
-		Name:     routeName,
+		Name:     publicRouteName,
 		Port:     port,
+		Targets:  targets,
+		Paths:    exposePaths,
 		Server:   serverURL,
 		Token:    token,
 		OwnerPID: os.Getpid(),
@@ -129,15 +140,43 @@ func startTunnel(cmd *cobra.Command, serverURL, token, routeName string, port in
 	defer stopExpose()
 
 	out := cmd.OutOrStdout()
-	printRouteLocal(out, routeName)
+	printRouteLocal(out, localRouteName)
 	_, _ = fmt.Fprintf(out, "public: https://%s\n", host)
-	_, _ = fmt.Fprintf(out, "target: http://localhost:%d\n", port)
-	_, _ = fmt.Fprintln(out, "expose: all paths")
+	printTargets(out, targets)
+	_, _ = fmt.Fprintf(out, "expose: %s\n", formatExposePaths(exposePaths))
 	_, _ = fmt.Fprintln(out, "")
 	_, _ = fmt.Fprintln(out, "press Ctrl-C to stop")
 
 	<-ctx.Done()
 	return nil
+}
+
+func exposeTargets(ctx context.Context, client *agentctl.Client, routeName string, portFlag int, targetFlags []route.Target, file config.Config) ([]route.Target, int, error) {
+	if !hasTargetOverride(portFlag, targetFlags) {
+		claims, err := client.List(ctx)
+		if err == nil {
+			for _, claim := range claims {
+				if claim.Name == routeName && len(claim.Targets) > 0 {
+					return claim.Targets, route.PrimaryPort(claim.Targets), nil
+				}
+			}
+		}
+	}
+
+	targets, port, err := config.ResolveTargets(config.Inputs{
+		PortFlag:    portFlag,
+		TargetFlags: targetFlags,
+		Env:         os.Getenv,
+		File:        file,
+	})
+	if err != nil {
+		return nil, 0, fmt.Errorf("resolve expose targets: %w", err)
+	}
+	return targets, port, nil
+}
+
+func hasTargetOverride(portFlag int, targetFlags []route.Target) bool {
+	return portFlag != 0 || len(targetFlags) != 0 || strings.TrimSpace(os.Getenv("ROUTEUP_PORT")) != ""
 }
 
 // holdExposure sends the expose request to the agent and returns the granted
@@ -179,18 +218,6 @@ func resolveExposeRouteName(positional string, file config.Config) string {
 		return env
 	}
 	return file.Name
-}
-
-func resolveExposePort(flagPort int, file config.Config) int {
-	if flagPort != 0 {
-		return flagPort
-	}
-	if raw := strings.TrimSpace(os.Getenv("ROUTEUP_PORT")); raw != "" {
-		if n, err := strconv.Atoi(raw); err == nil {
-			return n
-		}
-	}
-	return file.Port
 }
 
 func resolveServerToken(flagServer, flagToken string) (server, token string) {

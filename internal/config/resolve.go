@@ -13,20 +13,22 @@ import (
 type Inputs struct {
 	PositionalName string
 	PortFlag       int
+	TargetFlags    []route.Target
 	Env            func(string) string
 	File           Config
 }
 
 // Resolved is the final, validated route + target.
 type Resolved struct {
-	Route route.Name
-	Port  int
+	Route   route.Name
+	Port    int
+	Targets []route.Target
 }
 
 // Resolve applies precedence:
 //
-//	Port: PortFlag > ROUTEUP_PORT env > File.Port.
-//	      Errors if all are unset. Out-of-range values error.
+//	Targets: File port/targets, overridden per path by ROUTEUP_PORT, --port,
+//	         and --target. Errors if all are unset. Out-of-range values error.
 //
 //	Name: PositionalName (with bare-name rule) > ROUTEUP_NAME env > File.Name.
 //	      Errors if both are empty.
@@ -36,7 +38,7 @@ type Resolved struct {
 // the suffix). Otherwise the chosen string is used literally and parsed via
 // route.Parse.
 func Resolve(in Inputs) (Resolved, error) {
-	port, err := resolvePort(in)
+	targets, err := resolveTargets(in)
 	if err != nil {
 		return Resolved{}, err
 	}
@@ -51,42 +53,84 @@ func Resolve(in Inputs) (Resolved, error) {
 		return Resolved{}, fmt.Errorf("invalid route name: %w", err)
 	}
 
-	return Resolved{Route: parsed, Port: port}, nil
+	return Resolved{Route: parsed, Port: route.PrimaryPort(targets), Targets: targets}, nil
 }
 
-// resolvePort picks a port via PortFlag > ROUTEUP_PORT env > File.Port and
-// range-checks the result.
-func resolvePort(in Inputs) (int, error) {
-	port, err := pickPort(in)
+// ResolveTargets resolves only the target set. It is used by `routeup expose`,
+// where the public route name is resolved separately from local target config.
+func ResolveTargets(in Inputs) ([]route.Target, int, error) {
+	targets, err := resolveTargets(in)
 	if err != nil {
-		return 0, err
+		return nil, 0, err
 	}
-	if port < 1 || port > 65535 {
-		return 0, fmt.Errorf("port %d out of range [1, 65535]", port)
-	}
-	return port, nil
+	return targets, route.PrimaryPort(targets), nil
 }
 
-// pickPort returns the chosen port without range-checking it.
-func pickPort(in Inputs) (int, error) {
-	if in.PortFlag != 0 {
-		return in.PortFlag, nil
+func resolveTargets(in Inputs) ([]route.Target, error) {
+	targets := make([]route.Target, 0, len(in.File.Targets)+len(in.TargetFlags)+1)
+	var err error
+
+	if in.File.Port != 0 {
+		targets, err = setTarget(targets, route.Target{Path: "/", Port: in.File.Port})
+		if err != nil {
+			return nil, err
+		}
+	}
+	for _, target := range in.File.Targets {
+		targets, err = setTarget(targets, target)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if raw := envGet(in.Env, "ROUTEUP_PORT"); raw != "" {
 		trimmed := strings.TrimSpace(raw)
 		n, err := strconv.Atoi(trimmed)
 		if err != nil {
-			return 0, fmt.Errorf("invalid ROUTEUP_PORT %q: %w", raw, err)
+			return nil, fmt.Errorf("invalid ROUTEUP_PORT %q: %w", raw, err)
 		}
-		return n, nil
+		targets, err = setTarget(targets, route.Target{Path: "/", Port: n})
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	if in.File.Port != 0 {
-		return in.File.Port, nil
+	if in.PortFlag != 0 {
+		targets, err = setTarget(targets, route.Target{Path: "/", Port: in.PortFlag})
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	return 0, errors.New("no port specified (use --port, ROUTEUP_PORT, or set port in config)")
+	for _, target := range in.TargetFlags {
+		targets, err = setTarget(targets, target)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if len(targets) == 0 {
+		return nil, errors.New("no targets specified (use --port, --target, ROUTEUP_PORT, or set port/targets in config)")
+	}
+	return route.NormalizeTargets(targets)
+}
+
+func setTarget(targets []route.Target, target route.Target) ([]route.Target, error) {
+	normalized, err := route.NormalizeTarget(target)
+	if err != nil {
+		return nil, err
+	}
+	for i, existing := range targets {
+		existing, err := route.NormalizeTarget(existing)
+		if err != nil {
+			return nil, err
+		}
+		if existing.Path == normalized.Path {
+			targets[i] = normalized
+			return targets, nil
+		}
+	}
+	return append(targets, normalized), nil
 }
 
 // resolveName picks a name string via positional (with bare-name rule) >
