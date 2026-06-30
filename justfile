@@ -20,6 +20,10 @@ test-race:
 test-integration:
     go test -tags integration -run TestIntegration -timeout 15m ./internal/server
 
+# Validate runnable examples and their routeup.json files
+test-examples:
+    go test ./examples/...
+
 # Run golangci-lint
 lint:
     golangci-lint run
@@ -37,5 +41,11 @@ build:
 dev *args:
     @go run ./cmd/routeup {{args}}
 
-# CI pipeline used in GitHub Actions
+# Main CI pipeline used in GitHub Actions
 ci: test-race lint
+
+# Examples CI entry point
+ci-examples: test-examples
+
+# Integration CI entry point
+ci-integration: test-integration

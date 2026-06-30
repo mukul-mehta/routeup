@@ -1,0 +1,7 @@
+{
+  "name": "python-api",
+  "port": 8082,
+  "expose": {
+    "paths": ["/api/webhooks/*"]
+  }
+}

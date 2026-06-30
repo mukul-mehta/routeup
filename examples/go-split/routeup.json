@@ -1,0 +1,10 @@
+{
+  "name": "go-split",
+  "targets": [
+    { "path": "/", "port": 5173 },
+    { "path": "/api", "port": 8080 }
+  ],
+  "expose": {
+    "paths": ["/api/*"]
+  }
+}
