@@ -200,7 +200,8 @@ if [ "${RUNNER_ENV[0]:-}" != "routeup-runner-ok" ]; then
 	exit 1
 fi
 
-APP_PORT="${RUNNER_ENV[1]#PORT=}"
+APP_PORT="${RUNNER_ENV[1]:-}"
+APP_PORT="${APP_PORT#PORT=}"
 if ! [[ "$APP_PORT" =~ ^[0-9]+$ ]] || [ "$APP_PORT" = "$TLS_PORT" ] || [ "$APP_PORT" = "8080" ]; then
 	printf '%s\n' "runner assigned invalid dynamic port: $APP_PORT" >&2
 	exit 1
@@ -213,7 +214,10 @@ if [ "${RUNNER_ENV[2]:-}" != "HOST=127.0.0.1" ] || \
 fi
 
 for file in app.pid app.pgid descendant.pid descendant.pgid; do
-	for ((attempt = 0; attempt < 50 && ! -s "$RUNNER_DIR/$file"; attempt++)); do
+	for ((attempt = 0; attempt < 50; attempt++)); do
+		if [ -s "$RUNNER_DIR/$file" ]; then
+			break
+		fi
 		sleep 0.1
 	done
 	if [ ! -s "$RUNNER_DIR/$file" ]; then
