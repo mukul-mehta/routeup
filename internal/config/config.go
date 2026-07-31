@@ -4,6 +4,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
@@ -25,6 +26,12 @@ type Config struct {
 
 	// Expose configures public exposure for this route.
 	Expose ExposeConfig `json:"expose,omitempty"`
+
+	// Script names a package.json script to resolve in runner mode.
+	Script string `json:"script,omitempty"`
+
+	// Command is the resolved shell command run in runner mode.
+	Command string `json:"command,omitempty"`
 }
 
 // ExposeConfig holds public exposure constraints loaded from config.
@@ -45,6 +52,9 @@ func LoadRouteupJSON(path string) (Config, error) {
 		return Config{}, fmt.Errorf("could not parse %s: %w", path, err)
 	}
 
+	if c.Script != "" {
+		return Config{}, fmt.Errorf("%s: script is only valid in a package.json routeup block; use \"command\" here", path)
+	}
 	if err := c.Validate(); err != nil {
 		return Config{}, fmt.Errorf("could not validate %s: %w", path, err)
 	}
@@ -57,6 +67,7 @@ func LoadRouteupJSON(path string) (Config, error) {
 //   - Port, if non-zero, must be in [1, 65535].
 //   - Targets, if non-empty, must have valid unique path prefixes and ports.
 //   - Expose paths, if non-empty, must be valid public path patterns.
+//   - Script and Command cannot both be set.
 func (c Config) Validate() error {
 	if c.Name != "" {
 		if _, err := route.Parse(c.Name); err != nil {
@@ -82,6 +93,10 @@ func (c Config) Validate() error {
 
 	if _, err := route.NormalizePathPatterns(c.Expose.Paths); err != nil {
 		return fmt.Errorf("invalid expose paths: %w", err)
+	}
+
+	if c.Script != "" && c.Command != "" {
+		return errors.New("set either script or command, not both")
 	}
 
 	return nil

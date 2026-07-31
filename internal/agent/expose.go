@@ -23,9 +23,9 @@ type tunnelSession struct {
 }
 
 // tunnelManager owns the agent's live public tunnels. The CLI asks it to expose
-// a local port; it starts the tunnel and keeps it running after the IPC request
-// returns, until the CLI unexposes or its process dies. Entries are keyed by the
-// public host the server granted.
+// a local target set; it starts the tunnel and keeps it running after the IPC
+// request returns, until the CLI unexposes or its process dies. Entries are
+// keyed by the public host the server granted.
 type tunnelManager struct {
 	parent context.Context
 	logger *slog.Logger
@@ -81,14 +81,6 @@ func (m *tunnelManager) Expose(reqCtx context.Context, req ipc.ExposeRequest) (s
 	})
 	go func() { errCh <- client.Run(tunnelCtx) }()
 
-	// Wait for whichever of the three outcomes happens first. The tunnel
-	// goroutine above keeps running regardless of which branch we take here
-	// (unless we cancel it).
-	//
-	// The 3 outcomes are:
-	// 1. The server accepted claim and returned the public host.
-	// 2. There was an error and the tunnel died before granting a host
-	// 3. THe CLI received a Ctrl+C and cancelled the IPC request
 	select {
 	case host := <-grantedCh:
 		if host == "" {

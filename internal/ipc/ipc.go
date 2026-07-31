@@ -55,7 +55,7 @@ type Claim struct {
 //
 // BootID is a random identifier generated once per agent process at startup.
 // A change in BootID tells the CLI the agent restarted (and therefore lost its
-// in-memory registry), which is the signal the serve reconcile loop uses to
+// in-memory registry), which is the signal foreground claim owners use to
 // re-register.
 //
 // ExecPath and ExecModTime describe the binary the running agent was launched
@@ -93,9 +93,10 @@ type ErrorBody struct {
 
 // ExposeRequest asks the agent to open a public tunnel for a route. The agent
 // dials Server, authenticates with Token, claims the route, and forwards
-// inbound public requests to the local Port. OwnerPID lets the agent reap the
-// tunnel if the requesting CLI dies. A --random name is resolved by the CLI
-// before this request, so Name is always a concrete label here.
+// inbound public requests to the local target set; Port is root-target
+// shorthand. OwnerPID lets the agent reap the tunnel if the requesting CLI
+// dies. A --random name is resolved by the CLI before this request, so Name is
+// always a concrete label here.
 type ExposeRequest struct {
 	Name     string         `json:"name"`
 	Port     int            `json:"port,omitempty"`

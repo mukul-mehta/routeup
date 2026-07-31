@@ -139,7 +139,7 @@ func TestTunnel_EndToEnd(t *testing.T) {
 	client := NewClient(ClientOptions{
 		ServerURL: ts.URL,
 		Token:     "valid_token",
-		Spec:      ClaimSpec{Route: "api.myapp"},
+		Spec:      ClaimSpec{Route: "api-myapp"},
 		Handler:   httputil.NewSingleHostReverseProxy(target),
 		OnGranted: func(h string) { grantedCh <- h },
 	})
@@ -154,7 +154,7 @@ func TestTunnel_EndToEnd(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for claim grant")
 	}
-	if host != "api.myapp.alice.routeup.dev" {
+	if host != "api-myapp.alice.routeup.dev" {
 		t.Fatalf("granted = %q", host)
 	}
 
@@ -287,10 +287,10 @@ func TestTunnel_WebSocketHMR(t *testing.T) {
 
 func TestTunnel_SSEStreamsIncrementally(t *testing.T) {
 	gate := make(chan struct{})
-	publicURL, host, cleanup := startPublicTunnel(t, streamtest.SSEHMR([]string{"one", "two"}, gate))
+	publicURL, host, cleanup := startPublicTunnel(t, streamtest.SSEStream([]string{"one", "two"}, gate))
 	defer cleanup()
 
-	req, err := http.NewRequest(http.MethodGet, publicURL+"/_next/webpack-hmr", nil)
+	req, err := http.NewRequest(http.MethodGet, publicURL+"/events", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

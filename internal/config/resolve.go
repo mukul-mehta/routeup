@@ -43,17 +43,26 @@ func Resolve(in Inputs) (Resolved, error) {
 		return Resolved{}, err
 	}
 
-	nameStr, err := resolveName(in)
+	parsed, err := ResolveName(in)
 	if err != nil {
 		return Resolved{}, err
 	}
 
+	return Resolved{Route: parsed, Port: route.PrimaryPort(targets), Targets: targets}, nil
+}
+
+// ResolveName applies positional/env/file precedence and the positional
+// bare-name rule, then parses the result as a route name.
+func ResolveName(in Inputs) (route.Name, error) {
+	nameStr, err := resolveName(in)
+	if err != nil {
+		return route.Name{}, err
+	}
 	parsed, err := route.Parse(nameStr)
 	if err != nil {
-		return Resolved{}, fmt.Errorf("invalid route name: %w", err)
+		return route.Name{}, fmt.Errorf("invalid route name: %w", err)
 	}
-
-	return Resolved{Route: parsed, Port: route.PrimaryPort(targets), Targets: targets}, nil
+	return parsed, nil
 }
 
 // ResolveTargets resolves only the target set. It is used by `routeup expose`,

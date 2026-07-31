@@ -72,15 +72,14 @@ func TestParse_Invalid(t *testing.T) {
 	}
 }
 
-// TestName_Hosts checks LocalHost and PublicHost on valid names.
-func TestName_Hosts(t *testing.T) {
+// TestName_LocalHost checks local hostname mapping for valid names.
+func TestName_LocalHost(t *testing.T) {
 	cases := []struct {
-		in     string
-		local  string
-		public string
+		in    string
+		local string
 	}{
-		{in: "myapp", local: "myapp.localhost", public: "myapp.routeup.dev"},
-		{in: "api.myapp", local: "api.myapp.localhost", public: "api.myapp.routeup.dev"},
+		{in: "myapp", local: "myapp.localhost"},
+		{in: "api.myapp", local: "api.myapp.localhost"},
 	}
 
 	for _, tc := range cases {
@@ -91,9 +90,6 @@ func TestName_Hosts(t *testing.T) {
 			}
 			if got := n.LocalHost(); got != tc.local {
 				t.Errorf("LocalHost() = %q, want %q", got, tc.local)
-			}
-			if got := n.PublicHost(); got != tc.public {
-				t.Errorf("PublicHost() = %q, want %q", got, tc.public)
 			}
 		})
 	}

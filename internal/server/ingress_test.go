@@ -256,10 +256,10 @@ func testServerPort(t *testing.T, raw string) int {
 
 func TestIngress_SSEStreamsIncrementally(t *testing.T) {
 	gate := make(chan struct{})
-	publicURL, host, cleanup := startIngressTunnel(t, streamtest.SSEHMR([]string{"one", "two"}, gate))
+	publicURL, host, cleanup := startIngressTunnel(t, streamtest.SSEStream([]string{"one", "two"}, gate))
 	defer cleanup()
 
-	req, err := http.NewRequest(http.MethodGet, publicURL+"/_next/webpack-hmr", nil)
+	req, err := http.NewRequest(http.MethodGet, publicURL+"/events", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

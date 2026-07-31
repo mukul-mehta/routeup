@@ -50,6 +50,30 @@ func TestLoadPackageJSON_MissingFile(t *testing.T) {
 	}
 }
 
+func TestLoadPackageJSON_ScriptResolution(t *testing.T) {
+	path := writeTmpFile(t, "package.json", `{"scripts":{"dev:app":"vite --host"},"routeup":{"name":"myapp","script":"dev:app"}}`)
+	got, hasBlock, err := LoadPackageJSON(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasBlock {
+		t.Fatal("expected a routeup block")
+	}
+	if got.Script != "" || got.Command != "vite --host" {
+		t.Errorf("got Script=%q Command=%q, want empty / \"vite --host\"", got.Script, got.Command)
+	}
+
+	missing := writeTmpFile(t, "package.json", `{"scripts":{"build":"vite build"},"routeup":{"name":"myapp","script":"dev"}}`)
+	if _, _, err := LoadPackageJSON(missing); err == nil || !strings.Contains(err.Error(), "not defined in") {
+		t.Fatalf("expected missing-script error, got %v", err)
+	}
+
+	direct := writeTmpFile(t, "package.json", `{"routeup":{"name":"myapp","command":"vite"}}`)
+	if _, _, err := LoadPackageJSON(direct); err == nil || !strings.Contains(err.Error(), "only valid in routeup.json") {
+		t.Fatalf("expected package.json command rejection, got %v", err)
+	}
+}
+
 // TestLoadPackageJSON walks package.json content through the loader.
 func TestLoadPackageJSON(t *testing.T) {
 	cases := []struct {

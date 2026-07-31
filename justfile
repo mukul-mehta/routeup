@@ -16,7 +16,7 @@ test-race:
     go test -race {{pkg}}
 
 # Run the build-tagged real-dev-server integration tests (needs node + npm +
-# network; spins up real Vite and Next dev servers). Excluded from `test`/`ci`.
+# network; spins up real Vite and Next dev servers). Excluded from `test`.
 test-integration:
     go test -tags integration -run TestIntegration -timeout 15m ./internal/server
 
@@ -41,11 +41,11 @@ build:
 dev *args:
     @go run ./cmd/routeup {{args}}
 
-# Main CI pipeline used in GitHub Actions
+# Local equivalent of the deterministic CI checks
 ci: test-race lint
 
-# Examples CI entry point
+# Local equivalent of the examples workflow
 ci-examples: test-examples
 
-# Integration CI entry point
+# Local equivalent of the real-dev-server integration workflow
 ci-integration: test-integration

@@ -25,7 +25,8 @@ func newAgentCmd() *cobra.Command {
 		Short: "Inspect or control the local agent (rarely needed)",
 		Long: "Inspect or control the local routeup agent.\n\n" +
 			"You normally never run these by hand: the agent starts on demand when\n" +
-			"you run `routeup serve` and persists in the background. These commands\n" +
+			"you run bare `routeup` or `routeup serve`, and persists in the background.\n" +
+			"These commands\n" +
 			"exist for debugging and for forcing a reload after upgrading routeup.",
 	}
 	cmd.AddCommand(

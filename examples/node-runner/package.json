@@ -1,0 +1,13 @@
+{
+  "name": "routeup-node-runner-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "routeup",
+    "dev:app": "node server.mjs"
+  },
+  "routeup": {
+    "name": "node-runner",
+    "script": "dev:app"
+  }
+}

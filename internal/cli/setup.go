@@ -347,7 +347,7 @@ func startLocalAgent(cmd *cobra.Command, out io.Writer) error {
 	res, err := client.EnsureRunning(startCtx)
 	if err != nil {
 		_, _ = fmt.Fprintf(out, "agent: couldn't start now (%v)\n", err)
-		_, _ = fmt.Fprintln(out, "  it'll start on its own the first time you run `routeup serve`")
+		_, _ = fmt.Fprintln(out, "  it'll start on its own the first time you run bare `routeup` or `routeup serve`")
 		return nil
 	}
 	switch res {

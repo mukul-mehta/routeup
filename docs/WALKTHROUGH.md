@@ -13,7 +13,7 @@ cmd/routeup/
 
 internal/
   route/                   # Route names, parsing, host mapping, random names
-    name.go                #   Name struct, Parse, LocalHost, PublicHost
+    name.go                #   Name struct, Parse, LocalHost
     constants.go           #   LocalSuffix ("localhost"), PublicSuffix ("routeup.dev")
     random.go              #   RandomName() via golang-petname
     target.go              #   path-routed targets and expose path matching
@@ -65,6 +65,12 @@ internal/
 
   streamtest/              # Synthetic WS/SSE/large-body backends for M6 tests
 
+  process/                 # Child process ownership for bare runner mode
+    runner.go              #   shell command, process group, signals, exit status
+    env.go                 #   PORT/HOST/ROUTEUP_* and PATH injection
+    port.go                #   loopback free-port selection and availability
+    signal.go              #   signal-aware command context
+
   server/                  # Public routeup server
     doc.go                 #   Package doc
     config.go              #   ServerConfig, validation
@@ -85,17 +91,20 @@ internal/
 
   cli/                     # Cobra command tree
     root.go                #   Root command, subcommand registry
+    run.go                 #   bare `routeup` local process runner
+    run_process.go         #   startup readiness and child result handling
+    targets.go             #   target flag parsing and display
     serve.go               #   `routeup serve` — local + optional expose
     expose.go              #   `routeup expose` — public tunnel only
     server.go              #   `routeup server` — run the public server
     servercfg.go           #   Server config file paths
     token.go               #   `routeup token create|list|revoke`
-    agent.go               #   `routeup agent run|stop|restart`
+    agent.go               #   `routeup agent status|start|stop|restart|run`
     setup.go               #   `routeup setup` — local CA + OS trust + port bind
     forward.go              #   `routeup forward` — internal macOS 443 forwarder (hidden)
     doctor.go              #   `routeup doctor` — diagnostics
     routes.go              #   `routeup routes` — list active local routes (+ public)
-    logs.go                #   `routeup logs` — access logs
+    logs.go                #   `routeup logs` — Phase 9 placeholder
     update.go              #   `routeup update` — self update
     uninstall.go           #   `routeup uninstall` — reverse setup
 
@@ -112,12 +121,13 @@ A route name is a dotted, DNS-label-style identifier validated by `route.Parse`
 trailing hyphens, max 253 total. Input is lowercased. Rejects suffixes
 `.localhost` and `.routeup.dev` (reserved).
 
-`Name.String()` returns the dotted form. `LocalHost()` appends `.localhost`;
-`PublicHost()` appends `.routeup.dev`.
+`Name.String()` returns the dotted form. `LocalHost()` appends `.localhost`.
+Public hosts are granted by the selected server; the CLI normalizes a dotted
+local route to a hyphenated public label before requesting one.
 
 Constants (`constants.go`):
 - `LocalSuffix = "localhost"` — RFC 6761 reserved, no DNS needed
-- `PublicSuffix = "routeup.dev"` — the public server domain
+- `PublicSuffix = "routeup.dev"` — hosted suffix rejected in route-name input
 
 `RandomName()` (`random.go:7`) generates a docker-style two-word name via
 `golang-petname`, used by `--random` on `serve`/`expose`.
@@ -126,9 +136,10 @@ Constants (`constants.go`):
 
 ## Config discovery (`internal/config/`)
 
-`config.Discover(cwd)` scans the working directory for `routeup.json` or a
-`package.json` with a `"routeup"` block (`discovery.go`). Returns the first
-match or an empty `Config`.
+`config.Discover(cwd)` checks that directory only for `routeup.json` or a
+`package.json` with a `"routeup"` block (`discovery.go`). `routeup.json` wins
+when both exist; no parent-directory walk-up or top-level package-name inference
+occurs.
 
 `config.Resolve(inputs)` resolves a route name and target set by precedence:
 config targets/port, overridden by `ROUTEUP_PORT`, `--port`, and repeatable
@@ -148,6 +159,11 @@ Example M7 path-proxy config:
   "expose": { "paths": ["/api/*"] }
 }
 ```
+
+Runner mode uses `script` in a package.json `routeup` block or `command` in
+routeup.json. The two fields are source-specific. A package script is resolved
+to its command string, then run through `sh -c` with `node_modules/.bin`
+prepended to `PATH`.
 
 ---
 
@@ -184,6 +200,20 @@ routeup
 commands, just kept out of `--help`. `server` and `token` are operator commands
 that open the server's database directly (the server need not be running).
 
+Bare `routeup` (`run.go`) is the Phase 8 local runner. It loads the configured
+command, chooses or resolves the root target port, registers the route, injects
+`PORT`, `HOST`, `ROUTEUP_LOCAL_URL`, and local `ROUTEUP_URL`, and starts the
+child in an owned process group. It waits for the root target before printing
+the route, mirrors the child exit status after readiness, and unregisters on
+exit. A successful exit before the target listens is a startup failure.
+Config-driven public runner exposure and supported framework command adapters
+are planned for Phase 8.5.
+
+With a TTY, the child process group owns the foreground terminal, so Ctrl-C is
+delivered directly to that group. Direct cancellation of routeup forwards the
+signal and escalates to SIGKILL after five seconds; an interactive child that
+ignores SIGINT cannot trigger that parent-side timer.
+
 The `serve` command (`serve.go`): resolves the route name and port, ensures the
 local CA exists, ensures the agent is running, registers the route claim with
 the agent, optionally calls `serveExpose` (same path as `expose`), then blocks
@@ -210,8 +240,8 @@ type Claim struct {
     OwnerPID     int       // CLI's PID (for reap)
     OwnerCWD     string    // (for conflict messages)
     RegisteredAt time.Time
-    PublicHost   string    // response-only, when exposed
-    PublicPaths  []string  // response-only expose paths
+    PublicHost   string    // response-only, same-owner exposure
+    PublicPaths  []string  // response-only, same-owner expose paths
 }
 
 type Status struct {
@@ -342,7 +372,8 @@ CLI.
 ### MaintainClaim (`reconcile.go`)
 
 A 2s ticker loop that re-registers the route claim if the agent's BootID
-changes or the agent becomes unreachable. Runs for the lifetime of `serve`.
+changes or the agent becomes unreachable. Runs for the lifetime of `serve` or
+the bare runner.
 
 ### Expose (`expose.go`)
 
@@ -356,7 +387,7 @@ bounds it.
 
 ## Proxy (`internal/proxy/`)
 
-`TargetLookup` interface (`local.go:35`): breaks the import cycle between
+`TargetLookup` interface (`local.go`): breaks the import cycle between
 `agent` (which imports proxy) and `proxy` (which needs the registry).
 
 `New(lookup, logger)`: extracts the route name from `Host` by stripping
@@ -547,7 +578,7 @@ HTTP roles are inverted from the yamux roles (agent = HTTP server, public server
 (`runReap`, `runCertPrewarm`) live in `background.go`; `server.go` keeps `Run`
 and wiring.
 
-**Server.Run** (`server.go:77`):
+**Server.Run** (`server.go`):
 1. Open store, run migrations, purge ephemeral holds.
 2. Wire components: authorizer, routeBroker, TunnelRegistry.
 3. Reap loop (10s) for expired grace holds.
@@ -597,7 +628,8 @@ grant or an error — the tunnel keeps serving after the IPC reply returns.
 `Unexpose(host)` cancels the tunnel context; `ReapDeadOwners` (10s, signal-0
 probe) tears down tunnels whose owning CLI died; `publicExposures()` maps owner
 PID to host and exposed paths so `routeup routes` can show `PUBLIC` and `PATHS`
-columns.
+columns for a local claim owned by that same PID. A standalone `routeup expose`
+process does not annotate a route held by another process.
 
 The tunnel handler uses `proxy.NewTargets`: it optionally rejects paths outside
 `expose.paths`, then chooses the longest target path prefix and reverse-proxies
@@ -628,8 +660,8 @@ the agent serves and the `net.Conn` source the server dials. This deleted the
 hand-rolled `streamResponseWriter`, `serveStream`, `Forward`, `streamBody`, and
 the manual header copy (~150 lines), and — because `ReverseProxy` flushes —
 SSE/streaming and WebSocket upgrades work without bespoke framing. M6 keeps that
-shape and tests it with synthetic WebSocket HMR, SSE HMR, large-body, and
-cancellation scenarios.
+shape and tests it with synthetic WebSocket HMR, generic SSE/event streaming,
+large-body, and cancellation scenarios.
 
 ---
 
@@ -640,20 +672,21 @@ end-to-end:
 
 | Test | File | What it shows |
 |---|---|---|
-| `TestIngress_EndToEnd` | `server/ingress_test.go:20` | The whole public path: real store + authorizer + registry, a live `tunnel.Client`, and a public request routed by `Host` reaching the agent's backend. The single best place to start. |
-| `TestIngress_NoTunnel503` | `server/ingress_test.go:88` | Ingress returns 503 when no tunnel holds the host. |
+| `TestIngress_EndToEnd` | `server/ingress_test.go` | The whole public path: real store + authorizer + registry, a live `tunnel.Client`, and a public request routed by `Host` reaching the agent's backend. The single best place to start. |
+| `TestIngress_NoTunnel503` | `server/ingress_test.go` | Ingress returns 503 when no tunnel holds the host. |
 | `TestIngress_PathTargetsAndExposePaths` | `server/ingress_test.go` | Public ingress routes `/api/*` to the API target and returns 404 for paths excluded by `expose.paths`. |
 | `TestTunnel_WebSocketHMR` | `tunnel/tunnel_test.go` | Synthetic Vite-style WebSocket HMR through yamux: upgrade, subprotocol, server push, and client echo. |
-| `TestTunnel_SSEStreamsIncrementally` | `tunnel/tunnel_test.go` | Synthetic Next-style SSE through yamux; proves events flush before stream close. |
+| `TestTunnel_SSEStreamsIncrementally` | `tunnel/tunnel_test.go` | Synthetic SSE through yamux; proves events flush before stream close. |
 | `TestTunnel_LargeBodyEcho` | `tunnel/tunnel_test.go` | Large request and response body streaming through one tunnel stream, hash-checked end-to-end. |
 | `TestIngress_ClientDisconnectCancelsUpstream` | `server/ingress_test.go` | Public client disconnect propagates cancellation back to the agent-side backend. |
-| `TestLocalProxy_WebSocketHMR` / `TestLocalProxy_SSEStreamsIncrementally` | `proxy/local_test.go` | The local `.localhost` proxy path handles the same HMR-style WS/SSE traffic. |
+| `TestLocalProxy_WebSocketHMR` / `TestLocalProxy_SSEStreamsIncrementally` | `proxy/local_test.go` | The local `.localhost` proxy path handles WebSocket and SSE streaming traffic. |
 | `TestLocalProxy_PathTargets` | `proxy/local_test.go` | The local proxy routes `/` and `/api/*` on one host to different targets. |
 | `TestIntegration_ViteHMR` / `TestIntegration_NextHMR` | `server/integration_test.go` | Real Vite and Next dev servers exposed through `serveIngress`; drives the actual HMR WebSocket and asserts a file edit produces a live HMR push. Build-tagged (`integration`), excluded from the default suite — run with `just test-integration`. |
+| Linux runner integration | `scripts/integration-linux.sh` | Runs the built binary through setup, trusted local HTTPS, dynamic runner environment injection, route ownership, process-group signal cleanup, exit-code propagation, and unregister behavior. |
 | `TestAuthorize_*` | `server/authorize_test.go` | Placement rules: root vs namespace tier, reserved labels, out-of-domain and multi-label rejection. |
 | `TestHold_*` | `server/holds_test.go` | The hold/grace state machine: active conflict, token grace resume, grace expiry, ephemeral namespace holds. |
-| `TestCreateAndVerifyToken` | `server/tokens_test.go:30` | Token mint → SHA-256 store → verify round trip. |
-| `TestServer_ServesHTTPS` | `server/tls_test.go:64` | The server actually terminates TLS. |
+| `TestCreateAndVerifyToken` | `server/tokens_test.go` | Token mint → SHA-256 store → verify round trip. |
+| `TestServer_ServesHTTPS` | `server/tls_test.go` | The server actually terminates TLS. |
 
 Suggested reading order — **follow a live public request**: `server/api.go`
 (`serveIngress`) → `tunnel/server.go` (`Handler` + `newSessionProxy`) →

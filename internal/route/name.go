@@ -64,11 +64,6 @@ func (n Name) LocalHost() string {
 	return n.String() + "." + LocalSuffix
 }
 
-// PublicHost returns the public hostname: <name>.routeup.dev.
-func (n Name) PublicHost() string {
-	return n.String() + "." + PublicSuffix
-}
-
 // validateLabel enforces the per-label rules described on Parse.
 func validateLabel(label string) error {
 	if len(label) == 0 {

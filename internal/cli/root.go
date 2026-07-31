@@ -2,6 +2,9 @@
 package cli
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/spf13/cobra"
 )
 
@@ -30,11 +33,23 @@ func newRootCmd() *cobra.Command {
 			"  routeup setup\n\n" +
 			"  # serve a local app on https://myapp.localhost\n" +
 			"  routeup serve myapp --port 3000\n\n" +
+			"  # run your dev server on a stable route (Portless mode)\n" +
+			"  routeup\n\n" +
 			"  # list what's currently served\n" +
 			"  routeup routes",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       version,
+		// Bare `routeup` is the script runner: it wraps the configured dev
+		// command. Any positional means a mistyped subcommand, so reject it.
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("getting cwd: %w", err)
+			}
+			return runRun(cmd, cwd)
+		},
 	}
 	root.AddCommand(
 		newDoctorCmd(),

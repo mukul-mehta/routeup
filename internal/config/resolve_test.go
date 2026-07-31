@@ -13,62 +13,6 @@ func envFor(vars map[string]string) func(string) string {
 
 // TestResolve exercises the full precedence chain and bare-name resolution.
 // errSubstr == "" means the case must succeed; wantRoute / wantPort are checked.
-//
-// Cases to add (grouped for readability):
-//
-//	port precedence:
-//	  - "flag overrides env and file"
-//	      Inputs{PositionalName:"myapp", PortFlag:8080,
-//	             Env: envFor({"ROUTEUP_PORT":"9090"}),
-//	             File: Config{Port:7070}}
-//	      -> wantRoute "myapp", wantPort 8080
-//	  - "env overrides file"
-//	      Inputs{PositionalName:"myapp",
-//	             Env: envFor({"ROUTEUP_PORT":"9090"}),
-//	             File: Config{Port:7070}}
-//	      -> wantRoute "myapp", wantPort 9090
-//	  - "file used when no flag or env"
-//	      Inputs{PositionalName:"myapp", File: Config{Port:7070}}
-//	      -> wantRoute "myapp", wantPort 7070
-	//	  - "missing targets errors"
-	//	      Inputs{PositionalName:"myapp"}
-	//	      -> errSubstr "no targets"     (or your wording)
-//	  - "invalid ROUTEUP_PORT errors"
-//	      Inputs{PositionalName:"myapp", Env: envFor({"ROUTEUP_PORT":"notanint"})}
-//	      -> errSubstr "ROUTEUP_PORT"
-//	  - "out-of-range port errors"
-//	      Inputs{PositionalName:"myapp", PortFlag:70000}
-//	      -> errSubstr "out of range"
-//
-//	name precedence and bare-name rule:
-//	  - "positional with dot is literal"
-//	      Inputs{PositionalName:"api.myapp", PortFlag:8080, File: Config{Name:"other"}}
-//	      -> wantRoute "api.myapp"
-//	  - "bare positional + file name -> prefixed"
-//	      Inputs{PositionalName:"api", PortFlag:8080, File: Config{Name:"myapp"}}
-//	      -> wantRoute "api.myapp"
-//	  - "bare positional without file name passes through"
-//	      Inputs{PositionalName:"foo", PortFlag:8080}
-//	      -> wantRoute "foo"
-//	  - "no positional uses file name"
-//	      Inputs{PortFlag:8080, File: Config{Name:"myapp"}}
-//	      -> wantRoute "myapp"
-//	  - "positional with dot ignores file name (no scoping)"
-//	      Inputs{PositionalName:"api.other", PortFlag:8080, File: Config{Name:"myapp"}}
-//	      -> wantRoute "api.other"
-//	  - "missing name errors"
-//	      Inputs{PortFlag:8080}
-//	      -> errSubstr "no route name"     (or your wording)
-//
-//	validation propagation:
-//	  - "invalid name surfaces route.Parse error"
-//	      Inputs{PositionalName:"api..myapp", PortFlag:8080}
-//	      -> errSubstr "invalid route name"
-//
-//	combined:
-//	  - "everything from File (no positional, no flag, no env)"
-//	      Inputs{File: Config{Name:"myapp", Port:8080}}
-//	      -> wantRoute "myapp", wantPort 8080
 func TestResolve(t *testing.T) {
 	cases := []struct {
 		name      string

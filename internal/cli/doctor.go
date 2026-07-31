@@ -168,7 +168,7 @@ func checkAgent(cmd *cobra.Command) checkResult {
 
 	status, err := client.Status(ctx)
 	if err != nil {
-		return checkResult{checkWarn, "agent not running (it starts on demand via `routeup serve`)"}
+		return checkResult{checkWarn, "agent not running (it starts on demand via bare `routeup` or `routeup serve`)"}
 	}
 	return checkResult{checkOK, fmt.Sprintf("agent running (version %s, uptime %ds)",
 		status.Version, status.UptimeSeconds)}

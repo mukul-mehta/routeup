@@ -118,10 +118,10 @@ func TestLocalProxy_WebSocketHMR(t *testing.T) {
 
 func TestLocalProxy_SSEStreamsIncrementally(t *testing.T) {
 	gate := make(chan struct{})
-	proxyURL, cleanup := startLocalProxy(t, streamtest.SSEHMR([]string{"one", "two"}, gate))
+	proxyURL, cleanup := startLocalProxy(t, streamtest.SSEStream([]string{"one", "two"}, gate))
 	defer cleanup()
 
-	req, err := http.NewRequest(http.MethodGet, proxyURL+"/_next/webpack-hmr", nil)
+	req, err := http.NewRequest(http.MethodGet, proxyURL+"/events", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

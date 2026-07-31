@@ -81,15 +81,13 @@ func runExpose(cmd *cobra.Command, args []string, cwd string, opts exposeOpts) e
 		return err
 	}
 
-	routeName := resolveExposeRouteName(positional, discovered.Config)
-	if opts.random {
-		routeName = route.RandomName()
-	}
-	if routeName == "" {
-		return errors.New("provide a route name or use --random")
+	resolvedRoute, err := resolveExposeRoute(positional, discovered.Config, opts.random)
+	if err != nil {
+		return err
 	}
 
-	normalizedName := normalizePublicName(routeName)
+	routeName := resolvedRoute.String()
+	normalizedName := normalizePublicName(resolvedRoute)
 	exposePaths, err := route.NormalizePathPatterns(discovered.Config.Expose.Paths)
 	if err != nil {
 		return err
@@ -120,7 +118,7 @@ func startTunnel(cmd *cobra.Command, serverURL, token, localRouteName, publicRou
 		return fmt.Errorf("start agent: %w", err)
 	}
 
-	targets, port, err := exposeTargets(startCtx, client, localRouteName, portFlag, targetFlags, file)
+	targets, port, hasLocalRoute, err := exposeTargets(startCtx, client, localRouteName, portFlag, targetFlags, file)
 	if err != nil {
 		return err
 	}
@@ -140,7 +138,9 @@ func startTunnel(cmd *cobra.Command, serverURL, token, localRouteName, publicRou
 	defer stopExpose()
 
 	out := cmd.OutOrStdout()
-	printRouteLocal(out, localRouteName)
+	if hasLocalRoute {
+		printRouteLocal(out, localRouteName, state.TLSPortOrDefault())
+	}
 	_, _ = fmt.Fprintf(out, "public: https://%s\n", host)
 	printTargets(out, targets)
 	_, _ = fmt.Fprintf(out, "expose: %s\n", formatExposePaths(exposePaths))
@@ -151,13 +151,13 @@ func startTunnel(cmd *cobra.Command, serverURL, token, localRouteName, publicRou
 	return nil
 }
 
-func exposeTargets(ctx context.Context, client *agentctl.Client, routeName string, portFlag int, targetFlags []route.Target, file config.Config) ([]route.Target, int, error) {
+func exposeTargets(ctx context.Context, client *agentctl.Client, routeName string, portFlag int, targetFlags []route.Target, file config.Config) ([]route.Target, int, bool, error) {
 	if !hasTargetOverride(portFlag, targetFlags) {
 		claims, err := client.List(ctx)
 		if err == nil {
 			for _, claim := range claims {
 				if claim.Name == routeName && len(claim.Targets) > 0 {
-					return claim.Targets, route.PrimaryPort(claim.Targets), nil
+					return claim.Targets, route.PrimaryPort(claim.Targets), true, nil
 				}
 			}
 		}
@@ -170,9 +170,9 @@ func exposeTargets(ctx context.Context, client *agentctl.Client, routeName strin
 		File:        file,
 	})
 	if err != nil {
-		return nil, 0, fmt.Errorf("resolve expose targets: %w", err)
+		return nil, 0, false, fmt.Errorf("resolve expose targets: %w", err)
 	}
-	return targets, port, nil
+	return targets, port, false, nil
 }
 
 func hasTargetOverride(portFlag int, targetFlags []route.Target) bool {
@@ -198,7 +198,7 @@ func holdExposure(ctx context.Context, client *agentctl.Client, req ipc.ExposeRe
 	return resp.Host, stop, nil
 }
 
-func printRouteLocal(out io.Writer, routeName string) {
+func printRouteLocal(out io.Writer, routeName string, tlsPort int) {
 	if routeName == "" {
 		return
 	}
@@ -207,17 +207,21 @@ func printRouteLocal(out io.Writer, routeName string) {
 		return
 	}
 	_, _ = fmt.Fprintf(out, "route: %s\n", n)
-	_, _ = fmt.Fprintf(out, "local: https://%s\n", n.LocalHost())
+	_, _ = fmt.Fprintf(out, "local: %s\n", localURL(n.LocalHost(), tlsPort))
 }
 
-func resolveExposeRouteName(positional string, file config.Config) string {
-	if positional != "" {
-		return positional
+func resolveExposeRoute(positional string, file config.Config, random bool) (route.Name, error) {
+	if random {
+		return route.Parse(route.RandomName())
 	}
-	if env := strings.TrimSpace(os.Getenv("ROUTEUP_NAME")); env != "" {
-		return env
+	if positional == "" && strings.TrimSpace(os.Getenv("ROUTEUP_NAME")) == "" && file.Name == "" {
+		return route.Name{}, errors.New("provide a route name or use --random")
 	}
-	return file.Name
+	return config.ResolveName(config.Inputs{
+		PositionalName: positional,
+		Env:            os.Getenv,
+		File:           file,
+	})
 }
 
 func resolveServerToken(flagServer, flagToken string) (server, token string) {
@@ -227,12 +231,8 @@ func resolveServerToken(flagServer, flagToken string) (server, token string) {
 	return server, token
 }
 
-func normalizePublicName(label string) (normalizedName string) {
-	if label == "" || !strings.Contains(label, ".") {
-		return label
-	}
-	normalized := strings.ReplaceAll(label, ".", "-")
-	return normalized
+func normalizePublicName(name route.Name) string {
+	return strings.ReplaceAll(name.String(), ".", "-")
 }
 
 func firstNonEmpty(vals ...string) string {

@@ -119,3 +119,19 @@ func writeTmpFile(t *testing.T, name, content string) string {
 	}
 	return path
 }
+
+func TestLoadRouteupJSON_CommandAndScript(t *testing.T) {
+	path := writeTmpFile(t, "routeup.json", `{"name":"myapp","command":"go run ."}`)
+	got, err := LoadRouteupJSON(path)
+	if err != nil {
+		t.Fatalf("command in routeup.json: unexpected error: %v", err)
+	}
+	if got.Command != "go run ." {
+		t.Errorf("Command = %q, want %q", got.Command, "go run .")
+	}
+
+	sp := writeTmpFile(t, "routeup.json", `{"name":"myapp","script":"dev"}`)
+	if _, err := LoadRouteupJSON(sp); err == nil || !strings.Contains(err.Error(), "only valid in a package.json") {
+		t.Fatalf("expected script rejection in routeup.json, got %v", err)
+	}
+}

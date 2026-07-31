@@ -61,7 +61,7 @@ go.mod (module github.com/mukul-mehta/routeup, go 1.24)
 .editorconfig
 .golangci.yml (errcheck, govet, staticcheck, ineffassign, unused, gofmt, goimports)
 justfile (test, test-race, lint, fmt, build, run, ci)
-.github/workflows/ci.yml (just test + just lint on push and PR)
+initial .github/workflows/ci.yml (test + lint on push and PR)
 cmd/routeup/main.go
 internal/cli/root.go
 internal/cli/root_test.go
@@ -101,9 +101,9 @@ Build:
 route name parser
 route name validator
 hostname mapping
-package.json name discovery
-routeup config discovery
-flag/env/config/inference precedence
+package.json routeup-block discovery
+routeup.json discovery
+flag/env/config precedence
 ```
 
 Core route rules:
@@ -188,7 +188,9 @@ process runner
 
 Goal: remove visible local ports for `.localhost` routes.
 
-Build macOS and Linux together. Trust stores and port-443 strategies differ between them; both must work before this phase is done. See `docs/OPEN-QUESTIONS.md` OQ-002 and OQ-003 for the per-platform port-443 questions.
+Build macOS and Linux together. Trust stores and port-443 strategies differ
+between them; both must work before this phase is done. The resolved platform
+decisions are recorded in `docs/ARCHITECTURE.md`.
 
 Build:
 
@@ -230,8 +232,9 @@ Build:
 stable LaunchDaemon binary path (Homebrew opt/bin symlink, survives upgrades)
 setup marker records the configured binary path
 routeup uninstall (stop agent, remove forwarder/setcap, untrust CA, delete state)
+routeup update (delegate to Homebrew or replace a direct-install binary)
 doctor port-binding check (missing forwarder on macOS, lost setcap on Linux)
-Homebrew formula (binary + caveat to run `routeup setup`)
+Homebrew cask (binary + caveat to run `routeup setup`)
 ```
 
 Acceptance:
@@ -248,7 +251,6 @@ The forwarder on macOS is unaffected by upgrades because the plist points at the
 Do not build yet:
 
 ```txt
-auto-update (routeup update)
 Windows packaging
 signed/notarized macOS binaries
 ```
@@ -265,15 +267,15 @@ request to a local port over a tunnel.
 > out-of-scope route is rejected as the reserved-subtree / out-of-domain 403.
 > The agent owns the tunnel client and `routeup expose` holds the claim until
 > Ctrl-C. Public hosts are one label under a namespace base (`<label>.<base>`):
-> multi-label names are rejected, reserved names protect only the root tier, and
-> granting a namespace reserves its label at root. Claims are asserted over the
-> tunnel control channel; there is no separate HTTP claim API. The server serves
-> HTTPS: `--tls-mode acme` (default) auto-issues wildcards via Let's Encrypt +
-> Cloudflare DNS-01 (`certmagic`): `*.<domain>` and `*.try.<domain>` at startup,
-> and `*.<namespace>.<domain>` on first claim. `--tls-mode cert` serves an
-> operator-provided cert. Real public DNS
-> and a deployed host are the remaining deployment step. Acceptance needs a
-> `--server`/`ROUTEUP_SERVER` pointing at the running server.
+> the CLI normalizes dotted local routes to a hyphenated public label, while the
+> server rejects raw multi-label claims. Reserved names protect only the root
+> tier, and granting a namespace reserves its label at root. Claims are asserted
+> over the tunnel control channel; there is no separate HTTP claim API. The
+> server serves HTTPS: `--tls-mode acme` (default) auto-issues wildcards via
+> Let's Encrypt + Cloudflare DNS-01 (`certmagic`): `*.<domain>` and
+> `*.try.<domain>` at startup, and `*.<namespace>.<domain>` on first claim.
+> `--tls-mode cert` serves an operator-provided cert. The hosted deployment uses
+> `routeup.dev`; acceptance can also run against a loopback/self-hosted server.
 
 Build:
 
@@ -299,7 +301,7 @@ Acceptance:
 routeup server --domain routeup.dev --public-namespace try
 routeup token create mukul --allow "*.routeup.dev"
 ROUTEUP_TOKEN=... routeup expose api.myapp --port 8080
-curl https://api.myapp.routeup.dev
+curl https://api-myapp.routeup.dev
 ```
 
 The server should:
@@ -345,8 +347,8 @@ Goal: real dev servers work through the tunnel.
 > drive its real HMR channel: Vite over a `vite-hmr` WebSocket, Next over its
 > `/_next/webpack-hmr` WebSocket (Next switched HMR from SSE to WebSocket in v12).
 > Both assert a file edit produces a live HMR push through the tunnel. They are
-> excluded from the default suite/CI (need node + npm + network) and Skip when
-> node is absent.
+> excluded from the default Go suite, run in the dedicated integration CI
+> workflow, and Skip when node is absent.
 
 
 Build:
@@ -423,9 +425,20 @@ advanced ACLs
 team namespaces
 ```
 
-## Phase 8: Process Runner
+## Phase 8: Local Process Runner
 
-Goal: get Portless-style script-runner usage working — `routeup` wraps your dev server and gives it a stable local route, with the env vars pointing at the now-real local and public URLs from earlier phases.
+Goal: get the local Portless-style script-runner flow working. Bare `routeup`
+wraps a configured development command, gives it a stable local HTTPS route,
+and owns the child and route lifecycle.
+
+> Implementation note: complete, manually verified, and covered by the Linux
+> integration workflow. Bare `routeup` resolves package.json `routeup.script`
+> or routeup.json `command`, assigns the root target port, injects `PORT`,
+> `HOST`, `ROUTEUP_LOCAL_URL`, and a local `ROUTEUP_URL`, and owns the child
+> process group and route cleanup. Interactive suspension with Ctrl-Z is not
+> supported. In an interactive terminal, the child group is foreground and
+> receives Ctrl-C directly; it must respond to SIGINT. A SIGTERM sent directly
+> to routeup uses the managed shutdown and escalation path.
 
 Build:
 
@@ -445,7 +458,7 @@ Example package config:
 {
   "scripts": {
     "dev": "routeup",
-    "dev:app": "vite"
+    "dev:app": "node server.mjs"
   },
   "routeup": {
     "name": "myapp",
@@ -465,13 +478,89 @@ The app should receive:
 ```txt
 PORT=<assigned-port>
 HOST=127.0.0.1
-ROUTEUP_URL=https://myapp.routeup.dev
 ROUTEUP_LOCAL_URL=https://myapp.localhost
+ROUTEUP_URL=https://myapp.localhost
 ```
+
+The route should become reachable after the child binds its assigned port. When
+the child exits after Ctrl-C, or routeup receives SIGTERM, the whole child
+process group should stop and the route should be removed. A direct cancellation
+of routeup escalates to SIGKILL after five seconds. After readiness, routeup
+returns the child's exit status; a child that exits successfully before
+listening is treated as a startup failure.
 
 Do not build yet:
 
 ```txt
+config-driven public runner exposure (Phase 8.5)
+framework command adaptation (Phase 8.5)
+child stdio capture into agent logs
+request inspect
+replay
+```
+
+## Phase 8.5: Runner Exposure And Framework Adapters
+
+Goal: make runner mode optionally own public exposure and support unchanged
+commands for explicitly tested frameworks that do not honor `PORT` or `HOST`.
+
+> Implementation note: planned. Phase 8 users can already run `routeup expose`
+> in a second terminal to expose the runner's dynamic target. This milestone
+> integrates that lifecycle into bare `routeup` and starts framework adaptation
+> with the exact bare `vite` command shape rather than a generic shell rewriter.
+
+Build:
+
+```txt
+explicit expose.enabled config opt-in for runner mode
+existing server/token precedence reused by the runner
+public route granted before child launch
+ROUTEUP_LOCAL_URL remains local
+ROUTEUP_URL contains the granted public URL when exposure is enabled
+one runner process owns local registration, public exposure, and child cleanup
+narrow adapter for an unchanged bare vite command
+documented behavior for explicit or conflicting framework flags
+runner-driven integration coverage for local and exposed lifecycles
+```
+
+Example package config:
+
+```json
+{
+  "scripts": {
+    "dev": "routeup",
+    "dev:app": "vite"
+  },
+  "routeup": {
+    "name": "myapp",
+    "script": "dev:app",
+    "expose": {
+      "enabled": true
+    }
+  }
+}
+```
+
+Acceptance:
+
+```bash
+pnpm dev
+```
+
+An unchanged `vite` command should bind the routeup-assigned loopback address
+and port. With exposure disabled, both route URL variables remain local and no
+server is contacted. With `expose.enabled`, the runner should obtain a public
+route before child launch, inject that route into `ROUTEUP_URL`, serve both URLs,
+and release the tunnel, route, and complete child process group together on
+exit. Automated tests may use a loopback public server and must not require
+public DNS, production certificates, sudo, or a live VPS.
+
+Do not build yet:
+
+```txt
+generic shell-command rewriting or an adapter plugin system
+package-manager lifecycle hook emulation
+untested adapters for additional frameworks
 child stdio capture into agent logs
 request inspect
 replay
@@ -548,6 +637,9 @@ plain HTTP forwarding before WebSocket/SSE
 logs before inspect/replay
 ```
 
-Process Runner sits late on purpose: once TLS, public exposure, streaming, and path proxy are in, `ROUTEUP_URL` and `ROUTEUP_LOCAL_URL` are real working URLs the child can use without caveats, and the runner is just convenience over a complete routing stack.
+Process Runner sits late on purpose: local TLS, tunnels, streaming, and path
+routing already work before process orchestration is added. Phase 8 owns the
+local process lifecycle; Phase 8.5 composes it with public exposure and narrowly
+supported framework adapters.
 
 This keeps the project understandable and the implementation tractable, one usable slice at a time.

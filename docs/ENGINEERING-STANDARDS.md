@@ -73,9 +73,9 @@ Config should stay minimal until real usage proves otherwise.
 
 Required practices:
 
-- Support inference before requiring config.
-- Prefer `routeup.json` or a `package.json` `routeup` block only when inference is insufficient.
-- Flags override env vars. Env vars override config files. Config files override inference.
+- Discover `routeup.json` or an explicit package.json `routeup` block in the
+  current working directory only.
+- Flags override env vars. Env vars override config files.
 - Validate config at load time and return actionable errors.
 - Keep route naming as one concept. Avoid forcing users to separately understand project, namespace, and service.
 
@@ -84,6 +84,7 @@ Avoid:
 - Pulling in a large config framework before the config model settles.
 - Supporting many equivalent config shapes for the same behavior.
 - Adding aliases for every command or field before users ask for them.
+- Inferring route names from the directory name or top-level package name.
 
 ## Networking Standards
 

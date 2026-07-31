@@ -60,7 +60,7 @@ routeup serve
 routeup serve --port 8080
 routeup serve --port 8080 --expose
 routeup expose <name>
-routeup status
+routeup agent status
 routeup routes
 routeup logs
 routeup doctor
@@ -92,8 +92,8 @@ route by Host and path
 terminate local TLS once setup exists
 reverse proxy to local targets
 hold active route registry
-record local and public access logs
-own the tunnel client when any claim has expose=true
+record local and public access logs (planned, Phase 9)
+own tunnel clients for active exposure requests
 serve agent API for CLI commands
 serve useful error pages for missing routes
 ```
@@ -124,12 +124,11 @@ POST   /v1/expose               start public exposure for a claimed route
 POST   /v1/unexpose             stop public exposure
 ```
 
-The status response carries a `boot_id` generated once per agent process. The
-foreground `serve` command registers its claim, remembers that boot id, and
-re-registers if the id changes (the agent restarted) or the agent becomes
-unreachable. This client-driven reconciliation is why the agent can keep its
-registry purely in memory: the live `serve` processes are the source of truth
-and re-assert their claims after any agent restart.
+The status response carries a `boot_id` generated once per agent process.
+Foreground `serve` and runner commands register their claims, remember that
+boot id, and re-register if the agent restarts or becomes unreachable. This
+client-driven reconciliation keeps the registry in memory: live foreground
+commands are the source of truth.
 
 ### Public Server
 
@@ -148,13 +147,18 @@ issue and renew wildcard TLS via ACME DNS-01
 record edge metadata where useful
 ```
 
-The hosted server uses `routeup.dev` as its public suffix and enables the public namespace (`try.routeup.dev`). Self-hosted operators set their own suffix and DNS provider, and opt into a public namespace via server config; the code does not hardcode either.
+The hosted server uses `routeup.dev` as its public suffix and enables the public
+namespace (`try.routeup.dev`). Self-hosted operators set their own suffix and
+DNS provider, and opt into a public namespace via server config; the server code
+does not hardcode either.
 
 The public server should not be a SaaS control plane in v1. It is a self-hostable ingress server.
 
 ### Tunnel Client
 
-The tunnel client is a module of the local agent, not a separate process or user-visible component. It activates whenever an active claim has `expose=true`.
+The tunnel client is a module of the local agent, not a separate process or
+user-visible component. It activates when the CLI sends a successful
+`POST /v1/expose` request.
 
 Responsibilities:
 
@@ -329,8 +333,9 @@ interface keeps the tunnel decoupled from tokens, storage, and TLS — the
 server's `routeBroker` (`internal/server/broker.go`) implements it. Because both
 ends are stdlib HTTP over a yamux stream, streaming/flushing (SSE) and WebSocket
 upgrades work without bespoke framing. M6 tests this explicitly with synthetic
-Vite-style WebSocket HMR, Next-style SSE HMR, large-body, and cancellation
-scenarios across the tunnel, public ingress, and local `.localhost` paths.
+Vite-style WebSocket HMR, generic SSE/event streaming, large-body, and
+cancellation scenarios across the tunnel, public ingress, and local
+`.localhost` paths.
 
 ## Design Clarifications
 
@@ -446,9 +451,9 @@ namespace base, so one wildcard certificate (`*.<base>`) covers it:
 ```
 
 Reserved names protect the root tier only; inside an owned namespace any label
-is allowed (`api.mukul.routeup.dev` is mukul's). Multi-label route names work
-locally but are rejected for public exposure. See PLAN.md → Public hostname
-model.
+is allowed (`api.mukul.routeup.dev` is mukul's). The CLI normalizes a dotted
+local route to one public label (`api.myapp` becomes `api-myapp`); the server
+rejects raw multi-label claims. See PLAN.md → Public hostname model.
 
 Do not model `project`, `namespace`, and `service` as separate user concepts until real usage proves they are needed.
 
@@ -465,7 +470,7 @@ Current path-proxy route shape:
 ```txt
 name: myapp
 targets:
-  /: http://localhost:<dynamic-vite-port>
+  /: http://localhost:<dynamic-app-port>
   /api: http://localhost:9080
 public:
   exposed: true
@@ -482,7 +487,9 @@ Config sources, highest precedence first:
 3. Config files
 ```
 
-Inference is config-driven only: the `name` field in `routeup.json` or the `routeup` block of `package.json` is the project name. There is no CWD-basename or top-level `package.json` `name` fallback.
+Route naming is config-driven: the `name` field in `routeup.json` or the
+`routeup` block of `package.json` is the project name. There is no CWD-basename
+or top-level `package.json` `name` fallback.
 
 Config files are looked up in the current working directory only:
 
@@ -497,6 +504,22 @@ Targets are configured with either the single-port shorthand or explicit path
 targets. `port: 5173` means `targets: [{path: "/", port: 5173}]`; explicit
 targets support frontend/API routing behind one route. `expose.paths` limits
 public exposure only and defaults to all paths.
+
+Phase 8.5 adds `expose.enabled` as an explicit runner-mode opt-in. An `expose`
+object that only contains `paths` continues to constrain standalone exposure;
+it does not make bare `routeup` contact a public server implicitly.
+
+Runner mode has one command field per config source:
+
+```txt
+package.json routeup block:  script   resolves a key in package.json scripts
+routeup.json:                command  runs a shell command directly
+```
+
+The package loader resolves `script` to its command string before returning the
+config. The runner executes that string through `sh -c` with the project
+`node_modules/.bin` prepended to `PATH`; it does not invoke package-manager
+lifecycle hooks for the selected child script.
 
 Bare-name resolution:
 
@@ -518,27 +541,44 @@ For `routeup` as a runner:
 
 ```txt
 1. CLI loads config and infers route.
-2. CLI starts local agent if needed.
-3. CLI chooses a free app port.
-4. CLI starts the child command with env vars.
-5. CLI registers the route with the local agent.
-6. CLI waits for the child process.
+2. CLI chooses a free app port and starts the local agent if needed.
+3. CLI reserves the local route.
+4. CLI starts the child process group with `PORT`, `HOST`, and local route URLs.
+5. CLI waits up to 15 seconds for the root target to accept connections.
+6. CLI prints the ready route and waits for the child process group.
 7. CLI unregisters the route on exit or signal.
-8. CLI exits with the child process exit code.
+8. After readiness, CLI exits with the child process exit code.
 ```
 
-For `routeup serve --port 8080 --expose` (or standalone `routeup expose <name>` on an already-served route):
+`ROUTEUP_LOCAL_URL` and `ROUTEUP_URL` both contain the local HTTPS URL in the
+Phase 8 local runner. Phase 8.5 adds config-driven public runner exposure and
+sets `ROUTEUP_URL` to the granted public URL when that exposure is enabled.
+In an interactive terminal, routeup gives the child group foreground ownership,
+so terminal Ctrl-C reaches the child directly and the child must respond to
+SIGINT. When routeup itself is cancelled, it forwards that signal to the child
+group and escalates to SIGKILL after five seconds. A child that exits
+successfully before listening is reported as a startup failure rather than a
+successful run.
+
+For `routeup serve --port 8080 --expose`:
 
 ```txt
 1. CLI resolves the route name and target port.
 2. CLI starts the local agent if it is not running.
-3. CLI calls the agent: register route, target, expose=true.
-4. Agent registers the local route and dials the public server.
-5. Agent claims the public route over the WebSocket + yamux session.
-6. CLI streams status and logs and blocks until Ctrl-C.
+3. CLI registers the local route and targets.
+4. CLI separately requests exposure through `POST /v1/expose`.
+5. Agent dials the public server and claims the public route over the WebSocket + yamux session.
+6. CLI prints route status and blocks until Ctrl-C.
 7. CLI tells the agent to release the claim.
 8. Agent tears down the tunnel for this route, leaving other tunnels unaffected.
 ```
+
+Standalone `routeup expose <name>` starts the agent but does not register a
+local route. It reuses an active route's targets when one exists, otherwise it
+uses target flags, environment, or config. It then requests exposure, blocks
+until Ctrl-C, and releases only its tunnel. `routeup routes` annotates `PUBLIC`
+and `PATHS` only when the local claim and exposure share an owner PID, as they do
+for `serve --expose`.
 
 ## Code Layout
 
@@ -606,7 +646,6 @@ Local conflicts (two claims for the same route on one machine):
 
 ```txt
 default:   fail closed; the CLI prints the owning pid and cwd
-override:  --force transfers ownership and unregisters the previous owner
 orphans:   the agent reaps stale claims when the owning pid is gone
 ```
 

@@ -33,7 +33,10 @@ public (root token):     https://<label>.routeup.dev
 public (namespace token):https://<label>.mukul.routeup.dev
 ```
 
-A multi-label route name is fine locally but is rejected for public exposure.
+A multi-label route name is fine locally. For public exposure, the CLI
+normalizes dots to hyphens (`api.myapp` becomes `api-myapp`) because the server
+accepts exactly one label under a namespace base. Raw multi-label claims sent
+directly to the server are rejected.
 
 `.localhost` is the local TLD because RFC 6761 reserves it and modern browsers and resolvers short-circuit it to `127.0.0.1` without any DNS plumbing. `routeup.dev` is the public domain. Note that `.dev` is HSTS-preloaded by Chromium, so public hostnames are HTTPS-only by design — there is no HTTP fallback for the public side, which is the desired behavior.
 
@@ -78,8 +81,8 @@ routeup serve --port 8080
 routeup serve api --port 8080
 routeup serve api.myapp --port 9080
 routeup serve api.myapp --port 9080 --expose   # also expose publicly
-routeup expose api.myapp               # retrofit public exposure on an existing local route
-routeup status
+routeup expose api.myapp               # expose active or configured targets publicly
+routeup agent status
 routeup routes
 routeup logs
 routeup doctor
@@ -88,7 +91,7 @@ routeup update
 routeup uninstall
 ```
 
-The split: `serve` creates a route (local by default; `--expose` adds public exposure in one go). The standalone `expose` command retrofits public exposure to a route that's already being served locally. The bare `routeup` is the script-runner Portless mode and infers its intent (local or local+expose) from config.
+The split: `serve` creates a route (local by default; `--expose` adds public exposure in one go). Standalone `expose` reuses an active route's targets when available, otherwise it exposes targets from flags or config without creating a local registration. Bare `routeup` is the Phase 8 local script runner; Phase 8.5 adds config-driven runner exposure and adapters for explicitly supported frameworks.
 
 Operator-only commands:
 
@@ -99,7 +102,7 @@ routeup token list
 routeup token revoke <token-id>
 ```
 
-These are hidden from the default `routeup --help` output. How they surface to operators (cobra hidden commands, a `routeup help operator` subcommand, or a build tag) is a Phase 1 implementation choice.
+These are hidden Cobra commands and do not appear in the default `routeup --help` output.
 
 Commands to avoid in normal usage:
 
@@ -126,20 +129,20 @@ Local-only setup should prepare:
 ```txt
 trusted local CA
 local HTTPS certificates
-local agent autostart or auto-start support
+local agent auto-start on demand
 port 443 handling
 ```
 
 Public exposure with a token uses the same setup command:
 
 ```bash
-routeup setup --server https://routeup.dev --token sk_routeup_xxx
+routeup setup --server https://edge.routeup.dev --token sk_routeup_xxx
 ```
 
 Environment-driven usage should also work:
 
 ```bash
-ROUTEUP_SERVER=https://routeup.dev ROUTEUP_TOKEN=sk_routeup_xxx routeup expose --port 8080
+ROUTEUP_SERVER=https://edge.routeup.dev ROUTEUP_TOKEN=sk_routeup_xxx routeup expose --port 8080
 ```
 
 The token is optional. Two flows do not need one:
@@ -149,7 +152,7 @@ local-only:        routeup setup + routeup serve
                    -> https://<name>.localhost
                    no server contact, no token
 
-public namespace:  routeup expose with --server but no --token
+public namespace:  routeup expose --random with --server but no --token
                    -> https://<random>.try.routeup.dev (when the server enables it)
                    ephemeral, released on disconnect
 ```
@@ -190,6 +193,35 @@ Or inside `package.json`:
 }
 ```
 
+Bare runner mode resolves a package script explicitly:
+
+```json
+{
+  "scripts": {
+    "dev": "routeup",
+    "dev:app": "node server.mjs"
+  },
+  "routeup": {
+    "name": "myapp",
+    "script": "dev:app"
+  }
+}
+```
+
+Non-JavaScript projects put the shell command in `routeup.json`:
+
+```json
+{
+  "name": "myapp",
+  "command": "go run ."
+}
+```
+
+`script` is package.json-only and `command` is routeup.json-only. The package
+loader resolves the selected script to its command string; the runner executes
+that string through `sh -c` and does not run package-manager lifecycle hooks for
+the selected child script.
+
 For frontend + API behind one route, use path targets:
 
 ```json
@@ -204,7 +236,7 @@ For frontend + API behind one route, use path targets:
 
 The older `port` field remains shorthand for `{ "path": "/", "port": <port> }`.
 
-There is no separate "project" concept; the `name` field on the config is the project name used for bare-name resolution. Shared settings like `server` and token references will live in a separate global config (Phase 5), not in the per-service file.
+There is no separate "project" concept; the `name` field on the config is the project name used for bare-name resolution. Shared server and token settings live in `~/.routeup/client.json`, written by `routeup setup`, not in the per-service file.
 
 ## Exposure Model
 
@@ -221,24 +253,27 @@ What you get back depends on token state and the server's public-namespace setti
 ```txt
 token with --allow "*.alice.routeup.dev":
   routeup expose --port 8080            -> https://<project>.alice.routeup.dev  (named, persistent)
-  routeup expose foo --port 8080        -> https://foo.alice.routeup.dev        (named, persistent)
+  routeup expose api.myapp --port 8080  -> https://api-myapp.alice.routeup.dev  (named, persistent)
   routeup expose --random --port 8080   -> https://<random>.alice.routeup.dev   (random, persistent within session)
 
 no token, server has public_namespace=try:
-  routeup expose --port 8080            -> https://<random>.try.routeup.dev    (random, session-only)
-  routeup expose foo --port 8080        -> https://foo.try.routeup.dev         (first-come-first-served, session-only)
+  routeup expose --random --port 8080   -> https://<random>.try.routeup.dev    (random, session-only)
+  routeup expose api.myapp --port 8080  -> https://api-myapp.try.routeup.dev   (first-come-first-served, session-only)
 
 no token, server has no public namespace:
-  routeup expose --port 8080            -> error: no token and server allows no anonymous claims
+  routeup expose api.myapp --port 8080  -> error: no token and server allows no anonymous claims
 ```
 
 Expected output (token holder):
 
 ```txt
-Local:  https://myapp.localhost
-Public: https://myapp.alice.routeup.dev
-Expose: all paths
+public: https://myapp.alice.routeup.dev
+expose: all paths
 ```
+
+When standalone `expose` reuses an active local claim, it also prints that
+claim's local URL. An explicit/config-only target is public-only and does not
+create or advertise a local route.
 
 `--random` is the explicit override for "I have a config name but want a throwaway URL for this run." Without `--random`, the route name comes from config or the CLI argument and follows the resolution rule in Product Shape.
 
@@ -256,6 +291,26 @@ Path-limited exposure comes from config:
 ```
 
 That should be an opt-in constraint, not the default behavior.
+
+Phase 8.5 adds an explicit runner opt-in without changing what `expose.paths`
+means for standalone exposure:
+
+```json
+{
+  "routeup": {
+    "name": "myapp",
+    "script": "dev:app",
+    "expose": {
+      "enabled": true,
+      "paths": ["/api/webhooks/*"]
+    }
+  }
+}
+```
+
+When enabled, runner mode obtains the public route before starting the child so
+it can inject the granted URL into `ROUTEUP_URL`. The config shape and behavior
+above are planned for Phase 8.5 and are not implemented in Phase 8.
 
 ## Architecture Decision
 
@@ -404,11 +459,14 @@ The CLI should talk to the agent over a local socket. If the agent is not runnin
 Lifecycle ownership:
 
 ```txt
-The agent owns connections     tunnels, child processes, log retention
-The foreground CLI owns claims  active route registrations and exposure
+The agent owns connections      tunnels and active proxy state
+The foreground CLI owns claims  route registrations, exposure, child processes
 ```
 
-When a foreground command exits, the agent releases that command's claims and tears down the matching connections. Other active claims and connections are unaffected. No `proxy start` or `proxy stop` style commands are exposed.
+Foreground commands normally release their own registrations and exposures on
+exit. If one crashes, the agent reaps state owned by its dead PID and tears down
+matching connections. Other active claims and connections are unaffected. No
+`proxy start` or `proxy stop` style commands are exposed.
 
 CLI-to-agent IPC:
 
@@ -418,7 +476,7 @@ Path:        ~/.routeup/agent.sock (default), $XDG_RUNTIME_DIR/routeup/agent.soc
 Permissions: 0700 directory, 0600 socket
 Wire format: JSON over HTTP/1.1
 Auth:        filesystem permissions only
-Versioning:  /v1/ URL prefix; GET /version returns agent version
+Versioning:  /v1/ URL prefix; GET /v1/status returns agent version and boot id
 ```
 
 ## Public Server
@@ -446,6 +504,9 @@ root        required         *.routeup.dev         <label>.routeup.dev
 namespace   required         *.mukul.routeup.dev   <label>.mukul.routeup.dev
 ```
 
+The CLI turns a dotted local route into one public label by replacing dots with
+hyphens. The server still rejects raw multi-label claims at its trust boundary.
+
 Reserved names (`api`, `admin`, `www`, …, the control host) protect only the
 **root** tier — inside an owned namespace the tenant may use any label, so
 `api.mukul.routeup.dev` belongs to mukul. Granting a namespace also reserves
@@ -468,14 +529,17 @@ The list lives in server config so an operator can extend it. These names are re
 The server may designate one subdomain as a **public namespace** that anyone can claim under without a token:
 
 ```txt
-routeup expose --port 8080
+routeup expose --random --port 8080
 -> https://lively-otter-4f2.try.routeup.dev (random, session-only)
 
 routeup expose foo --port 8080
 -> https://foo.try.routeup.dev (first-come-first-served, session-only)
 ```
 
-All public-namespace claims release on disconnect. There is no grace window, no persistence, and no token. Within the namespace, names are first-come-first-served; if a name is held, the next client gets a `409` or, with `--random`, an automatically-assigned name.
+All public-namespace claims release on disconnect. There is no grace window, no
+persistence, and no token. Within the namespace, names are
+first-come-first-served and a held name returns `409`. `--random` chooses a
+random label before the claim; it does not retry a collision.
 
 The public namespace is **off by default** on self-hosted servers. Enable via server config:
 
@@ -483,7 +547,8 @@ The public namespace is **off by default** on self-hosted servers. Enable via se
 public_namespace: try
 ```
 
-Set to empty to disable. The hosted `routeup.dev` deployment runs with `public_namespace: try`. Self-hosted operators opt in explicitly.
+Set to empty to disable. The hosted `routeup.dev` deployment enables `try`;
+self-hosted operators opt in explicitly.
 
 ### Tokens
 
@@ -524,7 +589,7 @@ Following the one-label-per-namespace model, the server manages a wildcard per n
 
 The other mode is `cert`: an operator-provided certificate/key (e.g. a Cloudflare origin cert, or a self-signed cert for local development). DNS provider and ACME library choices (formerly OQ-014/OQ-015) are decided as above.
 
-## Logs, Inspect, And Replay
+## Logs, Inspect, And Replay (Planned)
 
 Route logs should be first-class.
 
@@ -537,7 +602,10 @@ server: minimal record per public request
         method, path, status, timing, request id
 ```
 
-The agent holds the authoritative log. The server records just enough to debug routing on the public side and to give the operator a per-route counter. `routeup logs` reads from the agent. If the agent is offline when a public request arrives, the request still completes and is logged by the server with the minimal record, but the canonical entry is lost — acceptable for v1.
+The agent holds the authoritative log. The server records just enough to debug
+routing on the public side and to give the operator a per-route counter.
+`routeup logs` reads from the agent. If no live tunnel exists, the server returns
+and records an offline `503`; there is no agent-side canonical entry.
 
 Commands:
 
@@ -582,7 +650,7 @@ Public suffix:  configurable per deployment; defaults to routeup.dev for the hos
 
 `routeup` ships as a single binary. Primary channels:
 
-- Homebrew tap for macOS and Linux: `brew install routeup/tap/routeup`.
+- Homebrew tap for macOS and Linux: `brew install mukul-mehta/tap/routeup`.
 - GitHub releases for direct download (tarball + checksums).
 
 Lifecycle commands:
@@ -592,7 +660,11 @@ routeup update     # check for and install a newer release
 routeup uninstall  # remove agent, CA, certs, and state dir
 ```
 
-`routeup update` detects the install channel (Homebrew vs direct binary) and delegates to the appropriate updater. `routeup uninstall` must work even when the binary is being replaced — it tears down the agent process and autostart unit, removes the local CA from the trust store, deletes generated certificates, and removes `~/.routeup/`.
+`routeup update` detects the install channel (Homebrew vs direct binary) and
+delegates to the appropriate updater. `routeup uninstall` must work even when
+the binary is being replaced: it stops the agent, removes the macOS port
+forwarder or Linux capability, removes the local CA from the trust store,
+deletes generated certificates, and removes `~/.routeup/`.
 
 ## Non-Goals For V1
 

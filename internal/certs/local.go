@@ -8,8 +8,8 @@ import (
 
 // EnsureLocalCA resolves the default local CA paths and ensures the CA exists
 // and is usable, creating it if needed. It is the precondition for any command
-// that goes through the local agent (serve, expose), since the agent needs the
-// CA for local HTTPS.
+// that goes through the local agent (serve, expose, or runner mode), since the
+// agent needs the CA for local HTTPS.
 func EnsureLocalCA() error {
 	certPath, err := state.CACertPath()
 	if err != nil {

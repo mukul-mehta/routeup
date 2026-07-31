@@ -26,70 +26,7 @@ func mkTree(t *testing.T, files map[string]string) string {
 	return root
 }
 
-// TestDiscover exercises the walk-up algorithm with assorted directory layouts.
-// errSubstr == "" means the case must succeed; wantSource/wantName are checked.
-// startDir is interpreted relative to the temp root.
-//
-// Cases to add:
-//
-//	none-found:
-//	  - "empty tree"
-//	      files: {}
-//	      startDir: "."
-//	      -> SourceNone, name ""
-//	  - "package.json without routeup block, nothing upstream"
-//	      files: {"package.json": `{"name":"app-web"}`}
-//	      startDir: "."
-//	      -> SourceNone, name ""
-//
-//	routeup.json:
-//	  - "routeup.json at startDir"
-//	      files: {"routeup.json": `{"name":"myapp"}`}
-//	      startDir: "."
-//	      -> SourceRouteupJSON, name "myapp"
-//
-//	package.json:
-//	  - "package.json with routeup block at startDir"
-//	      files: {"package.json": `{"routeup":{"name":"myapp"}}`}
-//	      startDir: "."
-//	      -> SourcePackageJSON, name "myapp"
-//
-//	walk-up:
-//	  - "package.json without block, routeup.json upstream"
-//	      files: {
-//	          "a/b/package.json": `{"name":"app"}`,
-//	          "a/routeup.json":   `{"name":"upstream"}`,
-//	      }
-//	      startDir: "a/b"
-//	      -> SourceRouteupJSON, name "upstream"
-//
-//	precedence in same dir:
-//	  - "routeup.json beats package.json"
-//	      files: {
-//	          "routeup.json": `{"name":"win"}`,
-//	          "package.json": `{"routeup":{"name":"lose"}}`,
-//	      }
-//	      startDir: "."
-//	      -> SourceRouteupJSON, name "win"
-//
-//	closest wins:
-//	  - "inner routeup.json beats outer"
-//	      files: {
-//	          "routeup.json":     `{"name":"outer"}`,
-//	          "a/b/routeup.json": `{"name":"inner"}`,
-//	      }
-//	      startDir: "a/b"
-//	      -> SourceRouteupJSON, name "inner"
-//
-//	error propagation:
-//	  - "malformed routeup.json on the path stops the walk"
-//	      files: {"routeup.json": `{not json`}
-//	      startDir: "."
-//	      -> errSubstr "could not parse"
-//	  - "validation failure on the path stops the walk"
-//	      files: {"routeup.json": `{"port":-1}`}
-//	      startDir: "."
-//	      -> errSubstr "could not validate"
+// TestDiscover exercises current-directory discovery and source precedence.
 func TestDiscover(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -107,11 +44,20 @@ func TestDiscover(t *testing.T) {
 			wantSource: SourceNone,
 		},
 		{
-			name: "package.json without routeup block and nothing upstream",
+			name: "package.json without routeup block",
 			files: map[string]string{
 				"package.json": `{"name":"app-web"}`,
 			},
 			startDir:   ".",
+			wantSource: SourceNone,
+		},
+		{
+			name: "parent config is not discovered",
+			files: map[string]string{
+				"routeup.json": `{"name":"parent"}`,
+				"nested/.keep": "",
+			},
+			startDir:   "nested",
 			wantSource: SourceNone,
 		},
 
@@ -151,7 +97,7 @@ func TestDiscover(t *testing.T) {
 
 		// error propagation
 		{
-			name: "malformed routeup.json on the path stops the walk",
+			name: "malformed routeup.json returns an error",
 			files: map[string]string{
 				"routeup.json": `{not json`,
 			},
@@ -159,7 +105,7 @@ func TestDiscover(t *testing.T) {
 			errSubstr: "could not parse",
 		},
 		{
-			name: "validation failure on the path stops the walk",
+			name: "invalid routeup.json returns an error",
 			files: map[string]string{
 				"routeup.json": `{"port":-1}`,
 			},

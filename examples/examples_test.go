@@ -69,7 +69,19 @@ func TestNodeExampleSyntax(t *testing.T) {
 	if err != nil {
 		t.Skip("node is not installed")
 	}
-	runExampleCheck(t, node, "--check", filepath.FromSlash("node-basic/server.mjs"))
+	for _, path := range []string{"node-basic/server.mjs", "node-runner/server.mjs"} {
+		runExampleCheck(t, node, "--check", filepath.FromSlash(path))
+	}
+}
+
+func TestRunnerExampleConfig(t *testing.T) {
+	cfg, ok, err := config.LoadPackageJSON(filepath.FromSlash("node-runner/package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || cfg.Name != "node-runner" || cfg.Script != "" || cfg.Command != "node server.mjs" {
+		t.Fatalf("runner config = %#v, present = %t", cfg, ok)
+	}
 }
 
 func TestPythonExampleSyntax(t *testing.T) {

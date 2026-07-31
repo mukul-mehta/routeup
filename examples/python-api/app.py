@@ -2,7 +2,7 @@
 
 import json
 import signal
-import sys
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ADDR = ("127.0.0.1", 8082)
@@ -57,12 +57,14 @@ def main():
     print("run `../../routeup serve` in this directory, then test https://python-api.localhost/api/healthz")
 
     def shutdown(_signum, _frame):
-        server.shutdown()
-        sys.exit(0)
+        threading.Thread(target=server.shutdown, daemon=True).start()
 
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()
 
 
 if __name__ == "__main__":

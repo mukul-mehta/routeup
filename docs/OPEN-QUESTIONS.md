@@ -5,7 +5,7 @@ This file tracks unresolved product, architecture, and engineering questions for
 ## How To Use This File
 
 - Each question has a stable id (`OQ-NNN`) that can be referenced from code, commits, and other docs.
-- `Status` is one of `open`, `leaning <option>`, or `deferred-to-phase-N`.
+- `Status` is one of `open`, `leaning <option>`, `deferred-to-phase-N`, or `deferred-to-post-v1`.
 - Re-read this file at the start of each phase. Items not actionable for the next phase become `deferred-to-phase-N`.
 - When an item is decided, the answer moves to `PLAN.md` or `docs/ARCHITECTURE.md` and the entry is removed here.
 - IDs are stable. Resolved entries are deleted, not reused. Holes in the numbering are expected.
@@ -13,10 +13,6 @@ This file tracks unresolved product, architecture, and engineering questions for
 ## Index
 
 ```txt
-OQ-002  macOS port 443 strategy
-OQ-003  Linux port 443 strategy
-OQ-009  Agent autostart approach for Phase 4
-OQ-010  Tunnel reconnect tuning surface
 OQ-011  mDNS for same-LAN device testing
 OQ-012  Server observability and metrics
 OQ-013  Public server rate limiting
@@ -24,66 +20,10 @@ OQ-016  Dual-stack loopback for the agent listener
 OQ-017  Release artifact signing / provenance
 ```
 
-Resolved and removed: OQ-014 (DNS provider → Cloudflare) and OQ-015 (ACME
-library → certmagic). The decision is recorded in `PLAN.md` under Public Server
-→ TLS; the implementation is `internal/server/tls.go`.
+Resolved and removed: OQ-002, OQ-003, OQ-009, OQ-010, OQ-014, and OQ-015. Their
+decisions are recorded in the architecture, milestones, and walkthrough docs.
 
 ---
-
-## OQ-002: macOS port 443 strategy
-
-Status: open
-Linked milestone: Phase 4
-
-How does the agent bind port 443 on macOS without a bad privileged-helper UX?
-
-Options:
-
-- `pfctl` rdr rule from 443 to the high port. No sudo per run, sudo once at setup.
-- LaunchDaemon running as root listening on 443, forwarding to the per-user agent. Heavier setup, two processes.
-- `authopen`-style helper invoked from setup. Complex.
-
-Decision criteria: which option survives reboot, system updates, and uninstall cleanly.
-
-## OQ-003: Linux port 443 strategy
-
-Status: leaning `cap_net_bind_service`
-Linked milestone: Phase 4
-
-How does the agent bind 443 on Linux without sudo per run?
-
-Options:
-
-- `setcap 'cap_net_bind_service=+ep' /path/to/routeup`. Sudo once at setup. Must be reapplied on upgrade.
-- iptables/nftables redirect from 443 to a high port. Sudo once at setup.
-- systemd socket activation with the unit running as user, socket owned by root. Cleanest if user uses systemd.
-
-Decision criteria: whether `setcap` survives package upgrades on common distros.
-
-## OQ-009: Agent autostart approach for Phase 4
-
-Status: leaning on-demand fork for v1, user-level launch unit added in Phase 4
-Linked milestone: Phase 4
-
-v1 forks the agent on first CLI call. Phase 4 adds:
-
-- macOS: `LaunchAgent` plist in `~/Library/LaunchAgents/`. No sudo.
-- Linux: systemd user unit at `~/.config/systemd/user/routeup.service` enabled via `systemctl --user enable routeup`. No sudo.
-
-Sudo is only required for port 443 binding and CA trust install, not for the agent itself.
-
-## OQ-010: Tunnel reconnect tuning surface
-
-Status: implemented with hard-coded defaults; revisit a config surface only on complaints
-Linked milestone: Phase 6
-
-The implementation hard-codes tunnel parameters and offers no CLI flag or config
-knob. Now in use: the tunnel client backs off 500ms..30s (x2) in
-`internal/tunnel/client.go`; yamux uses a 1MiB per-stream flow-control window
-and a 30s connection write timeout in `internal/tunnel/utils.go`; and the server
-holds a released token claim for a 30s grace window in
-`internal/server/holds.go`. yamux keepalive covers heartbeat. Surface as config
-only if real complaints justify it.
 
 ## OQ-011: mDNS for same-LAN device testing
 
@@ -125,14 +65,14 @@ A self-hosted operator must be able to disable rate limiting entirely.
 
 ## OQ-016: Dual-stack loopback for the agent listener
 
-Status: deferred-to-phase-4
-Linked milestone: Phase 4
+Status: deferred-to-post-v1
+Linked milestone: post-v1
 
 The agent's proxy listener binds `127.0.0.1` (IPv4 only). The upstream dial was changed to `localhost` so it reaches dev servers on either loopback family, but the listen side was left as IPv4. A client that resolves `*.localhost` to `::1` only, and won't fall back to IPv4, can't reach the agent.
 
 This is low risk today: browsers and macOS `getaddrinfo` return both `127.0.0.1` and `::1` for `*.localhost` and try both, so the IPv4 listener is reachable. No real client has been observed failing.
 
-Binding both families properly needs two listeners (`127.0.0.1:7070` and `[::1]:7070`), since `localhost:7070` binds only one family and `:7070` would expose the agent on every interface. Phase 4 reworks the listener for TLS and port 443, so handle it there if it is still worth doing.
+Binding both families properly needs two listeners (`127.0.0.1:7070` and `[::1]:7070`), since `localhost:7070` binds only one family and `:7070` would expose the agent on every interface. Revisit post-v1 if a real client cannot fall back to IPv4.
 
 ## OQ-017: Release artifact signing / provenance
 

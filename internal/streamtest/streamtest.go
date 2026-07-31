@@ -1,10 +1,10 @@
 // Package streamtest provides synthetic streaming backends used by the M6
 // tunnel/proxy tests: a WebSocket "HMR" server (models Vite), an SSE server
-// (models Next.js webpack HMR), and a body-echo handler plus a deterministic
+// for generic event streaming, and a body-echo handler plus a deterministic
 // reader for large transfers. They are deterministic and self-contained so the
-// streaming acceptance criteria run in CI without a real dev server. (Real Vite
+// streaming acceptance criteria run in CI without a real dev server. Real Vite
 // and Next servers are exercised separately by the build-tagged integration
-// tests in internal/server.)
+// tests in internal/server.
 //
 // It is a normal (non-_test) package so the tunnel, server, and proxy test
 // packages can all import it; it deliberately takes no dependency on testing.
@@ -73,14 +73,14 @@ func WSHMR(opts WSOptions) http.Handler {
 	})
 }
 
-// SSEHMR returns a handler that streams events as text/event-stream, flushing
-// after each, modelling Next.js webpack HMR (/_next/webpack-hmr).
+// SSEStream returns a handler that streams events as text/event-stream,
+// flushing after each.
 //
 // If gate is non-nil, the handler receives one value from it before each event
 // after the first. That lets a test prove incremental, non-buffered delivery
 // without timing assumptions: read event 0, then release the gate, then read
 // event 1, asserting the first arrived before the second was ever written.
-func SSEHMR(events []string, gate <-chan struct{}) http.Handler {
+func SSEStream(events []string, gate <-chan struct{}) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
 		if !ok {

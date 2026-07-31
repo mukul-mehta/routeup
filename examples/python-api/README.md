@@ -5,7 +5,7 @@ webhook paths.
 
 ```txt
 https://python-api.localhost/*              -> Python API on 127.0.0.1:8082
-https://python-api.<namespace>/api/webhooks/* -> public when exposed
+https://python-api.<namespace>.routeup.dev/api/webhooks/* -> public when exposed
 ```
 
 The local route serves all paths. The `expose.paths` config limits public traffic
@@ -36,5 +36,8 @@ curl https://python-api.localhost/api/healthz
 If you have a routeup server configured, expose only webhook paths:
 
 ```bash
-../../routeup serve --expose
+../../routeup expose
 ```
+
+Run that in a third terminal while the local `serve` command remains active. It
+reuses the registered target and applies the configured `expose.paths`.

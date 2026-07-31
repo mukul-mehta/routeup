@@ -42,9 +42,10 @@ jobs:
         with:
           version: v2.12.2
 
-  integration-debian:
-    name: integration (debian, :${{ matrix.port }})
+  integration-ubuntu:
+    name: integration (ubuntu, :${{ matrix.port }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -63,7 +64,7 @@ jobs:
       - name: build
         run: go build -buildvcs=false -o bin/routeup ./cmd/routeup
 
-      # Native runner (real filesystem): both the privileged-bind path (443,
+      # Native execution (real filesystem): both the privileged-bind path (443,
       # setcap on the binary) and the high-port path (47443, no setcap) work.
       - name: integration
         run: bash scripts/integration-linux.sh ./bin/routeup ${{ matrix.port }}
@@ -72,25 +73,33 @@ jobs:
     name: integration (fedora, :${{ matrix.port }})
     runs-on: ubuntu-latest
     container: fedora:latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         port: [443, 47443]
     steps:
       - name: install deps
-        run: dnf install -y git golang libcap ca-certificates sudo python3 curl
+        run: dnf install -y git golang libcap ca-certificates sudo python3 curl shadow-utils
 
       - uses: actions/checkout@v6
 
       - name: build
         run: go build -buildvcs=false -o bin/routeup ./cmd/routeup
 
+      - name: create unprivileged test user
+        run: |
+          useradd --create-home routeup-ci
+          printf 'routeup-ci ALL=(ALL) NOPASSWD: ALL\n' >/etc/sudoers.d/routeup-ci
+          chmod 0440 /etc/sudoers.d/routeup-ci
+          chown -R routeup-ci:routeup-ci "$GITHUB_WORKSPACE"
+
       # Fedora only exists here as a container, so :443 stresses setcap on an
       # overlay filesystem (may reject the security.capability xattr); :47443
       # skips setcap. fail-fast:false keeps the cells independent so a setcap
       # limitation surfaces on its own.
       - name: integration
-        run: bash scripts/integration-linux.sh ./bin/routeup ${{ matrix.port }}
+        run: sudo -u routeup-ci -H bash scripts/integration-linux.sh ./bin/routeup ${{ matrix.port }}
 
   # The public server ships on every push to main. The CLI releases separately
   # (goreleaser, on v* tags), so the server tracks main while the CLI cuts
@@ -120,4 +129,3 @@ jobs:
         run: flyctl deploy --remote-only -c deploy/fly.toml
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-

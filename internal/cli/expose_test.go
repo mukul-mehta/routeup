@@ -8,6 +8,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mukul-mehta/routeup/internal/certs"
+	"github.com/mukul-mehta/routeup/internal/config"
+	"github.com/mukul-mehta/routeup/internal/route"
 	"github.com/mukul-mehta/routeup/internal/state"
 )
 
@@ -33,15 +35,46 @@ func TestExpose_RequiresServer(t *testing.T) {
 // (api.myapp -> api-myapp) rather than rejected.
 func TestNormalizePublicName(t *testing.T) {
 	cases := []struct{ in, want string }{
-		{"", ""},
 		{"myapp", "myapp"},
 		{"api.myapp", "api-myapp"},
 		{"a.b.c", "a-b-c"},
 	}
 	for _, c := range cases {
-		if got := normalizePublicName(c.in); got != c.want {
+		name, err := route.Parse(c.in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := normalizePublicName(name); got != c.want {
 			t.Errorf("normalizePublicName(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+func TestPrintRouteLocal_NonDefaultTLSPort(t *testing.T) {
+	var out bytes.Buffer
+	printRouteLocal(&out, "api.myapp", 47443)
+	want := "route: api.myapp\nlocal: https://api.myapp.localhost:47443\n"
+	if out.String() != want {
+		t.Fatalf("output = %q, want %q", out.String(), want)
+	}
+}
+
+func TestResolveExposeRoute(t *testing.T) {
+	t.Setenv("ROUTEUP_NAME", "")
+
+	got, err := resolveExposeRoute("api", config.Config{Name: "myapp"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.String() != "api.myapp" {
+		t.Fatalf("route = %q, want %q", got, "api.myapp")
+	}
+
+	if _, err := resolveExposeRoute("api..myapp", config.Config{}, false); err == nil || !strings.Contains(err.Error(), "invalid route name") {
+		t.Fatalf("expected invalid route name, got %v", err)
+	}
+	if _, err := resolveExposeRoute("", config.Config{}, false); err == nil || !strings.Contains(err.Error(), "use --random") {
+		t.Fatalf("expected missing-name guidance, got %v", err)
 	}
 }
 

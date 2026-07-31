@@ -1,20 +1,21 @@
 # routeup Examples
 
-These examples demonstrate a few routeup config shapes, from one route/one port
-to one route with multiple path targets.
+These examples demonstrate routeup config shapes and runner mode, from one
+route/one process to multiple path targets.
 
 ```txt
 /      -> frontend target
 /api/* -> API target
 ```
 
-Each example has its own `routeup.json`. Run commands from inside the example
-directory so routeup discovers the right config.
+Run commands from inside an example directory so routeup discovers its
+`routeup.json` or package.json `routeup` block.
 
 ## Examples
 
 - [`go-split`](go-split/) - frontend + API behind one route using path targets.
 - [`node-basic`](node-basic/) - one Node.js app behind one route using `port`.
+- [`node-runner`](node-runner/) - bare `routeup` runs a configured package script and injects its environment.
 - [`python-api`](python-api/) - one Python API with `expose.paths` for webhooks.
 
 ## Basic Flow
@@ -31,8 +32,9 @@ Run setup once if needed:
 ./routeup setup
 ```
 
-Then pick an example, start its app process, and run `../../routeup serve` from
-the same example directory.
+The `go-split`, `node-basic`, and `python-api` examples start their app and
+`../../routeup serve` separately. The `node-runner` example uses bare `routeup`
+to own both the app process and route lifecycle.
 
 The example configs and dependency-free Node/Python syntax checks are covered by
 `go test ./examples/...`, which is included in the normal repository test run.

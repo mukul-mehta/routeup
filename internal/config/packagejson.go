@@ -9,9 +9,11 @@ import (
 )
 
 // pkgJSON is the minimal shape we decode from a package.json. Everything outside
-// the "routeup" field is intentionally ignored.
+// the "routeup" and "scripts" fields is intentionally ignored. Scripts is read
+// so a routeup "script" key can be resolved to its underlying command.
 type pkgJSON struct {
-	Routeup json.RawMessage `json:"routeup"`
+	Routeup json.RawMessage   `json:"routeup"`
+	Scripts map[string]string `json:"scripts"`
 }
 
 // LoadPackageJSON reads a package.json file at path and extracts the optional
@@ -46,8 +48,21 @@ func LoadPackageJSON(path string) (Config, bool, error) {
 
 	c.Name = stripScope(c.Name)
 
+	if c.Command != "" {
+		return Config{}, false, fmt.Errorf("%s: command is only valid in routeup.json; use \"script\" in the package.json routeup block", path)
+	}
 	if err := c.Validate(); err != nil {
 		return Config{}, false, fmt.Errorf("could not validate %s: %w", path, err)
+	}
+
+	script := c.Script
+	if script != "" {
+		command, ok := pkg.Scripts[script]
+		if !ok {
+			return Config{}, false, fmt.Errorf("routeup script %q is not defined in %s scripts", script, path)
+		}
+		c.Command = command
+		c.Script = ""
 	}
 
 	return c, true, nil

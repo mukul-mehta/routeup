@@ -16,9 +16,9 @@ const reconcileInterval = 2 * time.Second
 // MaintainClaim keeps claim registered with the agent until ctx is cancelled.
 //
 // The agent holds its registry in memory, so a crash or restart drops every
-// route. The serve process is still running and still wants its route, so it
-// re-registers when needed instead of registering once and hoping the agent
-// remembers.
+// route. The foreground claim owner (serve or runner) is still running and
+// still wants its route, so it re-registers when needed instead of registering
+// once and hoping the agent remembers.
 //
 // The loop tracks the agent's BootID, which the agent picks once at startup.
 // The same BootID means the same agent that still has our claim; a different
