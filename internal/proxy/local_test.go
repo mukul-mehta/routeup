@@ -43,6 +43,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/mukul-mehta/routeup/internal/logs"
 	"github.com/mukul-mehta/routeup/internal/route"
 	"github.com/mukul-mehta/routeup/internal/streamtest"
 )
@@ -68,11 +69,93 @@ func TestLocalProxy_PathTargets(t *testing.T) {
 	proxyServer := httptest.NewServer(New(testTargetLookup{"myapp": {
 		{Path: "/", Port: testServerPort(t, app.URL)},
 		{Path: "/api", Port: testServerPort(t, api.URL)},
-	}}, logger))
+	}}, logs.NewStore(), logger))
 	defer proxyServer.Close()
 
 	assertLocalBody(t, proxyServer.URL+"/", "myapp.localhost", "app")
 	assertLocalBody(t, proxyServer.URL+"/api/ping", "myapp.localhost", "api")
+}
+
+func TestLocalProxy_RecordsCompletedRequest(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, "created")
+	}))
+	defer backend.Close()
+
+	store := logs.NewStore()
+	proxyServer := httptest.NewServer(New(testTargetLookup{"myapp": {
+		{Path: "/api", Port: testServerPort(t, backend.URL)},
+	}}, store, nil))
+	defer proxyServer.Close()
+
+	req, err := http.NewRequest(http.MethodGet, proxyServer.URL+"/api/widgets?ready=true", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Host = "myapp.localhost"
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", response.StatusCode)
+	}
+
+	entries := store.List(logs.ListOptions{})
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	entry := entries[0]
+	if entry.Source != logs.SourceLocal || entry.Route != "myapp" || entry.Host != "myapp.localhost" {
+		t.Fatalf("identity = %#v, want local myapp myapp.localhost", entry)
+	}
+	if entry.Method != http.MethodGet || entry.RequestPath != "/api/widgets?ready=true" || entry.Status != http.StatusCreated {
+		t.Fatalf("request metadata = %#v", entry)
+	}
+	if entry.Target.Path != "/api" || entry.Target.Port != testServerPort(t, backend.URL) {
+		t.Fatalf("target = %#v, want /api backend port", entry.Target)
+	}
+	if entry.Duration < 0 || entry.StartedAt.IsZero() {
+		t.Fatalf("timing = %s at %s", entry.Duration, entry.StartedAt)
+	}
+}
+
+func TestPublicProxy_RecordsCanonicalLocalRoute(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer backend.Close()
+
+	store := logs.NewStore()
+	proxyServer := httptest.NewServer(NewTargets([]route.Target{
+		{Path: "/", Port: testServerPort(t, backend.URL)},
+	}, nil, "api.myapp", store, nil))
+	defer proxyServer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/webhooks/github", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Host = "api-myapp.mukul.routeup.dev"
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.StatusCode)
+	}
+
+	entries := store.List(logs.ListOptions{})
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	entry := entries[0]
+	if entry.Source != logs.SourcePublic || entry.Route != "api.myapp" || entry.Host != "api-myapp.mukul.routeup.dev" {
+		t.Fatalf("identity = %#v, want canonical public request identity", entry)
+	}
 }
 
 func TestLocalProxy_WebSocketHMR(t *testing.T) {
@@ -153,7 +236,7 @@ func startLocalProxy(t *testing.T, backend http.Handler) (proxyURL string, clean
 	backendServer := httptest.NewServer(backend)
 	backendPort := testServerPort(t, backendServer.URL)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	proxyServer := httptest.NewServer(New(testTargetLookup{"hmr": {{Path: "/", Port: backendPort}}}, logger))
+	proxyServer := httptest.NewServer(New(testTargetLookup{"hmr": {{Path: "/", Port: backendPort}}}, logs.NewStore(), logger))
 	cleanup = func() {
 		proxyServer.Close()
 		backendServer.Close()

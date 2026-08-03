@@ -22,6 +22,7 @@ import (
 
 	"github.com/mukul-mehta/routeup/internal/certs"
 	"github.com/mukul-mehta/routeup/internal/ipc"
+	"github.com/mukul-mehta/routeup/internal/logs"
 	"github.com/mukul-mehta/routeup/internal/proxy"
 	"github.com/mukul-mehta/routeup/internal/route"
 	"github.com/mukul-mehta/routeup/internal/state"
@@ -40,6 +41,7 @@ type Options struct {
 // Agent is the local routeup daemon. New binds nothing; Run does the work.
 type Agent struct {
 	reg           *Registry
+	logStore      *logs.Store
 	tunnels       *tunnelManager
 	sockPath      string
 	tlsAddr       string
@@ -72,6 +74,7 @@ func New(opts Options) (*Agent, error) {
 
 	return &Agent{
 		reg:       NewRegistry(),
+		logStore:  logs.NewStore(),
 		sockPath:  opts.SocketPath,
 		tlsAddr:   opts.TLSAddr,
 		caPath:    opts.CAPath,
@@ -136,7 +139,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	defer a.removePIDFile()
 
 	a.startedAt = time.Now()
-	a.tunnels = newTunnelManager(ctx, a.logger)
+	a.tunnels = newTunnelManager(ctx, a.logStore, a.logger)
 	a.logger.Info("agent started",
 		"socket", a.sockPath,
 		"tls_addr", a.tlsListenAddr,
@@ -148,7 +151,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		BaseContext:       func(_ net.Listener) context.Context { return ctx },
 	}
 	proxySrv := &http.Server{
-		Handler:           proxy.New(a.reg, a.logger),
+		Handler:           proxy.New(a.reg, a.logStore, a.logger),
 		ReadHeaderTimeout: 10 * time.Second,
 		BaseContext:       func(_ net.Listener) context.Context { return ctx },
 	}

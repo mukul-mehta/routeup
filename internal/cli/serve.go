@@ -186,6 +186,7 @@ func serveExpose(ctx context.Context, client *agentctl.Client, routeName route.N
 
 	return holdExposure(ctx, client, ipc.ExposeRequest{
 		Name:     normalizePublicName(routeName),
+		Route:    routeName.String(),
 		Port:     route.PrimaryPort(targets),
 		Targets:  targets,
 		Paths:    paths,

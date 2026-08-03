@@ -351,10 +351,8 @@ Token hashing:       crypto/sha256 (tokens are high-entropy; no KDF needed)
 
 Avoid `viper` at first. Config needs are still unsettled, so a small explicit config loader is better than a large config framework.
 
-The local agent has no persistent storage. Route registry stays in-memory. Logs
-are a single in-memory ring of the last 1024 requests. When capture is enabled,
-headers and bodies live in that same request record; the oldest complete record
-is removed when the ring fills. Disk-backed log storage is out of scope for v1.
+The local agent has no persistent storage. Route registry and the 1024-entry
+request-log ring stay in memory. Disk-backed log storage is out of scope for v1.
 
 The public server uses SQLite for token storage, claim tracking, and grace-window state. `modernc.org/sqlite` is chosen specifically so the server cross-compiles cleanly without a cgo toolchain. Add `sqlc` only when query count or scan complexity actually hurts.
 
@@ -452,7 +450,7 @@ listen on local HTTP/HTTPS ingress
 hold active route registry
 terminate local TLS
 reverse proxy to local targets
-record local and public request logs and opt-in captures
+record local and public request logs
 serve local status and error pages
 coordinate active exposes with the public server
 ```
@@ -592,16 +590,15 @@ Following the one-label-per-namespace model, the server manages a wildcard per n
 
 The other mode is `cert`: an operator-provided certificate/key (e.g. a Cloudflare origin cert, or a self-signed cert for local development). DNS provider and ACME library choices (formerly OQ-014/OQ-015) are decided as above.
 
-## Logs, Inspect, And Replay (Planned)
+## Logs (Phase 9) And Inspect/Replay (Planned)
 
-Route logs should be first-class.
+Route logs are first-class.
 
 Where logs live:
 
 ```txt
 agent:  canonical record for every local and public request
         1024-entry in-memory request ring
-        optional capture in the same entry
 server: minimal record per public request
         method, path, status, timing, request id
 ```
@@ -611,7 +608,7 @@ routing on the public side and to give the operator a per-route counter.
 `routeup logs` reads from the agent. If no live tunnel exists, the server returns
 and records an offline `503`; there is no agent-side canonical entry.
 
-Commands:
+Available commands:
 
 ```bash
 routeup logs
@@ -634,36 +631,16 @@ Request IDs are compact opaque values in `req_<16-char-random>` form. The log
 line already carries the route, method, and path, so IDs stay short enough to
 copy into the inspection commands.
 
-Do not capture headers or bodies by default. A project can opt in with:
-
-```json
-{
-  "capture": true
-}
-```
-
-`capture` applies to both request and response headers and bodies. It is an
-initial, local-only debugging feature: captured data is unredacted and remains
-in agent memory only. It should be enabled only for traffic the developer is
-comfortable retaining locally.
-
-The agent keeps the last 1024 request records in one ring. Each captured request
-and response message is limited to 256 KiB, including headers and body. When a
-new record fills the ring, the oldest record and any capture it holds are both
-removed. A partial message can be inspected but cannot be replayed.
-
-Capture powers:
+Phase 10 will add request inspection and replay:
 
 ```bash
 routeup inspect req_Ap7kQ3mN8vR2xLzC
 routeup replay req_Ap7kQ3mN8vR2xLzC
 ```
 
-`routeup inspect` displays the captured original request and response.
-`routeup replay` immediately sends the complete captured request once to its
-original loopback target, then displays the replay status and duration. It
-never sends to the public hostname or an external webhook sender. It fails
-without sending when capture is unavailable or incomplete.
+`routeup inspect` displays one request record. `routeup replay` sends a request
+once to its original loopback target, never to the public hostname or an
+external webhook sender.
 
 ## Project Constraints
 
@@ -715,8 +692,6 @@ Possible later additions:
 
 ```txt
 basic auth for public routes
-capture redaction controls
-capture retention controls
 webhook signature helpers
 route namespaces for shared servers
 GUI dashboard

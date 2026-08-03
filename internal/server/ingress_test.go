@@ -171,7 +171,7 @@ func TestIngress_PathTargetsAndExposePaths(t *testing.T) {
 		{Path: "/", Port: testServerPort(t, app.URL)},
 		{Path: "/api", Port: testServerPort(t, api.URL)},
 	}
-	publicURL, host, cleanup := startIngressTunnel(t, proxy.NewTargets(targets, []string{"/api/*"}, nil))
+	publicURL, host, cleanup := startIngressTunnel(t, proxy.NewTargets(targets, []string{"/api/*"}, "myapp", nil, nil))
 	defer cleanup()
 
 	assertIngressBody(t, publicURL+"/api/ping", host, http.StatusOK, "api")

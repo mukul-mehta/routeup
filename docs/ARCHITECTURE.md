@@ -92,7 +92,7 @@ route by Host and path
 terminate local TLS once setup exists
 reverse proxy to local targets
 hold active route registry
-record local and public access logs and opt-in request captures (planned, Phases 9-10)
+record local and public access logs
 own tunnel clients for active exposure requests
 serve agent API for CLI commands
 serve useful error pages for missing routes
@@ -119,9 +119,9 @@ DELETE /v1/routes/{name}        release a claim
 GET    /v1/routes               list active routes
 GET    /v1/status               agent status, version, uptime, boot id
 POST   /v1/shutdown             graceful shutdown (used by `agent stop`/restart)
-GET    /v1/logs?route=&source=&follow=  access-log list or SSE stream (planned, Phase 9)
-GET    /v1/requests/{id}                 inspect one captured request (planned, Phase 10)
-POST   /v1/requests/{id}/replay          replay one captured request locally (planned, Phase 10)
+GET    /v1/logs?route=&source=&follow=  access-log list or SSE stream
+GET    /v1/requests/{id}                 inspect one request (planned, Phase 10)
+POST   /v1/requests/{id}/replay          replay one request locally (planned, Phase 10)
 POST   /v1/expose               start public exposure for a claimed route
 POST   /v1/unexpose             stop public exposure
 ```
@@ -132,39 +132,23 @@ boot id, and re-register if the agent restarts or becomes unreachable. This
 client-driven reconciliation keeps the registry in memory: live foreground
 commands are the source of truth.
 
-### Request Logs, Inspect, And Replay (Planned)
+### Request Logs (Phase 9) And Inspect/Replay (Planned)
 
 The agent is the canonical record for traffic that reaches a local route. Every
 local `.localhost` request and every public request received through a tunnel
 gets a compact opaque ID in the form `req_<16-char-random>`. `routeup logs`
 filters these records by route and by source (`local` or `public`) and can
-follow new records through the agent API.
+follow new completed records through the agent API. Long-lived SSE and WebSocket
+requests appear when their exchange ends.
 
 Records live in a 1024-entry in-memory ring. They include the request ID,
 route, source, method, path/query, matched target, status, and duration. They
 disappear when the agent restarts. The public server may retain minimal
 operator-side metadata, but `routeup logs` always reads from the agent.
 
-Capture is a per-route project setting:
-
-```json
-{
-  "capture": true
-}
-```
-
-It defaults to false. When enabled, the agent captures request and response
-headers and bodies without redaction in the initial slice. Each request and
-response message is limited to 256 KiB, including headers and body. Capture
-lives in the same 1024-entry request ring as metadata, so the oldest record and
-its capture are removed together when the ring fills. Capture is therefore for
-locally trusted debugging traffic only.
-
-`routeup inspect <request-id>` displays the original request, response, and
-capture state. `routeup replay <request-id>` sends that complete captured
-request once to the original loopback target, never to the public hostname or
-an external webhook sender. It rejects requests whose capture is missing,
-incomplete, truncated, or evicted.
+Phase 10 will add `routeup inspect <request-id>` and
+`routeup replay <request-id>`. Replay will always use the original loopback
+target, never the public hostname or an external webhook sender.
 
 ### Public Server
 
@@ -652,7 +636,7 @@ proxy: reverse proxy behavior
 process: child command runner and env injection
 server: public ingress, tokens, route claims
 tunnel: tunnel protocol and stream forwarding
-logs: request metadata, bounded capture payloads, and follow subscriptions
+logs: request metadata and a follow change signal
 certs: local CA and certificate handling
 setup: OS setup orchestration
 state: filesystem paths and state-file helpers

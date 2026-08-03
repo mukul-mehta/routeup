@@ -376,7 +376,6 @@ client disconnect cancels upstream work
 Do not build yet:
 
 ```txt
-request body capture
 replay
 GUI inspection
 ```
@@ -494,7 +493,6 @@ Do not build yet:
 ```txt
 config-driven public runner exposure (Phase 8.5)
 framework command adaptation (Phase 8.5)
-child stdio capture into agent logs
 request inspect
 replay
 ```
@@ -561,7 +559,6 @@ Do not build yet:
 generic shell-command rewriting or an adapter plugin system
 package-manager lifecycle hook emulation
 untested adapters for additional frameworks
-child stdio capture into agent logs
 request inspect
 replay
 ```
@@ -569,6 +566,12 @@ replay
 ## Phase 9: Route Logs
 
 Goal: make local and public traffic visible.
+
+> Implementation note: complete. The agent owns one 1,024-entry in-memory ring
+> for local and public completed request metadata. `routeup logs [route]` reads
+> the JSON agent API, and `--follow` consumes its SSE stream. The proxy records
+> the matched target, status, and duration without buffering request or response
+> bodies; inspect and replay remain Phase 10 work.
 
 Build:
 
@@ -595,8 +598,6 @@ Shows incoming webhook traffic in real time.
 Do not build yet:
 
 ```txt
-header capture
-body capture
 inspect
 replay
 ```
@@ -608,9 +609,6 @@ Goal: make webhook debugging excellent.
 Build:
 
 ```txt
-opt-in capture: true config
-request and response header/body capture
-256 KiB request and response capture limit
 routeup inspect <request-id>
 routeup replay <request-id>
 ```
@@ -622,22 +620,9 @@ routeup inspect req_Ap7kQ3mN8vR2xLzC
 routeup replay req_Ap7kQ3mN8vR2xLzC
 ```
 
-`capture` is disabled by default. When set to `true` in `routeup.json` or the
-`package.json` `routeup` block, it captures request and response headers and
-bodies for that route. The first capture slice has no configurable retention or
-redaction controls; users must opt in only for traffic they are comfortable
-retaining in local agent memory.
-
-The agent keeps its last 1024 request records in one in-memory ring. Each
-captured request and response message retains at most 256 KiB, including
-headers and body. When the ring fills, the oldest record and any capture it
-holds are removed together. Partial captures can be inspected but cannot be
-replayed.
-
-`routeup inspect` displays the captured original request and response.
-`routeup replay` sends the captured request once to its original loopback
-target, then prints the result. It fails without sending when capture was
-disabled, incomplete, truncated, or evicted.
+`routeup inspect` displays one recorded request. `routeup replay` sends that
+request once to its original loopback target, then prints the result. It never
+sends to a public hostname or an external webhook sender.
 
 ## Milestone Discipline
 

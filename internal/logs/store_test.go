@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 )
 
 func TestNewRequestID(t *testing.T) {
@@ -68,6 +69,34 @@ func TestStoreAppendListAndRingEviction(t *testing.T) {
 	limited := store.List(ListOptions{Limit: 1})
 	if len(limited) != 1 || limited[0].ID != "req_three" {
 		t.Fatalf("limited list = %#v, want req_three", limited)
+	}
+}
+
+func TestStoreListAndWatch(t *testing.T) {
+	store := NewStore()
+	_, err := store.Append(Entry{ID: "req_one", Source: SourceLocal, Route: "myapp"})
+	if err != nil {
+		t.Fatalf("Append() initial entry: %v", err)
+	}
+
+	snapshot, changed := store.ListAndWatch(ListOptions{Route: "myapp"})
+	if len(snapshot) != 1 || snapshot[0].ID != "req_one" {
+		t.Fatalf("snapshot = %#v, want req_one", snapshot)
+	}
+
+	_, err = store.Append(Entry{ID: "req_two", Source: SourcePublic, Route: "myapp"})
+	if err != nil {
+		t.Fatalf("Append() later entry: %v", err)
+	}
+	select {
+	case <-changed:
+	case <-time.After(time.Second):
+		t.Fatal("watch did not observe appended entry")
+	}
+
+	entries, _ := store.ListAndWatch(ListOptions{Route: "myapp"})
+	if len(entries) != 2 || entries[1].ID != "req_two" {
+		t.Fatalf("updated entries = %#v, want req_one then req_two", entries)
 	}
 }
 

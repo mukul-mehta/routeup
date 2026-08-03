@@ -5,9 +5,14 @@
 // inspecting the request's Host header, stripping any port suffix, and
 // dropping the LocalSuffix (".localhost"). The remaining label sequence is
 // the route name, which is looked up against the agent's registry.
+//
+// Both local and tunnel handlers finish by recording one metadata-only entry:
+//
+//	request -> route/path lookup -> upstream reverse proxy -> logs.Store
 package proxy
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"log/slog"
@@ -17,7 +22,9 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/mukul-mehta/routeup/internal/logs"
 	"github.com/mukul-mehta/routeup/internal/route"
 )
 
@@ -39,7 +46,7 @@ type TargetLookup interface {
 
 // New returns an HTTP handler that reverse-proxies requests to the registered
 // local target identified by Host. Unknown hosts get a small text/plain 404.
-func New(lookup TargetLookup, logger *slog.Logger) http.Handler {
+func New(lookup TargetLookup, logStore *logs.Store, logger *slog.Logger) http.Handler {
 	logger = defaultLogger(logger)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host := stripPort(r.Host)
@@ -56,16 +63,25 @@ func New(lookup TargetLookup, logger *slog.Logger) http.Handler {
 			return
 		}
 
-		serveTargets(w, r, targets, nil, logger, host, name)
+		serveTargets(w, r, targets, nil, logStore, logger, logs.Entry{
+			Source: logs.SourceLocal,
+			Route:  name,
+			Host:   host,
+		})
 	})
 }
 
 // NewTargets returns a handler that path-routes requests across targets. When
 // exposedPaths is non-empty, requests outside those public paths return 404.
-func NewTargets(targets []route.Target, exposedPaths []string, logger *slog.Logger) http.Handler {
+// routeName is the dotted local route, not the normalized public claim label.
+func NewTargets(targets []route.Target, exposedPaths []string, routeName string, logStore *logs.Store, logger *slog.Logger) http.Handler {
 	logger = defaultLogger(logger)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		serveTargets(w, r, targets, exposedPaths, logger, stripPort(r.Host), "")
+		serveTargets(w, r, targets, exposedPaths, logStore, logger, logs.Entry{
+			Source: logs.SourcePublic,
+			Route:  routeName,
+			Host:   stripPort(r.Host),
+		})
 	})
 }
 
@@ -76,19 +92,39 @@ func defaultLogger(logger *slog.Logger) *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-func serveTargets(w http.ResponseWriter, r *http.Request, targets []route.Target, exposedPaths []string, logger *slog.Logger, host, name string) {
+func serveTargets(w http.ResponseWriter, r *http.Request, targets []route.Target, exposedPaths []string, logStore *logs.Store, logger *slog.Logger, entry logs.Entry) {
+	startedAt := time.Now()
+	entry.StartedAt = startedAt
+	entry.Method = r.Method
+	entry.RequestPath = r.URL.RequestURI()
+	response := &statusWriter{ResponseWriter: w}
+	var target route.Target
+
+	defer func() {
+		if logStore == nil {
+			return
+		}
+		entry.Duration = time.Since(startedAt)
+		entry.Status = response.status
+		entry.Target = target
+		if _, err := logStore.Append(entry); err != nil {
+			logger.Warn("record request log", "route", entry.Route, "err", err)
+		}
+	}()
+
 	if !route.PathAllowed(exposedPaths, r.URL.Path) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = io.WriteString(w, "routeup: path is not exposed\n")
+		response.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		response.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(response, "routeup: path is not exposed\n")
 		return
 	}
 
-	target, ok := route.MatchTarget(targets, r.URL.Path)
+	var ok bool
+	target, ok = route.MatchTarget(targets, r.URL.Path)
 	if !ok {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = fmt.Fprintf(w, "routeup: no target for path %q\n", r.URL.Path)
+		response.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		response.WriteHeader(http.StatusNotFound)
+		_, _ = fmt.Fprintf(response, "routeup: no target for path %q\n", r.URL.Path)
 		return
 	}
 
@@ -105,13 +141,59 @@ func serveTargets(w http.ResponseWriter, r *http.Request, targets []route.Target
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
 			logger.Warn("proxy upstream error",
-				"host", host, "name", name, "path", target.Path, "port", target.Port, "err", err)
+				"host", entry.Host, "name", entry.Route, "path", target.Path, "port", target.Port, "err", err)
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusBadGateway)
 			_, _ = fmt.Fprintf(w, "routeup: upstream %s failed: %v\n", targetURL.Host, err)
 		},
+		ModifyResponse: func(upstream *http.Response) error {
+			response.status = upstream.StatusCode
+			return nil
+		},
 	}
-	rp.ServeHTTP(w, r)
+	rp.ServeHTTP(response, r)
+}
+
+// statusWriter observes the status emitted by the proxy without changing the
+// response stream. Unwrap lets http.ResponseController reach the underlying
+// writer for SSE flushing and WebSocket hijacking.
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(status int) {
+	if w.status == 0 {
+		w.status = status
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *statusWriter) Write(body []byte) (int, error) {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(body)
+}
+
+func (w *statusWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+func (w *statusWriter) Flush() {
+	_ = http.NewResponseController(w.ResponseWriter).Flush()
+}
+
+func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return http.NewResponseController(w.ResponseWriter).Hijack()
+}
+
+func (w *statusWriter) Push(target string, options *http.PushOptions) error {
+	pusher, ok := w.ResponseWriter.(http.Pusher)
+	if !ok {
+		return http.ErrNotSupported
+	}
+	return pusher.Push(target, options)
 }
 
 // stripPort removes a trailing :port from h, if any. IPv6 hosts (with

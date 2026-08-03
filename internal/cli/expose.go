@@ -125,6 +125,7 @@ func startTunnel(cmd *cobra.Command, serverURL, token, localRouteName, publicRou
 
 	host, stopExpose, err := holdExposure(ctx, client, ipc.ExposeRequest{
 		Name:     publicRouteName,
+		Route:    localRouteName,
 		Port:     port,
 		Targets:  targets,
 		Paths:    exposePaths,

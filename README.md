@@ -6,7 +6,7 @@ It is an open source developer tool for local apps, APIs, webhooks, OAuth callba
 
 ## Status
 
-Phases 0 through 8 are complete: trusted local HTTPS, packaging and lifecycle,
+Phases 0 through 9 are complete: trusted local HTTPS, packaging and lifecycle,
 the public server and tunnel, streaming/HMR, path routing, and the local process
 runner are implemented. Public behavior is verified over loopback and the
 hosted service is available under `routeup.dev`.
@@ -30,28 +30,22 @@ Phase definitions and acceptance criteria live in [docs/MILESTONES.md](docs/MILE
 - [x] **Phase 7 — Path proxy:** frontend + API behind one route
 - [x] **Phase 8 — Local process runner:** configured command execution, route environment, process-group ownership, and cleanup
 - [ ] **Phase 8.5 — Runner exposure & framework adapters:** config-driven public runner exposure and unchanged `vite` support
-- [ ] **Phase 9 — Route logs:** local/public, `routeup logs --follow`
-- [ ] **Phase 10 — Inspect & replay:** opt-in `capture: true`, `routeup inspect`/`replay`
+- [x] **Phase 9 — Route logs:** local/public request metadata, `routeup logs --follow`
+- [ ] **Phase 10 — Inspect & replay:** `routeup inspect`/`replay`
 
-### Planned Logs And Replay
+### Logs And Replay
 
-Phases 9 and 10 will add an agent-local 1024-entry request-log ring for local
-and public traffic. Request IDs will be compact opaque values such as
+Phase 9 provides an agent-local 1024-entry request-log ring for completed local
+and public traffic. Use `routeup logs [route]` with `--local`, `--public`,
+`--follow`, or `--json`. Request IDs are compact opaque values such as
 `req_Ap7kQ3mN8vR2xLzC`.
 
-Projects will opt into request inspection with:
+The log records request metadata only: source, route, method, path/query,
+matched target, status, and duration. SSE, WebSocket, and other long-lived
+requests appear after their exchange completes.
 
-```json
-{
-  "capture": true
-}
-```
-
-This captures request and response headers and bodies in the same agent-memory
-ring used for request logs. Each request and response message is limited to 256
-KiB. `routeup replay <request-id>` will send the complete captured request once
-to its original loopback target. Capture is disabled by default and unredacted
-when enabled, so use it only for locally trusted debugging traffic.
+Phase 10 will add `routeup inspect <request-id>` and
+`routeup replay <request-id>`.
 
 ## LLM Usage
 

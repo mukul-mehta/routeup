@@ -28,6 +28,7 @@ const (
 const (
 	PathStatus   = "/v1/status"
 	PathRoutes   = "/v1/routes"
+	PathLogs     = "/v1/logs"
 	PathShutdown = "/v1/shutdown"
 	PathExpose   = "/v1/expose"
 	PathUnexpose = "/v1/unexpose"
@@ -95,10 +96,13 @@ type ErrorBody struct {
 // dials Server, authenticates with Token, claims the route, and forwards
 // inbound public requests to the local target set; Port is root-target
 // shorthand. OwnerPID lets the agent reap the tunnel if the requesting CLI
-// dies. A --random name is resolved by the CLI before this request, so Name is
-// always a concrete label here.
+// dies. Name is the single-label public claim sent to the server. Route is the
+// canonical dotted local route retained by the agent for public request logs.
+// A --random name is resolved by the CLI before this request, so Name is always
+// a concrete label here.
 type ExposeRequest struct {
 	Name     string         `json:"name"`
+	Route    string         `json:"route"`
 	Port     int            `json:"port,omitempty"`
 	Targets  []route.Target `json:"targets,omitempty"`
 	Paths    []string       `json:"paths,omitempty"`

@@ -17,6 +17,7 @@ func (a *Agent) apiHandler() http.Handler {
 	mux.HandleFunc("POST "+ipc.PathRoutes, a.handleRegister)
 	mux.HandleFunc("DELETE "+ipc.PathRoutes+"/{name}", a.handleUnregister)
 	mux.HandleFunc("GET "+ipc.PathRoutes, a.handleList)
+	mux.HandleFunc("GET "+ipc.PathLogs, a.handleLogs)
 	mux.HandleFunc("GET "+ipc.PathStatus, a.handleStatus)
 	mux.HandleFunc("POST "+ipc.PathShutdown, a.handleShutdown)
 	mux.HandleFunc("POST "+ipc.PathExpose, a.handleExpose)
@@ -111,8 +112,8 @@ func (a *Agent) handleExpose(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid json: "+err.Error(), nil)
 		return
 	}
-	if (in.Port == 0 && len(in.Targets) == 0) || in.Server == "" || in.OwnerPID == 0 || in.Name == "" {
-		writeJSONError(w, http.StatusBadRequest, "targets, server, owner_pid and name are required", nil)
+	if (in.Port == 0 && len(in.Targets) == 0) || in.Server == "" || in.OwnerPID == 0 || in.Name == "" || in.Route == "" {
+		writeJSONError(w, http.StatusBadRequest, "targets, server, owner_pid, name and route are required", nil)
 		return
 	}
 

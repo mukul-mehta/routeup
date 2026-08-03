@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/mukul-mehta/routeup/internal/ipc"
+	"github.com/mukul-mehta/routeup/internal/logs"
 	"github.com/mukul-mehta/routeup/internal/proxy"
 	"github.com/mukul-mehta/routeup/internal/route"
 	"github.com/mukul-mehta/routeup/internal/tunnel"
@@ -29,15 +30,17 @@ type tunnelSession struct {
 type tunnelManager struct {
 	parent context.Context
 	logger *slog.Logger
+	logs   *logs.Store
 
 	mu                   sync.Mutex
 	activeTunnelSessions map[string]*tunnelSession
 }
 
-func newTunnelManager(parent context.Context, logger *slog.Logger) *tunnelManager {
+func newTunnelManager(parent context.Context, logStore *logs.Store, logger *slog.Logger) *tunnelManager {
 	return &tunnelManager{
 		parent:               parent,
 		logger:               logger,
+		logs:                 logStore,
 		activeTunnelSessions: make(map[string]*tunnelSession),
 	}
 }
@@ -60,7 +63,7 @@ func (m *tunnelManager) Expose(reqCtx context.Context, req ipc.ExposeRequest) (s
 	if err != nil {
 		return "", err
 	}
-	handler := proxy.NewTargets(targets, paths, m.logger)
+	handler := proxy.NewTargets(targets, paths, req.Route, m.logs, m.logger)
 
 	tunnelCtx, cancel := context.WithCancel(m.parent)
 	grantedCh := make(chan string, 1)

@@ -10,9 +10,11 @@
 //	  -> remove oldest entry if the ring is full
 //	  -> append the new entry and index it by request ID
 //
-// `routeup logs` will call List, which returns metadata only so normal log
-// output never exposes captured headers or bodies. Future inspect and replay
-// commands will call Get, which returns a deep copy of the complete entry.
+// `routeup logs` calls ListAndWatch, which takes a metadata-only snapshot and
+// returns a signal that closes on the next append. The agent turns that signal
+// into SSE. There is no second ring or per-follower queue: a slow follower
+// re-reads this bounded ring after a change. Future inspect and replay commands
+// call Get, which returns a deep copy of the complete entry.
 //
 // Store is shared by concurrent proxy requests. Public methods lock Store.mu.
 // Helpers ending in Locked must be called only while that mutex is held; they
@@ -56,6 +58,7 @@ type Store struct {
 	start   int
 	size    int
 	byID    map[string]int
+	changes chan struct{}
 }
 
 // NewStore returns a store with routeup's fixed in-memory entry limit.
@@ -63,6 +66,7 @@ func NewStore() *Store {
 	return &Store{
 		entries: make([]Entry, logCapacity),
 		byID:    make(map[string]int, logCapacity),
+		changes: make(chan struct{}),
 	}
 }
 
@@ -101,6 +105,8 @@ func (store *Store) Append(entry Entry) (Entry, error) {
 	store.entries[index] = entry
 	store.byID[entry.ID] = index
 	store.size++
+	close(store.changes)
+	store.changes = make(chan struct{})
 
 	return metadataEntry(entry), nil
 }
@@ -110,11 +116,17 @@ func (store *Store) List(opts ListOptions) []Entry {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	entries := store.matchingEntriesLocked(opts)
-	if opts.Limit > 0 && len(entries) > opts.Limit {
-		entries = entries[len(entries)-opts.Limit:]
-	}
-	return entries
+	return store.listLocked(opts)
+}
+
+// ListAndWatch returns a metadata-only snapshot and a channel that closes when
+// a later entry is appended. Taking both under one lock means a caller cannot
+// miss an entry between listing existing requests and waiting for new ones.
+func (store *Store) ListAndWatch(opts ListOptions) ([]Entry, <-chan struct{}) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	return store.listLocked(opts), store.changes
 }
 
 // Get returns a deep copy of one complete entry by ID.
@@ -161,6 +173,14 @@ func (store *Store) matchingEntriesLocked(opts ListOptions) []Entry {
 		if opts.matches(entry) {
 			entries = append(entries, metadataEntry(entry))
 		}
+	}
+	return entries
+}
+
+func (store *Store) listLocked(opts ListOptions) []Entry {
+	entries := store.matchingEntriesLocked(opts)
+	if opts.Limit > 0 && len(entries) > opts.Limit {
+		entries = entries[len(entries)-opts.Limit:]
 	}
 	return entries
 }
