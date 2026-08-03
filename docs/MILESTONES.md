@@ -575,13 +575,13 @@ Build:
 ```txt
 access log entries
 local/public source field
-request IDs
+opaque request IDs (req_<16-char-random>)
 routeup logs
 routeup logs --follow
 routeup logs --public
 routeup logs --local
 routeup logs --json
-bounded retention
+1024-entry in-memory request ring
 ```
 
 Acceptance:
@@ -608,22 +608,36 @@ Goal: make webhook debugging excellent.
 Build:
 
 ```txt
-opt-in header capture
-opt-in body capture
+opt-in capture: true config
+request and response header/body capture
+256 KiB request and response capture limit
 routeup inspect <request-id>
 routeup replay <request-id>
-redaction controls
-retention controls
 ```
 
 Acceptance:
 
 ```bash
-routeup inspect req_abc123
-routeup replay req_abc123
+routeup inspect req_Ap7kQ3mN8vR2xLzC
+routeup replay req_Ap7kQ3mN8vR2xLzC
 ```
 
-Replay should show exactly what will be replayed and require captured bodies.
+`capture` is disabled by default. When set to `true` in `routeup.json` or the
+`package.json` `routeup` block, it captures request and response headers and
+bodies for that route. The first capture slice has no configurable retention or
+redaction controls; users must opt in only for traffic they are comfortable
+retaining in local agent memory.
+
+The agent keeps its last 1024 request records in one in-memory ring. Each
+captured request and response message retains at most 256 KiB, including
+headers and body. When the ring fills, the oldest record and any capture it
+holds are removed together. Partial captures can be inspected but cannot be
+replayed.
+
+`routeup inspect` displays the captured original request and response.
+`routeup replay` sends the captured request once to its original loopback
+target, then prints the result. It fails without sending when capture was
+disabled, incomplete, truncated, or evicted.
 
 ## Milestone Discipline
 

@@ -351,7 +351,10 @@ Token hashing:       crypto/sha256 (tokens are high-entropy; no KDF needed)
 
 Avoid `viper` at first. Config needs are still unsettled, so a small explicit config loader is better than a large config framework.
 
-The local agent has no persistent storage. Route registry stays in-memory. Logs are an in-memory ring buffer of the last 10k entries; disk-backed log storage is out of scope for v1.
+The local agent has no persistent storage. Route registry stays in-memory. Logs
+are a single in-memory ring of the last 1024 requests. When capture is enabled,
+headers and bodies live in that same request record; the oldest complete record
+is removed when the ring fills. Disk-backed log storage is out of scope for v1.
 
 The public server uses SQLite for token storage, claim tracking, and grace-window state. `modernc.org/sqlite` is chosen specifically so the server cross-compiles cleanly without a cgo toolchain. Add `sqlc` only when query count or scan complexity actually hurts.
 
@@ -449,7 +452,7 @@ listen on local HTTP/HTTPS ingress
 hold active route registry
 terminate local TLS
 reverse proxy to local targets
-record local and public request logs
+record local and public request logs and opt-in captures
 serve local status and error pages
 coordinate active exposes with the public server
 ```
@@ -597,7 +600,8 @@ Where logs live:
 
 ```txt
 agent:  canonical record for every local and public request
-        in-memory ring buffer, last 10k entries
+        1024-entry in-memory request ring
+        optional capture in the same entry
 server: minimal record per public request
         method, path, status, timing, request id
 ```
@@ -622,18 +626,44 @@ routeup logs api.myapp --json
 Default log line:
 
 ```txt
-12:41:03 public api.myapp POST /api/webhooks/github 200 38ms req_abc123
-12:41:07 local  myapp     GET  /settings             200 12ms req_def456
+12:41:03 public api.myapp POST /api/webhooks/github 200 38ms req_Ap7kQ3mN8vR2xLzC
+12:41:07 local  myapp     GET  /settings             200 12ms req_B9vL5rTs1mX8qK2d
 ```
 
-Do not capture headers or bodies by default. Later, opt-in capture can power:
+Request IDs are compact opaque values in `req_<16-char-random>` form. The log
+line already carries the route, method, and path, so IDs stay short enough to
+copy into the inspection commands.
+
+Do not capture headers or bodies by default. A project can opt in with:
+
+```json
+{
+  "capture": true
+}
+```
+
+`capture` applies to both request and response headers and bodies. It is an
+initial, local-only debugging feature: captured data is unredacted and remains
+in agent memory only. It should be enabled only for traffic the developer is
+comfortable retaining locally.
+
+The agent keeps the last 1024 request records in one ring. Each captured request
+and response message is limited to 256 KiB, including headers and body. When a
+new record fills the ring, the oldest record and any capture it holds are both
+removed. A partial message can be inspected but cannot be replayed.
+
+Capture powers:
 
 ```bash
-routeup inspect req_abc123
-routeup replay req_abc123
+routeup inspect req_Ap7kQ3mN8vR2xLzC
+routeup replay req_Ap7kQ3mN8vR2xLzC
 ```
 
-Replay is explicitly not v1.
+`routeup inspect` displays the captured original request and response.
+`routeup replay` immediately sends the complete captured request once to its
+original loopback target, then displays the replay status and duration. It
+never sends to the public hostname or an external webhook sender. It fails
+without sending when capture is unavailable or incomplete.
 
 ## Project Constraints
 
@@ -677,7 +707,6 @@ billing
 hosted SaaS control plane
 web UI
 worktree routing
-request replay
 Windows support
 complex ACLs
 ```
@@ -686,8 +715,8 @@ Possible later additions:
 
 ```txt
 basic auth for public routes
-request inspector
-request replay
+capture redaction controls
+capture retention controls
 webhook signature helpers
 route namespaces for shared servers
 GUI dashboard

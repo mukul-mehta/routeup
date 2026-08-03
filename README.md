@@ -31,7 +31,27 @@ Phase definitions and acceptance criteria live in [docs/MILESTONES.md](docs/MILE
 - [x] **Phase 8 — Local process runner:** configured command execution, route environment, process-group ownership, and cleanup
 - [ ] **Phase 8.5 — Runner exposure & framework adapters:** config-driven public runner exposure and unchanged `vite` support
 - [ ] **Phase 9 — Route logs:** local/public, `routeup logs --follow`
-- [ ] **Phase 10 — Inspect & replay:** opt-in header/body capture, `routeup inspect`/`replay`
+- [ ] **Phase 10 — Inspect & replay:** opt-in `capture: true`, `routeup inspect`/`replay`
+
+### Planned Logs And Replay
+
+Phases 9 and 10 will add an agent-local 1024-entry request-log ring for local
+and public traffic. Request IDs will be compact opaque values such as
+`req_Ap7kQ3mN8vR2xLzC`.
+
+Projects will opt into request inspection with:
+
+```json
+{
+  "capture": true
+}
+```
+
+This captures request and response headers and bodies in the same agent-memory
+ring used for request logs. Each request and response message is limited to 256
+KiB. `routeup replay <request-id>` will send the complete captured request once
+to its original loopback target. Capture is disabled by default and unredacted
+when enabled, so use it only for locally trusted debugging traffic.
 
 ## LLM Usage
 

@@ -1,0 +1,53 @@
+// Package logs defines the agent-local request log and bounded capture store.
+//
+// A future proxy creates one Entry after it finishes handling an HTTP request.
+// Store retains the entry for `routeup logs`, while Capture, defined in
+// capture.go, holds optional request and response data for inspect and replay.
+//
+// An entry carries two intentionally different paths:
+//
+//	RequestPath  the incoming URL path, such as /api/webhooks/github
+//	Target.Path   the configured target prefix selected for that request, such as /api
+//
+// The target uses route.Target rather than a duplicate logs type so the proxy,
+// registry, and log all share the same path/port representation.
+//
+//	proxy --> Entry --> Store --> agent API --> CLI
+package logs
+
+import (
+	"time"
+
+	"github.com/mukul-mehta/routeup/internal/route"
+)
+
+// Source identifies how a request reached the local agent.
+type Source string
+
+const (
+	// SourceLocal is traffic received at a .localhost route.
+	SourceLocal Source = "local"
+
+	// SourcePublic is traffic received through a public tunnel.
+	SourcePublic Source = "public"
+)
+
+// Entry is one completed request handled by the local agent. Capture is nil
+// when the route did not opt in.
+type Entry struct {
+	ID          string        `json:"id"`
+	StartedAt   time.Time     `json:"started_at"`
+	Duration    time.Duration `json:"duration"`
+	Source      Source        `json:"source"`
+	Route       string        `json:"route"`
+	Host        string        `json:"host"`
+	Method      string        `json:"method"`
+	RequestPath string        `json:"request_path"`
+	Target      route.Target  `json:"target"`
+	Status      int           `json:"status"`
+	Capture     *Capture      `json:"capture,omitempty"`
+}
+
+func (source Source) valid() bool {
+	return source == SourceLocal || source == SourcePublic
+}

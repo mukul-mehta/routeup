@@ -1,0 +1,171 @@
+// Capture is the optional detailed portion of one log Entry.
+//
+// Capture exists because a later proxy needs to inspect a body without changing
+// the bytes or errors that reach the upstream service. Reading an HTTP body into
+// memory before proxying would break streaming and allow an arbitrarily large
+// request to exhaust the agent.
+//
+// MessageCapture hides that bookkeeping from the proxy. It copies headers,
+// exposes an io.ReadCloser the proxy can use normally, then creates a
+// CapturedMessage when Take is called after forwarding ends.
+//
+//	incoming HTTP message
+//	  -> NewMessageCapture
+//	  -> proxy reads MessageCapture as its body
+//	  -> Take returns CapturedMessage
+//	  -> request or response field on Capture
+//
+// A captured request or response is limited to 256 KiB, including headers and
+// body. Complete is false when the full message did not fit or the body did not
+// reach EOF. Inspect may still display the retained prefix; replay must require
+// a complete captured request.
+package logs
+
+import (
+	"io"
+	"net/http"
+	"sort"
+)
+
+const maxCapturedMessageBytes = 256 << 10
+
+// CapturedMessage is one captured HTTP request or response.
+type CapturedMessage struct {
+	Headers  http.Header `json:"headers,omitempty"`
+	Body     []byte      `json:"body,omitempty"`
+	Complete bool        `json:"complete"`
+}
+
+// Capture holds the request and response data retained for an inspected entry.
+type Capture struct {
+	Request  CapturedMessage `json:"request"`
+	Response CapturedMessage `json:"response"`
+}
+
+// MessageCapture is an io.ReadCloser that forwards its source body unchanged
+// while retaining the bounded data needed to build one CapturedMessage.
+type MessageCapture struct {
+	headers         http.Header
+	headersComplete bool
+	body            io.ReadCloser
+	limit           int
+	data            []byte
+	bodyComplete    bool
+	truncated       bool
+}
+
+// NewMessageCapture starts a bounded capture for headers and body. The returned
+// value can replace an HTTP request or response body directly.
+func NewMessageCapture(headers http.Header, body io.ReadCloser) *MessageCapture {
+	capturedHeaders, remaining, complete := captureHeaders(headers, maxCapturedMessageBytes)
+	if body == nil {
+		body = http.NoBody
+	}
+	return &MessageCapture{
+		headers:         capturedHeaders,
+		headersComplete: complete,
+		body:            body,
+		limit:           remaining,
+		data:            make([]byte, 0, remaining),
+	}
+}
+
+// Read forwards to the source body and retains at most the remaining message
+// capacity.
+func (capture *MessageCapture) Read(p []byte) (int, error) {
+	n, err := capture.body.Read(p)
+	if n > 0 {
+		capture.append(p[:n])
+	}
+	if err == io.EOF {
+		capture.bodyComplete = true
+	}
+	return n, err
+}
+
+// Close closes the source body.
+func (capture *MessageCapture) Close() error {
+	return capture.body.Close()
+}
+
+// Take transfers the retained data into a CapturedMessage. It should only be
+// called after no further reads can occur.
+func (capture *MessageCapture) Take() CapturedMessage {
+	body := capture.data
+	capture.data = nil
+	return CapturedMessage{
+		Headers:  capture.headers,
+		Body:     body,
+		Complete: capture.headersComplete && capture.bodyComplete && !capture.truncated,
+	}
+}
+
+func (capture *MessageCapture) append(data []byte) {
+	remaining := capture.limit - len(capture.data)
+	if remaining == 0 {
+		capture.truncated = true
+		return
+	}
+	if len(data) > remaining {
+		capture.data = append(capture.data, data[:remaining]...)
+		capture.truncated = true
+		return
+	}
+	capture.data = append(capture.data, data...)
+}
+
+func captureHeaders(headers http.Header, limit int) (http.Header, int, bool) {
+	keys := make([]string, 0, len(headers))
+	for key := range headers {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	captured := make(http.Header)
+	remaining := limit
+	for _, key := range keys {
+		for _, value := range headers[key] {
+			cost := len(key) + len(value)
+			if cost > remaining {
+				return captured, remaining, false
+			}
+			captured.Add(key, value)
+			remaining -= cost
+		}
+	}
+	return captured, remaining, true
+}
+
+func (capture *Capture) clone() *Capture {
+	if capture == nil {
+		return nil
+	}
+	out := *capture
+	out.Request.Headers = capture.Request.Headers.Clone()
+	out.Request.Body = append([]byte(nil), capture.Request.Body...)
+	out.Response.Headers = capture.Response.Headers.Clone()
+	out.Response.Body = append([]byte(nil), capture.Response.Body...)
+	return &out
+}
+
+func (capture *Capture) withinLimit() bool {
+	if capture == nil {
+		return true
+	}
+	return messageBytes(capture.Request) <= maxCapturedMessageBytes &&
+		messageBytes(capture.Response) <= maxCapturedMessageBytes
+}
+
+func messageBytes(message CapturedMessage) int {
+	return headerBytes(message.Headers) + len(message.Body)
+}
+
+func headerBytes(headers http.Header) int {
+	bytes := 0
+	for key, values := range headers {
+		for _, value := range values {
+			bytes += len(key) + len(value)
+		}
+	}
+	return bytes
+}
