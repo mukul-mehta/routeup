@@ -19,6 +19,7 @@ internal/
     target.go              #   path-routed targets and expose path matching
 
   config/                  # Config file discovery and value resolution
+    constants.go           #   Source type constants (routeup.json, package.json, none)
     discovery.go           #   Discover: routeup.json or package.json lookup
     packagejson.go         #   read package.json "routeup" block
     resolve.go             #   Resolve: flag > env > file config precedence
@@ -31,6 +32,7 @@ internal/
   certs/                   # Local CA and per-SNI TLS issuer
     ca.go                  #   CA struct, Create, Load, EnsureCA, Inspect
     leaf.go                #   Issuer: per-SNI leaf certificates
+    trust.go               #   InstallTrust, VerifyTrust, UninstallTrust (platform dispatch)
     trust_darwin.go        #   OS trust (macOS)
     trust_linux.go         #   OS trust (Linux)
     local.go               #   EnsureLocalCA() convenience
@@ -51,6 +53,7 @@ internal/
     lifecycle.go           #   EnsureRunning, Stop, Restart, spawnAndWait
     expose.go              #   Expose, Unexpose
     reconcile.go           #   MaintainClaim loop (re-register on agent restart)
+    timeouts.go            #   IPC timeout constants (handshake, spawn/stop budgets)
 
   agent/                   # Local agent daemon
     agent.go               #   Agent struct, Run (UDS API + TLS proxy), reap
@@ -248,14 +251,16 @@ types:
 
 ```go
 type Claim struct {
-    Name         string    // dotted route name
-    Port         int       // root target shorthand / display port
-    Targets      []route.Target
-    OwnerPID     int       // CLI's PID (for reap)
-    OwnerCWD     string    // (for conflict messages)
-    RegisteredAt time.Time
-    PublicHost   string    // response-only, same-owner exposure
-    PublicPaths  []string  // response-only, same-owner expose paths
+    Name          string         // dotted route name
+    Port          int            // root target shorthand / display port
+    Targets       []route.Target
+    Capture       bool           // opt-in request body/header retention (Phase 10)
+    RedactHeaders []string       // headers excluded from capture
+    OwnerPID      int            // CLI's PID (for reap)
+    OwnerCWD      string         // (for conflict messages)
+    RegisteredAt  time.Time
+    PublicHost    string         // response-only, same-owner exposure
+    PublicPaths   []string       // response-only, same-owner expose paths
 }
 
 type Status struct {
@@ -266,10 +271,14 @@ type Status struct {
 }
 
 type ExposeRequest struct {
-    Name, Server, Token string
-    Port, OwnerPID      int
-    Targets             []route.Target
-    Paths               []string
+    Name          string         // single-label public claim sent to the server
+    Route         string         // canonical dotted local route (retained for public request logs)
+    Server, Token string
+    Port, OwnerPID int
+    Targets       []route.Target
+    Paths         []string
+    Capture       bool
+    RedactHeaders []string
 }
 
 type ExposeResponse struct {
@@ -281,8 +290,8 @@ type UnexposeRequest struct {
 }
 ```
 
-Path constants: `/v1/status`, `/v1/routes`, `/v1/shutdown`, `/v1/expose`,
-`/v1/unexpose`.
+Path constants: `/v1/status`, `/v1/routes`, `/v1/logs`, `/v1/requests`,
+`/v1/shutdown`, `/v1/expose`, `/v1/unexpose`.
 
 ---
 
