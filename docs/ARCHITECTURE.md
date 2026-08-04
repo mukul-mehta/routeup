@@ -524,8 +524,9 @@ Config sources, highest precedence first:
 ```
 
 Route naming is config-driven: the `name` field in `routeup.json` or the
-`routeup` block of `package.json` is the project name. There is no CWD-basename
-or top-level `package.json` `name` fallback.
+`routeup` block of `package.json` is the project name. When no name is set in
+config or `ROUTEUP_NAME`, the working-directory basename is used as a last-resort
+fallback (e.g. running from `~/projects/myapp` gives the route name `myapp`).
 
 Config files are looked up in the current working directory only:
 
@@ -541,10 +542,12 @@ targets. `port: 5173` means `targets: [{path: "/", port: 5173}]`; explicit
 targets support frontend/API routing behind one route. `expose.paths` limits
 public exposure only and defaults to all paths.
 
-Phase 8.5 is still planned. It adds `expose.enabled` as an explicit runner-mode
-opt-in. An `expose` object that only contains `paths` currently constrains
-standalone exposure; it does not make bare `routeup` contact a public server
-implicitly.
+`expose.enabled` is implemented. When set, bare `routeup` obtains the public
+route before child launch, injects the granted URL into `ROUTEUP_URL` (while
+`ROUTEUP_LOCAL_URL` stays local), and releases the tunnel alongside the route and
+child group on exit. The Vite framework adapter from Phase 8.5 is still deferred.
+An `expose` object that only contains `paths` constrains standalone exposure and
+does not trigger runner-mode exposure on its own.
 
 Runner mode has one command field per config source:
 

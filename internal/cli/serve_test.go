@@ -38,13 +38,3 @@ func TestServe_NoTargets_Errors(t *testing.T) {
 		t.Errorf("error %q does not contain %q", err.Error(), "no targets")
 	}
 }
-
-func TestServe_NoName_Errors(t *testing.T) {
-	_, _, err := runServeIn(t, t.TempDir(), "--port", "8080")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "no route name") {
-		t.Errorf("error %q does not contain %q", err.Error(), "no route name")
-	}
-}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -40,7 +41,7 @@ func runRun(cmd *cobra.Command, cwd string) error {
 		return errors.New("nothing to run: set \"script\" in your package.json routeup block or \"command\" in routeup.json (or use `routeup serve`)")
 	}
 
-	routeName, err := runnerRoute(file)
+	routeName, err := runnerRoute(file, cwd)
 	if err != nil {
 		return err
 	}
@@ -113,12 +114,44 @@ func runRun(cmd *cobra.Command, cwd string) error {
 		}
 	}()
 
+	publicURL := ""
+	if file.Expose.Enabled {
+		serverURL, token := resolveServerToken("", "")
+		if serverURL == "" {
+			return errors.New("expose.enabled requires a server — set ROUTEUP_SERVER or run `routeup setup --server …`")
+		}
+		exposePaths, err := route.NormalizePathPatterns(file.Expose.Paths)
+		if err != nil {
+			return err
+		}
+		host, stopExpose, err := holdExposure(ctx, client, ipc.ExposeRequest{
+			Name:          normalizePublicName(routeName),
+			Route:         routeName.String(),
+			Port:          appPort,
+			Targets:       targets,
+			Paths:         exposePaths,
+			Capture:       file.Capture,
+			RedactHeaders: file.RedactHeaders,
+			Server:        serverURL,
+			Token:         token,
+			OwnerPID:      os.Getpid(),
+		})
+		if err != nil {
+			return err
+		}
+		defer stopExpose()
+		publicURL = "https://" + host
+	}
+
+	caCertPath, _ := state.CACertPath()
 	local := localURL(routeName.LocalHost(), tlsPort)
 	childEnv := process.InjectEnv(os.Environ(), process.EnvInputs{
-		Port:     appPort,
-		Host:     "127.0.0.1",
-		LocalURL: local,
-		WorkDir:  cwd,
+		Port:       appPort,
+		Host:       "127.0.0.1",
+		LocalURL:   local,
+		PublicURL:  publicURL,
+		CACertPath: caCertPath,
+		WorkDir:    cwd,
 	})
 
 	_, _ = fmt.Fprintf(out, "running: %s\n", command)
@@ -155,6 +188,9 @@ func runRun(cmd *cobra.Command, cwd string) error {
 
 	_, _ = fmt.Fprintf(out, "route: %s\n", routeName)
 	_, _ = fmt.Fprintf(out, "local: %s\n", local)
+	if publicURL != "" {
+		_, _ = fmt.Fprintf(out, "public: %s\n", publicURL)
+	}
 	printTargets(out, targets)
 	_, _ = fmt.Fprintln(out, "")
 
@@ -163,19 +199,12 @@ func runRun(cmd *cobra.Command, cwd string) error {
 	return runnerResultError(result, appPort, false)
 }
 
-func runnerRoute(file config.Config) (route.Name, error) {
-	name := strings.TrimSpace(os.Getenv("ROUTEUP_NAME"))
-	if name == "" {
-		name = file.Name
-	}
-	if name == "" {
-		return route.Name{}, errors.New("no route name: set \"name\" in your routeup config or ROUTEUP_NAME")
-	}
-	parsed, err := route.Parse(name)
-	if err != nil {
-		return route.Name{}, fmt.Errorf("invalid route name: %w", err)
-	}
-	return parsed, nil
+func runnerRoute(file config.Config, cwd string) (route.Name, error) {
+	return config.ResolveName(config.Inputs{
+		Env:     os.Getenv,
+		File:    file,
+		DirName: filepath.Base(cwd),
+	})
 }
 
 func runnerTargets(file config.Config) ([]route.Target, int, error) {

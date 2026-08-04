@@ -47,3 +47,44 @@ func TestInjectEnv_LocalOnly(t *testing.T) {
 		t.Errorf("FOO = %q, want it preserved", got["FOO"])
 	}
 }
+
+func TestInjectEnv_PublicURLOverridesROUTEUP_URL(t *testing.T) {
+	base := []string{"PATH=/usr/bin"}
+	got := envMap(InjectEnv(base, EnvInputs{
+		Port:      8080,
+		LocalURL:  "https://myapp.localhost",
+		PublicURL: "https://myapp.example.com",
+	}))
+
+	if got["ROUTEUP_LOCAL_URL"] != "https://myapp.localhost" {
+		t.Errorf("ROUTEUP_LOCAL_URL = %q, want local URL", got["ROUTEUP_LOCAL_URL"])
+	}
+	if got["ROUTEUP_URL"] != "https://myapp.example.com" {
+		t.Errorf("ROUTEUP_URL = %q, want public URL", got["ROUTEUP_URL"])
+	}
+}
+
+func TestInjectEnv_CACertPath(t *testing.T) {
+	base := []string{"PATH=/usr/bin"}
+	got := envMap(InjectEnv(base, EnvInputs{
+		Port:       3000,
+		LocalURL:   "https://myapp.localhost",
+		CACertPath: "/home/user/.routeup/ca.crt",
+	}))
+
+	if got["NODE_EXTRA_CA_CERTS"] != "/home/user/.routeup/ca.crt" {
+		t.Errorf("NODE_EXTRA_CA_CERTS = %q, want /home/user/.routeup/ca.crt", got["NODE_EXTRA_CA_CERTS"])
+	}
+}
+
+func TestInjectEnv_NoCACertPath(t *testing.T) {
+	base := []string{"PATH=/usr/bin"}
+	got := envMap(InjectEnv(base, EnvInputs{
+		Port:     3000,
+		LocalURL: "https://myapp.localhost",
+	}))
+
+	if _, ok := got["NODE_EXTRA_CA_CERTS"]; ok {
+		t.Errorf("NODE_EXTRA_CA_CERTS should not be set when CACertPath is empty, got %q", got["NODE_EXTRA_CA_CERTS"])
+	}
+}

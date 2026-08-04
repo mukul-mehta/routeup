@@ -16,6 +16,10 @@ type Inputs struct {
 	TargetFlags    []route.Target
 	Env            func(string) string
 	File           Config
+	// DirName is the working-directory basename used as a last-resort route
+	// name when no name is set via positional, ROUTEUP_NAME, or File.Name.
+	// Callers set this to filepath.Base(cwd); it is validated by route.Parse.
+	DirName string
 }
 
 // Resolved is the final, validated route + target.
@@ -154,7 +158,10 @@ func resolveName(in Inputs) (string, error) {
 	if in.File.Name != "" {
 		return in.File.Name, nil
 	}
-	return "", errors.New("no route name (pass a positional, set ROUTEUP_NAME, or set name in config)")
+	if in.DirName != "" {
+		return in.DirName, nil
+	}
+	return "", errors.New("no route name (pass a positional, set ROUTEUP_NAME, set name in config, or run from a named directory)")
 }
 
 // applyBareName implements the PLAN.md rule: if positional has no dot and a

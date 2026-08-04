@@ -1,0 +1,16 @@
+{
+  "name": "routeup-node-runner-expose-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "routeup",
+    "dev:app": "node server.mjs"
+  },
+  "routeup": {
+    "name": "node-runner-expose",
+    "script": "dev:app",
+    "expose": {
+      "enabled": true
+    }
+  }
+}

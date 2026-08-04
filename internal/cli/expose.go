@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -81,7 +82,7 @@ func runExpose(cmd *cobra.Command, args []string, cwd string, opts exposeOpts) e
 		return err
 	}
 
-	resolvedRoute, err := resolveExposeRoute(positional, discovered.Config, opts.random)
+	resolvedRoute, err := resolveExposeRoute(positional, discovered.Config, opts.random, cwd)
 	if err != nil {
 		return err
 	}
@@ -213,17 +214,15 @@ func printRouteLocal(out io.Writer, routeName string, tlsPort int) {
 	_, _ = fmt.Fprintf(out, "local: %s\n", localURL(n.LocalHost(), tlsPort))
 }
 
-func resolveExposeRoute(positional string, file config.Config, random bool) (route.Name, error) {
+func resolveExposeRoute(positional string, file config.Config, random bool, cwd string) (route.Name, error) {
 	if random {
 		return route.Parse(route.RandomName())
-	}
-	if positional == "" && strings.TrimSpace(os.Getenv("ROUTEUP_NAME")) == "" && file.Name == "" {
-		return route.Name{}, errors.New("provide a route name or use --random")
 	}
 	return config.ResolveName(config.Inputs{
 		PositionalName: positional,
 		Env:            os.Getenv,
 		File:           file,
+		DirName:        filepath.Base(cwd),
 	})
 }
 

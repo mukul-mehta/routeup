@@ -91,7 +91,7 @@ routeup update
 routeup uninstall
 ```
 
-The split: `serve` creates a route (local by default; `--expose` adds public exposure in one go). Standalone `expose` reuses an active route's targets when available, otherwise it exposes targets from flags or config without creating a local registration. Bare `routeup` is the Phase 8 local script runner; Phase 8.5 adds config-driven runner exposure and adapters for explicitly supported frameworks.
+The split: `serve` creates a route (local by default; `--expose` adds public exposure in one go). Standalone `expose` reuses an active route's targets when available, otherwise it exposes targets from flags or config without creating a local registration. Bare `routeup` is the Phase 8 local script runner; Phase 8.5 added `expose.enabled` for config-driven runner exposure. Adapters for explicitly supported frameworks are deferred.
 
 Operator-only commands:
 

@@ -498,10 +498,12 @@ request inspect
 Goal: make runner mode optionally own public exposure and support unchanged
 commands for explicitly tested frameworks that do not honor `PORT` or `HOST`.
 
-> Implementation note: planned. Phase 8 users can already run `routeup expose`
-> in a second terminal to expose the runner's dynamic target. This milestone
-> integrates that lifecycle into bare `routeup` and starts framework adaptation
-> with the exact bare `vite` command shape rather than a generic shell rewriter.
+> Implementation note: partially complete. `expose.enabled` is implemented:
+> when set in config, bare `routeup` contacts the configured server, claims
+> a public route before child launch, injects the granted URL into `ROUTEUP_URL`
+> (while `ROUTEUP_LOCAL_URL` stays local), and releases the tunnel alongside
+> the route and child group on exit. The Vite framework adapter and
+> runner-driven integration tests for the exposed lifecycle are deferred.
 
 Build:
 

@@ -176,6 +176,37 @@ func TestResolve(t *testing.T) {
 			wantRoute: "myapp",
 			wantPort:  8080,
 		},
+
+		// DirName fallback
+		{
+			name: "DirName used as last-resort when no other name",
+			in: Inputs{
+				PortFlag: 8080,
+				DirName:  "myproject",
+			},
+			wantRoute: "myproject",
+			wantPort:  8080,
+		},
+		{
+			name: "DirName ignored when file name is set",
+			in: Inputs{
+				PortFlag: 8080,
+				File:     Config{Name: "myapp"},
+				DirName:  "ignored",
+			},
+			wantRoute: "myapp",
+			wantPort:  8080,
+		},
+		{
+			name: "DirName ignored when ROUTEUP_NAME is set",
+			in: Inputs{
+				PortFlag: 8080,
+				Env:      envFor(map[string]string{"ROUTEUP_NAME": "envname"}),
+				DirName:  "ignored",
+			},
+			wantRoute: "envname",
+			wantPort:  8080,
+		},
 	}
 
 	for _, tc := range cases {

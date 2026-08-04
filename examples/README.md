@@ -1,24 +1,21 @@
 # routeup Examples
 
-These examples demonstrate routeup config shapes and runner mode, from one
-route/one process to multiple path targets.
-
-```txt
-/      -> frontend target
-/api/* -> API target
-```
-
-Run commands from inside an example directory so routeup discovers its
-`routeup.json` or package.json `routeup` block.
+Runnable examples covering the main routeup config shapes, from a single port to
+path-routed targets and public runner exposure. Run commands from inside an
+example directory so routeup discovers its `routeup.json` or package.json
+`routeup` block.
 
 ## Examples
 
-- [`go-split`](go-split/) - frontend + API behind one route using path targets.
-- [`node-basic`](node-basic/) - one Node.js app behind one route using `port`.
-- [`node-runner`](node-runner/) - bare `routeup` runs a configured package script and injects its environment.
-- [`python-api`](python-api/) - one Python API with `expose.paths` for webhooks.
+| Example | What it shows |
+|---|---|
+| [`node-basic`](node-basic/) | Simplest case: one route, one fixed port, `routeup serve` |
+| [`node-runner`](node-runner/) | Runner mode: bare `routeup` starts the app, injects `PORT`/`HOST`/`ROUTEUP_*` |
+| [`node-runner-expose`](node-runner-expose/) | Runner + `expose.enabled: true`: `ROUTEUP_URL` becomes the granted public URL |
+| [`go-split`](go-split/) | Path routing: frontend at `/` and API at `/api` behind one route |
+| [`python-api`](python-api/) | Webhook debugging: `capture: true`, `redact_headers`, `expose.paths` |
 
-## Basic Flow
+## Prerequisites
 
 Build routeup from the repository root:
 
@@ -26,15 +23,41 @@ Build routeup from the repository root:
 go build -o ./routeup ./cmd/routeup
 ```
 
-Run setup once if needed:
+Run one-time setup if you haven't already:
 
 ```bash
 ./routeup setup
 ```
 
-The `go-split`, `node-basic`, and `python-api` examples start their app and
-`../../routeup serve` separately. The `node-runner` example uses bare `routeup`
-to own both the app process and route lifecycle.
+## How each example runs
 
-The example configs and dependency-free Node/Python syntax checks are covered by
-`go test ./examples/...`, which is included in the normal repository test run.
+**node-basic, go-split, python-api** — start the app in one terminal and
+`../../routeup serve` in another. The app listens on a fixed port; routeup
+registers the route and proxies traffic.
+
+**node-runner** — bare `routeup` owns the app process and route lifecycle.
+No second terminal needed:
+
+```bash
+cd examples/node-runner
+PATH="$(cd ../.. && pwd):$PATH" pnpm dev
+```
+
+**node-runner-expose** — same as node-runner but `expose.enabled: true` in
+the config. routeup claims a public route before launching the app and tears
+it down on exit. Requires `ROUTEUP_SERVER` and `ROUTEUP_TOKEN`:
+
+```bash
+cd examples/node-runner-expose
+ROUTEUP_SERVER=https://routeup.dev ROUTEUP_TOKEN=sk_routeup_... \
+  PATH="$(cd ../.. && pwd):$PATH" pnpm dev
+```
+
+## Tests
+
+Example configs and Node/Python syntax are covered by `go test ./examples/...`,
+included in the normal test run:
+
+```bash
+go test ./examples/...
+```

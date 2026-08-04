@@ -74,7 +74,11 @@ func TestNodeExampleSyntax(t *testing.T) {
 	if err != nil {
 		t.Skip("node is not installed")
 	}
-	for _, path := range []string{"node-basic/server.mjs", "node-runner/server.mjs"} {
+	for _, path := range []string{
+		"node-basic/server.mjs",
+		"node-runner/server.mjs",
+		"node-runner-expose/server.mjs",
+	} {
 		runExampleCheck(t, node, "--check", filepath.FromSlash(path))
 	}
 }
@@ -86,6 +90,25 @@ func TestRunnerExampleConfig(t *testing.T) {
 	}
 	if !ok || cfg.Name != "node-runner" || cfg.Script != "" || cfg.Command != "node server.mjs" {
 		t.Fatalf("runner config = %#v, present = %t", cfg, ok)
+	}
+}
+
+func TestRunnerExposeExampleConfig(t *testing.T) {
+	cfg, ok, err := config.LoadPackageJSON(filepath.FromSlash("node-runner-expose/package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("routeup block not found in node-runner-expose/package.json")
+	}
+	if cfg.Name != "node-runner-expose" {
+		t.Fatalf("name = %q, want %q", cfg.Name, "node-runner-expose")
+	}
+	if cfg.Command != "node server.mjs" {
+		t.Fatalf("command = %q, want %q", cfg.Command, "node server.mjs")
+	}
+	if !cfg.Expose.Enabled {
+		t.Fatal("expose.enabled = false, want true")
 	}
 }
 

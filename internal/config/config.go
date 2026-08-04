@@ -45,6 +45,12 @@ type Config struct {
 
 // ExposeConfig holds public exposure constraints loaded from config.
 type ExposeConfig struct {
+	// Enabled opts bare `routeup` (runner mode) into public exposure before
+	// child launch. When true, the runner contacts the configured server,
+	// claims a public route, and injects the public URL into ROUTEUP_URL.
+	// Has no effect on standalone `routeup serve` or `routeup expose`.
+	Enabled bool `json:"enabled,omitempty"`
+
 	// Paths limits which request paths are exposed publicly. Empty means all paths.
 	Paths []string `json:"paths,omitempty"`
 }

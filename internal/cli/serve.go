@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -97,6 +98,7 @@ func runServe(cmd *cobra.Command, args []string, cwd string, opts serveOpts) err
 		TargetFlags:    targetFlags,
 		Env:            os.Getenv,
 		File:           discovered.Config,
+		DirName:        filepath.Base(cwd),
 	})
 	if err != nil {
 		return err

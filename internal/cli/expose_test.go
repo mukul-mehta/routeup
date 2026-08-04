@@ -62,7 +62,7 @@ func TestPrintRouteLocal_NonDefaultTLSPort(t *testing.T) {
 func TestResolveExposeRoute(t *testing.T) {
 	t.Setenv("ROUTEUP_NAME", "")
 
-	got, err := resolveExposeRoute("api", config.Config{Name: "myapp"}, false)
+	got, err := resolveExposeRoute("api", config.Config{Name: "myapp"}, false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,11 +70,17 @@ func TestResolveExposeRoute(t *testing.T) {
 		t.Fatalf("route = %q, want %q", got, "api.myapp")
 	}
 
-	if _, err := resolveExposeRoute("api..myapp", config.Config{}, false); err == nil || !strings.Contains(err.Error(), "invalid route name") {
+	if _, err := resolveExposeRoute("api..myapp", config.Config{}, false, ""); err == nil || !strings.Contains(err.Error(), "invalid route name") {
 		t.Fatalf("expected invalid route name, got %v", err)
 	}
-	if _, err := resolveExposeRoute("", config.Config{}, false); err == nil || !strings.Contains(err.Error(), "use --random") {
-		t.Fatalf("expected missing-name guidance, got %v", err)
+
+	// No name set anywhere: falls back to the working-directory basename.
+	got, err = resolveExposeRoute("", config.Config{}, false, "/projects/myservice")
+	if err != nil {
+		t.Fatalf("expected dirname fallback, got error: %v", err)
+	}
+	if got.String() != "myservice" {
+		t.Fatalf("route = %q, want %q", got, "myservice")
 	}
 }
 

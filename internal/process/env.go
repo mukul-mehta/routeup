@@ -13,8 +13,15 @@ type EnvInputs struct {
 	Port int
 	// Host is exported as HOST. Empty defaults to 127.0.0.1.
 	Host string
-	// LocalURL is exported as ROUTEUP_LOCAL_URL and ROUTEUP_URL.
+	// LocalURL is exported as ROUTEUP_LOCAL_URL. Also sets ROUTEUP_URL unless
+	// PublicURL is provided.
 	LocalURL string
+	// PublicURL, when non-empty, sets ROUTEUP_URL to the granted public URL.
+	// ROUTEUP_LOCAL_URL always contains the local URL.
+	PublicURL string
+	// CACertPath, when non-empty, is exported as NODE_EXTRA_CA_CERTS so
+	// Node.js child processes trust the routeup local CA without manual setup.
+	CACertPath string
 	// WorkDir is the project directory; its node_modules/.bin is prepended to
 	// PATH so local dev binaries resolve without a package-manager wrapper.
 	WorkDir string
@@ -42,7 +49,14 @@ func InjectEnv(base []string, in EnvInputs) []string {
 	env = upsert(env, "HOST", host)
 	if in.LocalURL != "" {
 		env = upsert(env, "ROUTEUP_LOCAL_URL", in.LocalURL)
-		env = upsert(env, "ROUTEUP_URL", in.LocalURL)
+		routeupURL := in.LocalURL
+		if in.PublicURL != "" {
+			routeupURL = in.PublicURL
+		}
+		env = upsert(env, "ROUTEUP_URL", routeupURL)
+	}
+	if in.CACertPath != "" {
+		env = upsert(env, "NODE_EXTRA_CA_CERTS", in.CACertPath)
 	}
 	return env
 }

@@ -2,8 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -26,20 +24,6 @@ func TestRun_NothingToRun(t *testing.T) {
 	err := runRun(newRunCmd(), t.TempDir())
 	if err == nil || !strings.Contains(err.Error(), "nothing to run") {
 		t.Fatalf("expected 'nothing to run' error, got %v", err)
-	}
-}
-
-func TestRun_CommandWithoutName(t *testing.T) {
-	t.Setenv("ROUTEUP_NAME", "")
-
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "routeup.json"), []byte(`{"command":"true"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	err := runRun(newRunCmd(), dir)
-	if err == nil || !strings.Contains(err.Error(), "no route name") {
-		t.Fatalf("expected 'no route name' error, got %v", err)
 	}
 }
 
