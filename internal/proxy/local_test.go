@@ -50,15 +50,21 @@ import (
 
 type testTargetLookup map[string][]route.Target
 
-func (l testTargetLookup) LookupTargets(name string) ([]route.Target, bool, bool) {
+func (l testTargetLookup) LookupTargets(name string) ([]route.Target, bool, []string, bool) {
 	targets, ok := l[name]
-	return targets, false, ok
+	return targets, false, nil, ok
 }
 
 type captureTargetLookup []route.Target
 
-func (l captureTargetLookup) LookupTargets(_ string) ([]route.Target, bool, bool) {
-	return l, true, true
+func (l captureTargetLookup) LookupTargets(_ string) ([]route.Target, bool, []string, bool) {
+	return l, true, nil, true
+}
+
+type redactingTargetLookup []route.Target
+
+func (l redactingTargetLookup) LookupTargets(_ string) ([]route.Target, bool, []string, bool) {
+	return l, true, []string{"Authorization", "Cookie"}, true
 }
 
 func TestLocalProxy_PathTargets(t *testing.T) {
@@ -177,6 +183,56 @@ func TestLocalProxy_CapturesIncomingRequest(t *testing.T) {
 	}
 }
 
+func TestLocalProxy_RedactsConfiguredHeadersWithoutDroppingForwarding(t *testing.T) {
+	forwardedAuth := make(chan string, 1)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		forwardedAuth <- r.Header.Get("Authorization")
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer backend.Close()
+
+	store := logs.NewStore()
+	proxyServer := httptest.NewServer(New(redactingTargetLookup{{Path: "/", Port: testServerPort(t, backend.URL)}}, store, nil))
+	defer proxyServer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/webhook", strings.NewReader("payload"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Host = "myapp.localhost"
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("Cookie", "session=secret")
+	req.Header.Set("X-Trace", "keep-me")
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.StatusCode)
+	}
+	if got := <-forwardedAuth; got != "Bearer secret" {
+		t.Fatalf("forwarded authorization = %q, want original secret", got)
+	}
+
+	entries := store.List(logs.ListOptions{})
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	entry, ok := store.Get(entries[0].ID)
+	if !ok || entry.Capture == nil {
+		t.Fatalf("captured entry = %#v, want retained request", entry)
+	}
+	request := entry.Capture.Request
+	if request.Headers.Get("Authorization") != "" || request.Headers.Get("Cookie") != "" {
+		t.Fatalf("redacted headers retained: %#v", request.Headers)
+	}
+	if request.Headers.Get("X-Trace") != "keep-me" {
+		t.Fatalf("non-redacted header missing: %#v", request.Headers)
+	}
+}
+
 func TestPublicProxy_RecordsCanonicalLocalRoute(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, "ok")
@@ -186,7 +242,7 @@ func TestPublicProxy_RecordsCanonicalLocalRoute(t *testing.T) {
 	store := logs.NewStore()
 	proxyServer := httptest.NewServer(NewTargets([]route.Target{
 		{Path: "/", Port: testServerPort(t, backend.URL)},
-	}, nil, "api.myapp", true, store, nil))
+	}, nil, "api.myapp", true, nil, store, nil))
 	defer proxyServer.Close()
 
 	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/webhooks/github", strings.NewReader("public webhook"))

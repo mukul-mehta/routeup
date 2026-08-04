@@ -19,7 +19,7 @@ func (a *Agent) handleInspect(w http.ResponseWriter, r *http.Request) {
 	}
 	entry, ok := a.logStore.Get(id)
 	if !ok {
-		writeJSONError(w, http.StatusNotFound, "request not found", nil)
+		writeJSONError(w, http.StatusNotFound, "request not found (the agent may have restarted or the request may have been evicted)", nil)
 		return
 	}
 	if entry.Capture == nil {

@@ -51,7 +51,9 @@ func (s *Server) handler() http.Handler {
 // header hygiene, body streaming, and its own 502 on a dead tunnel; a Host with
 // no live tunnel is a 503 here.
 func (s *Server) serveIngress(w http.ResponseWriter, r *http.Request) {
-	host := stripPort(r.Host)
+	// DNS hostnames are case-insensitive, while tunnel registrations use the
+	// canonical lowercase form returned by the authorizer.
+	host := strings.ToLower(stripPort(r.Host))
 	h, ok := s.tunnels.Handler(host)
 	if !ok {
 		http.Error(w, "routeup: no tunnel is connected for "+host, http.StatusServiceUnavailable)

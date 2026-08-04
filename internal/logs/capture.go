@@ -24,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -31,9 +32,10 @@ const maxCapturedMessageBytes = 256 << 10
 
 // CapturedMessage is one captured HTTP request.
 type CapturedMessage struct {
-	Headers  http.Header `json:"headers,omitempty"`
-	Body     []byte      `json:"body,omitempty"`
-	Complete bool        `json:"complete"`
+	Headers         http.Header `json:"headers,omitempty"`
+	RedactedHeaders []string    `json:"redacted_headers,omitempty"`
+	Body            []byte      `json:"body,omitempty"`
+	Complete        bool        `json:"complete"`
 }
 
 // Capture holds the original request data retained for an inspected entry.
@@ -47,6 +49,7 @@ type MessageCapture struct {
 	mu sync.Mutex
 
 	headers         http.Header
+	redactedHeaders []string
 	headersComplete bool
 	body            io.ReadCloser
 	limit           int
@@ -57,14 +60,16 @@ type MessageCapture struct {
 
 // NewMessageCapture starts a bounded capture for one request's headers and
 // body. The returned value can replace an HTTP request body directly.
-func NewMessageCapture(headers http.Header, body io.ReadCloser) *MessageCapture {
-	capturedHeaders, remaining, complete := captureHeaders(headers, maxCapturedMessageBytes)
+func NewMessageCapture(headers http.Header, body io.ReadCloser, redactHeaders []string) *MessageCapture {
+	redacted := redactedHeaderSet(redactHeaders)
+	capturedHeaders, remaining, complete := captureHeaders(headers, maxCapturedMessageBytes, redacted)
 	bodyComplete := body == nil || body == http.NoBody
 	if body == nil {
 		body = http.NoBody
 	}
 	return &MessageCapture{
 		headers:         capturedHeaders,
+		redactedHeaders: sortedHeaderNames(redacted),
 		headersComplete: complete,
 		body:            body,
 		limit:           remaining,
@@ -100,9 +105,10 @@ func (capture *MessageCapture) Take() CapturedMessage {
 	capture.mu.Lock()
 	defer capture.mu.Unlock()
 	return CapturedMessage{
-		Headers:  capture.headers,
-		Body:     append([]byte(nil), capture.data...),
-		Complete: capture.headersComplete && capture.bodyComplete && !capture.truncated,
+		Headers:         capture.headers,
+		RedactedHeaders: append([]string(nil), capture.redactedHeaders...),
+		Body:            append([]byte(nil), capture.data...),
+		Complete:        capture.headersComplete && capture.bodyComplete && !capture.truncated,
 	}
 }
 
@@ -120,7 +126,7 @@ func (capture *MessageCapture) appendLocked(data []byte) {
 	capture.data = append(capture.data, data...)
 }
 
-func captureHeaders(headers http.Header, limit int) (http.Header, int, bool) {
+func captureHeaders(headers http.Header, limit int, redacted map[string]struct{}) (http.Header, int, bool) {
 	keys := make([]string, 0, len(headers))
 	for key := range headers {
 		keys = append(keys, key)
@@ -130,6 +136,9 @@ func captureHeaders(headers http.Header, limit int) (http.Header, int, bool) {
 	captured := make(http.Header)
 	remaining := limit
 	for _, key := range keys {
+		if _, excluded := redacted[strings.ToLower(key)]; excluded {
+			continue
+		}
 		for _, value := range headers[key] {
 			cost := len(key) + len(value)
 			if cost > remaining {
@@ -142,12 +151,33 @@ func captureHeaders(headers http.Header, limit int) (http.Header, int, bool) {
 	return captured, remaining, true
 }
 
+func redactedHeaderSet(headers []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(headers))
+	for _, header := range headers {
+		name := strings.TrimSpace(header)
+		if name != "" {
+			set[strings.ToLower(name)] = struct{}{}
+		}
+	}
+	return set
+}
+
+func sortedHeaderNames(headers map[string]struct{}) []string {
+	names := make([]string, 0, len(headers))
+	for name := range headers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 func (capture *Capture) clone() *Capture {
 	if capture == nil {
 		return nil
 	}
 	out := *capture
 	out.Request.Headers = capture.Request.Headers.Clone()
+	out.Request.RedactedHeaders = append([]string(nil), capture.Request.RedactedHeaders...)
 	out.Request.Body = append([]byte(nil), capture.Request.Body...)
 	return &out
 }

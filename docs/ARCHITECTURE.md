@@ -120,7 +120,7 @@ GET    /v1/routes               list active routes
 GET    /v1/status               agent status, version, uptime, boot id
 POST   /v1/shutdown             graceful shutdown (used by `agent stop`/restart)
 GET    /v1/logs?route=&source=&follow=  access-log list or SSE stream
-GET    /v1/requests/{id}                 inspect one request (planned, Phase 10)
+GET    /v1/requests/{id}                 inspect one retained request
 POST   /v1/expose               start public exposure for a claimed route
 POST   /v1/unexpose             stop public exposure
 ```
@@ -133,31 +133,38 @@ commands are the source of truth.
 
 ### Request Logs (Phase 9) And Request Capture/Inspect (Phase 10)
 
-The agent is the canonical record for traffic that reaches a local route. Every
-local `.localhost` request and every public request received through a tunnel
-gets a compact opaque ID in the form `req_<16-char-random>`. `routeup logs`
-filters these records by route and by source (`local` or `public`) and can
-follow new completed records through the agent API. Long-lived SSE and WebSocket
-requests appear when their exchange ends.
+The agent is the canonical record for traffic that reaches a registered local
+route or an active tunnel. Each request handled by the route handler gets a
+compact opaque ID in the form `req_<16-char-random>`. `routeup logs` filters
+these records by route and by source (`local` or `public`) and can follow new
+completed records through the agent API. Long-lived SSE and WebSocket requests
+appear when their exchange ends. Requests rejected before reaching the agent,
+such as public traffic with no live tunnel, have no agent-side entry.
 
 Records live in a 1024-entry in-memory ring. They include the request ID,
-route, source, method, path/query, matched target, status, and duration. They
-disappear when the agent restarts. The public server may retain minimal
-operator-side metadata, but `routeup logs` always reads from the agent.
+route, source, method, path/query, matched target when one exists, status, and
+duration. They disappear when the agent restarts. The current public server has
+no separate request-log store; `routeup logs` always reads from the agent.
 
 Phase 10 adds per-route opt-in request retention:
 
 ```json
 {
-  "capture": true
+  "capture": true,
+  "redact_headers": ["authorization", "cookie", "x-webhook-signature"]
 }
 ```
 
-Capture is disabled by default. When enabled, the agent retains the original
-incoming request headers and body in the same 1024-entry request ring. Each
-retained request is limited to 256 KiB including headers and body. Captured data
-is unredacted and remains in agent memory only. `routeup inspect <request-id>`
-displays the retained request over the user's local Unix socket.
+Capture is disabled by default. When enabled, the agent retains the incoming
+request headers and body after public-path and target matching in the same
+1024-entry request ring. Each retained request is limited to 256 KiB including
+headers and body. Non-redacted captured data remains unredacted and in agent
+memory only. If the body exceeds the limit or forwarding ends before EOF, the
+retained prefix is marked `Complete: false`. `redact_headers` is case-insensitive;
+configured headers are forwarded normally but excluded from capture and listed by
+`routeup inspect`. `routeup inspect <request-id>` displays the retained request
+over the user's local Unix socket. Path-filtered and unmatched-target requests
+still produce metadata logs when they reach the agent, but are not captured.
 
 ### Public Server
 
@@ -534,9 +541,10 @@ targets. `port: 5173` means `targets: [{path: "/", port: 5173}]`; explicit
 targets support frontend/API routing behind one route. `expose.paths` limits
 public exposure only and defaults to all paths.
 
-Phase 8.5 adds `expose.enabled` as an explicit runner-mode opt-in. An `expose`
-object that only contains `paths` continues to constrain standalone exposure;
-it does not make bare `routeup` contact a public server implicitly.
+Phase 8.5 is still planned. It adds `expose.enabled` as an explicit runner-mode
+opt-in. An `expose` object that only contains `paths` currently constrains
+standalone exposure; it does not make bare `routeup` contact a public server
+implicitly.
 
 Runner mode has one command field per config source:
 

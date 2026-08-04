@@ -11,17 +11,18 @@ import (
 func TestRegistryLookupTargetsIncludesCaptureSetting(t *testing.T) {
 	registry := NewRegistry()
 	_, err := registry.Register(ipc.Claim{
-		Name:     "myapp",
-		Targets:  []route.Target{{Path: "/", Port: 8080}},
-		Capture:  true,
-		OwnerPID: os.Getpid(),
+		Name:          "myapp",
+		Targets:       []route.Target{{Path: "/", Port: 8080}},
+		Capture:       true,
+		RedactHeaders: []string{"Authorization"},
+		OwnerPID:      os.Getpid(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	targets, capture, ok := registry.LookupTargets("myapp")
-	if !ok || !capture || len(targets) != 1 || targets[0] != (route.Target{Path: "/", Port: 8080}) {
-		t.Fatalf("LookupTargets() = %#v, %t, %t", targets, capture, ok)
+	targets, capture, redactHeaders, ok := registry.LookupTargets("myapp")
+	if !ok || !capture || len(targets) != 1 || targets[0] != (route.Target{Path: "/", Port: 8080}) || len(redactHeaders) != 1 || redactHeaders[0] != "Authorization" {
+		t.Fatalf("LookupTargets() = %#v, %t, %#v, %t", targets, capture, redactHeaders, ok)
 	}
 }

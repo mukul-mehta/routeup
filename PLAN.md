@@ -366,6 +366,7 @@ cmd/routeup/main.go
 internal/cli/
   root.go
   expose.go
+  inspect.go
   setup.go
   server.go
   token.go
@@ -414,8 +415,8 @@ internal/tunnel/
 
 internal/logs/
   entry.go
+  capture.go
   store.go
-  stream.go
 
 internal/certs/
   ca.go
@@ -597,16 +598,16 @@ Route logs are first-class.
 Where logs live:
 
 ```txt
-agent:  canonical record for every local and public request
+agent:  canonical record for every request handled by a local route or tunnel
         1024-entry in-memory request ring
-server: minimal record per public request
-        method, path, status, timing, request id
+server: no request-log store in the current implementation
 ```
 
-The agent holds the authoritative log. The server records just enough to debug
-routing on the public side and to give the operator a per-route counter.
-`routeup logs` reads from the agent. If no live tunnel exists, the server returns
-and records an offline `503`; there is no agent-side canonical entry.
+The agent holds the authoritative log for requests that reach a registered route
+or active tunnel. `routeup logs` reads from the agent. If no live tunnel exists,
+the public server returns `503` before the request reaches the agent, so there is
+no agent-side entry. Server-side request records, counters, and offline-request
+logging remain open under OQ-012 rather than being implied by Phase 9.
 
 Available commands:
 
@@ -635,15 +636,20 @@ Phase 10 adds opt-in request retention and inspection:
 
 ```json
 {
-  "capture": true
+  "capture": true,
+  "redact_headers": ["authorization", "cookie"]
 }
 ```
 
 Capture is disabled by default. When enabled in `routeup.json` or the
 `package.json` `routeup` block, it retains the original incoming request headers
-and body in the agent's existing request ring. Each retained request is limited
-to 256 KiB including headers and body. Captured data is unredacted and remains
-in memory only, so users must opt in only for trusted debugging traffic.
+and body after path and target matching in the agent's existing request ring.
+Each retained request is limited to 256 KiB including headers and body. Captured
+data remains in memory only. `redact_headers` is case-insensitive: those headers
+continue to the upstream service but are omitted from retained data and listed
+as redacted by `routeup inspect`. Oversized or partially-read requests retain a
+bounded prefix and report `Complete: false`; blocked public paths and unmatched
+targets are logged without request capture.
 
 ```bash
 routeup inspect req_Ap7kQ3mN8vR2xLzC

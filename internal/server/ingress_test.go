@@ -133,6 +133,28 @@ func TestIngress_EndToEnd(t *testing.T) {
 	}
 }
 
+func TestIngress_MixedCaseHost(t *testing.T) {
+	publicURL, host, cleanup := startIngressTunnel(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer cleanup()
+
+	req, err := http.NewRequest(http.MethodGet, publicURL+"/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Host = strings.ToUpper(host)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("mixed-case public request: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, body)
+	}
+}
+
 func TestIngress_NoTunnel503(t *testing.T) {
 	store, err := OpenStore(context.Background(), filepath.Join(t.TempDir(), "i2.db"))
 	if err != nil {
@@ -171,7 +193,7 @@ func TestIngress_PathTargetsAndExposePaths(t *testing.T) {
 		{Path: "/", Port: testServerPort(t, app.URL)},
 		{Path: "/api", Port: testServerPort(t, api.URL)},
 	}
-	publicURL, host, cleanup := startIngressTunnel(t, proxy.NewTargets(targets, []string{"/api/*"}, "myapp", false, nil, nil))
+	publicURL, host, cleanup := startIngressTunnel(t, proxy.NewTargets(targets, []string{"/api/*"}, "myapp", false, nil, nil, nil))
 	defer cleanup()
 
 	assertIngressBody(t, publicURL+"/api/ping", host, http.StatusOK, "api")

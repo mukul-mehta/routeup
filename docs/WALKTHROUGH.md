@@ -46,6 +46,8 @@ internal/
 
   agentctl/                # CLI-side agent IPC client stub
     client.go              #   Client: Status, Register, Unregister, List
+    logs.go                #   Logs and FollowLogs
+    inspect.go             #   Inspect one retained request
     lifecycle.go           #   EnsureRunning, Stop, Restart, spawnAndWait
     expose.go              #   Expose, Unexpose
     reconcile.go           #   MaintainClaim loop (re-register on agent restart)
@@ -54,8 +56,10 @@ internal/
     agent.go               #   Agent struct, Run (UDS API + TLS proxy), reap
     registry.go            #   Registry: in-memory route claims, conflict detection
     api.go                 #   HTTP handlers: register, unregister, list, status,
-                           #   shutdown, expose, unexpose
+                           #   shutdown, logs, inspect, expose, unexpose
     expose.go              #   tunnelManager, tunnelSession, public expose wiring
+    logs.go                #   request-log list and SSE follow handlers
+    inspect.go             #   retained-request inspection handler
 
   tunnel/                  # Tunnel protocol (shared by agent + server)
     protocol.go            #   HandshakeMessage, ClaimSpec, RouteBroker interface
@@ -64,6 +68,11 @@ internal/
     timeouts.go            #   dial / backoff / request-header timeouts
 
   streamtest/              # Synthetic WS/SSE/large-body backends for M6 tests
+
+  logs/                    # Agent-local request metadata and optional capture
+    entry.go                #   request-log wire model
+    capture.go              #   bounded header/body retention
+    store.go                #   1,024-entry ring and change signal
 
   process/                 # Child process ownership for bare runner mode
     runner.go              #   shell command, process group, signals, exit status
@@ -104,7 +113,8 @@ internal/
     forward.go              #   `routeup forward` — internal macOS 443 forwarder (hidden)
     doctor.go              #   `routeup doctor` — diagnostics
     routes.go              #   `routeup routes` — list active local routes (+ public)
-    logs.go                #   `routeup logs` — Phase 9 placeholder
+    logs.go                #   `routeup logs` — metadata list and follow
+    inspect.go              #   `routeup inspect` — retained request output
     update.go              #   `routeup update` — self update
     uninstall.go           #   `routeup uninstall` — reverse setup
 
@@ -156,6 +166,8 @@ Example M7 path-proxy config:
     { "path": "/", "port": 5173 },
     { "path": "/api", "port": 8080 }
   ],
+  "capture": true,
+  "redact_headers": ["authorization", "cookie"],
   "expose": { "paths": ["/api/*"] }
 }
 ```
@@ -184,7 +196,8 @@ routeup
   doctor                    Diagnose setup state
   update                    Self-update to the latest release
   uninstall                 Reverse setup (untrust CA, remove forwarder/setcap, delete state)
-  logs                      Stream request logs  [stub: "not implemented yet"]
+  logs                      Stream recent request logs
+  inspect <request-id>       Show an opted-in captured request
   agent                     Inspect/control the local agent: status | start | stop | restart
 
   # hidden — operator commands, run on the server host
@@ -207,7 +220,8 @@ child in an owned process group. It waits for the root target before printing
 the route, mirrors the child exit status after readiness, and unregisters on
 exit. A successful exit before the target listens is a startup failure.
 Config-driven public runner exposure and supported framework command adapters
-are planned for Phase 8.5.
+are planned for Phase 8.5. Phase 10 request capture and inspect are implemented
+independently of that deferred runner enhancement.
 
 With a TTY, the child process group owns the foreground terminal, so Ctrl-C is
 delivered directly to that group. Direct cancellation of routeup forwards the
@@ -317,7 +331,7 @@ re-registers after any agent restart.
 
 ### Proxy wiring
 
-The agent wires `proxy.New(a.reg, a.logger)` onto its TLS listener. For each
+The agent wires `proxy.New(a.reg, a.logStore, a.logger)` onto its TLS listener. For each
 incoming HTTPS request, `proxy.New` extracts the route name from the Host
 header (strip port, strip `.localhost`), looks up targets via `a.reg`, chooses
 the longest path-prefix match (`/api` beats `/`), and reverse-proxies to that
@@ -331,12 +345,14 @@ with public `expose.paths` filtering.
 
 ### API handlers (`api.go`)
 
-Seven endpoints over the Unix socket:
+Nine endpoint forms over the Unix socket:
 
 - `POST /v1/routes` — register a claim
 - `DELETE /v1/routes/{name}` — unregister
 - `GET /v1/routes` — list claims
 - `GET /v1/status` — agent status + boot ID
+- `GET /v1/logs` — metadata snapshot or SSE follow stream
+- `GET /v1/requests/{id}` — one retained request for inspection
 - `POST /v1/shutdown` — graceful shutdown
 - `POST /v1/expose` — start a tunnel (M5)
 - `POST /v1/unexpose` — stop a tunnel (M5)
@@ -350,7 +366,7 @@ The CLI stub that speaks to the agent over the Unix socket.
 ### Client (`client.go`)
 
 Wraps `http.Client` with a Unix-socket `DialContext`. Methods: `Status`,
-`Register`, `Unregister`, `List`.
+`Register`, `Unregister`, `List`, `Logs`, `FollowLogs`, and `Inspect`.
 
 ### Lifecycle (`lifecycle.go`)
 
@@ -390,7 +406,7 @@ bounds it.
 `TargetLookup` interface (`local.go`): breaks the import cycle between
 `agent` (which imports proxy) and `proxy` (which needs the registry).
 
-`New(lookup, logger)`: extracts the route name from `Host` by stripping
+`New(lookup, logStore, logger)`: extracts the route name from `Host` by stripping
 `.localhost` (and any port), looks up the route's targets, chooses the longest
 matching path prefix, and creates a one-shot `httputil.ReverseProxy` per
 request. The `Rewrite` func preserves the incoming Host header and sets
@@ -398,6 +414,33 @@ request. The `Rewrite` func preserves the incoming Host header and sets
 public tunnel handler, with optional public `expose.paths` filtering.
 
 Unknown hosts return a `text/plain` 404 with a hint to run `routeup routes`.
+
+---
+
+## Request logs and inspect (`internal/logs/`, Phase 9 and 10)
+
+The agent owns one bounded `logs.Store` shared by the local HTTPS handler and
+the public tunnel handler. It retains the newest 1,024 completed request
+entries, indexed by opaque `req_<16-char-random>` IDs. `List` and `FollowLogs`
+return metadata only: source, route, method, path/query, matched target, status,
+and duration. The store's change signal drives the agent's SSE response without
+creating an unbounded queue for each follower.
+
+When a claim or exposure has `Capture: true`, the proxy replaces the incoming
+body with `logs.MessageCapture`. It forwards the body normally while retaining
+at most 256 KiB including headers and body. Capture begins after public-path and
+target matching, and `Complete` is false for an oversized or partially-read
+request. `Store.Get` returns a deep copy so inspection cannot mutate the ring.
+
+`redact_headers` names are case-insensitive. The proxy forwards those headers to
+the upstream as usual, but omits them from the retained request and reports the
+omitted names in inspect output.
+
+The API serves `GET /v1/logs` for a finite metadata snapshot or `follow=true`
+for SSE, and `GET /v1/requests/{id}` for one retained request. `routeup logs`
+and `routeup inspect` only query an already-running agent; they do not start one,
+because the ring is process-local. A request without capture returns a conflict
+from the inspect endpoint, while an evicted or unknown ID returns not found.
 
 ---
 
@@ -681,6 +724,9 @@ end-to-end:
 | `TestIngress_ClientDisconnectCancelsUpstream` | `server/ingress_test.go` | Public client disconnect propagates cancellation back to the agent-side backend. |
 | `TestLocalProxy_WebSocketHMR` / `TestLocalProxy_SSEStreamsIncrementally` | `proxy/local_test.go` | The local `.localhost` proxy path handles WebSocket and SSE streaming traffic. |
 | `TestLocalProxy_PathTargets` | `proxy/local_test.go` | The local proxy routes `/` and `/api/*` on one host to different targets. |
+| `TestLocalProxy_CapturesIncomingRequest` / `TestPublicProxy_RecordsCanonicalLocalRoute` | `proxy/local_test.go` | Phase 10 capture retains headers/body for local and public handlers while preserving the canonical local route. |
+| `TestHandleInspectReturnsRetainedRequestOnly` | `agent/logs_test.go` | The inspect endpoint returns captured entries, rejects metadata-only entries, and reports missing IDs. |
+| `TestMessageCaptureTruncatesWithoutChangingStream` / `TestStoreGetReturnsCaptureCopy` | `logs/capture_test.go`, `logs/store_test.go` | Capture is bounded and forwarding-safe; inspection receives a deep copy of retained data. |
 | `TestIntegration_ViteHMR` / `TestIntegration_NextHMR` | `server/integration_test.go` | Real Vite and Next dev servers exposed through `serveIngress`; drives the actual HMR WebSocket and asserts a file edit produces a live HMR push. Build-tagged (`integration`), excluded from the default suite — run with `just test-integration`. |
 | Linux runner integration | `scripts/integration-linux.sh` | Runs the built binary through setup, trusted local HTTPS, dynamic runner environment injection, route ownership, process-group signal cleanup, exit-code propagation, and unregister behavior. |
 | `TestAuthorize_*` | `server/authorize_test.go` | Placement rules: root vs namespace tier, reserved labels, out-of-domain and multi-label rejection. |
@@ -696,4 +742,6 @@ Suggested reading order — **follow a live public request**: `server/api.go`
 (`handshake`) → `tunnel/server.go` (`ServeConn`) → `server/broker.go` (the
 `RouteBroker` bridge) → `server/authorize.go` (policy) → `server/holds.go`
 (persistence). Local `.localhost` path: `proxy/local.go` → `agent/agent.go` →
-`certs/leaf.go`.
+`certs/leaf.go`. Request logs and inspection: `proxy/local.go` or
+`agent/expose.go` → `logs/store.go` → `agent/logs.go` / `agent/inspect.go` →
+`agentctl/logs.go` / `agentctl/inspect.go` → the CLI commands.

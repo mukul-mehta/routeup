@@ -6,10 +6,12 @@ It is an open source developer tool for local apps, APIs, webhooks, OAuth callba
 
 ## Status
 
-Phases 0 through 9 are complete: trusted local HTTPS, packaging and lifecycle,
-the public server and tunnel, streaming/HMR, path routing, and the local process
-runner are implemented. Public behavior is verified over loopback and the
-hosted service is available under `routeup.dev`.
+Phases 0 through 10 are implemented, with Phase 8.5 still planned: trusted local
+HTTPS, packaging and lifecycle, the public server and tunnel, streaming/HMR, path
+routing, the local process runner, route logs, and request capture/inspect are
+implemented. Public behavior is verified over loopback and the hosted service is
+available under `routeup.dev`. Phase 10 was implemented independently of the
+deferred runner-exposure work in Phase 8.5.
 
 Phase 8.5 is planned. It adds config-driven public exposure to runner mode and
 automatic adaptation of explicitly supported commands that ignore `PORT` and
@@ -31,7 +33,7 @@ Phase definitions and acceptance criteria live in [docs/MILESTONES.md](docs/MILE
 - [x] **Phase 8 — Local process runner:** configured command execution, route environment, process-group ownership, and cleanup
 - [ ] **Phase 8.5 — Runner exposure & framework adapters:** config-driven public runner exposure and unchanged `vite` support
 - [x] **Phase 9 — Route logs:** local/public request metadata, `routeup logs --follow`
-- [ ] **Phase 10 — Request capture & inspect:** opt-in `capture: true`, `routeup inspect`
+- [x] **Phase 10 — Request capture & inspect:** opt-in `capture: true`, bounded request retention, `routeup inspect`
 
 ### Logs And Request Capture
 
@@ -48,14 +50,18 @@ Phase 10 adds opt-in request retention and `routeup inspect <request-id>`:
 
 ```json
 {
-  "capture": true
+  "capture": true,
+  "redact_headers": ["authorization", "cookie", "x-webhook-signature"]
 }
 ```
 
-When enabled for a route, routeup retains the original incoming request headers
-and body in the same agent-memory ring. Each retained request is limited to 256
-KiB including headers and body. Capture is disabled by default and unredacted,
-so enable it only for locally trusted debugging traffic.
+When enabled for a route, and after path and target matching succeeds, routeup
+retains the incoming request headers and body in the same agent-memory ring. Each
+retained request is limited to 256 KiB including headers and body. Oversized or
+partially-read requests remain inspectable as a prefix with `Complete: false`.
+Configured redacted headers are still forwarded to the upstream service but are
+omitted from retained data. Capture is disabled by default and otherwise
+unredacted, so enable it only for locally trusted debugging traffic.
 
 ## LLM Usage
 

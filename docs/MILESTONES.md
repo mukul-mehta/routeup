@@ -566,7 +566,7 @@ Goal: make local and public traffic visible.
 > for local and public completed request metadata. `routeup logs [route]` reads
 > the JSON agent API, and `--follow` consumes its SSE stream. The proxy records
 > the matched target, status, and duration without buffering request or response
-> bodies; request capture and inspect remain Phase 10 work.
+> bodies; request capture and inspect are implemented in Phase 10 below.
 
 Build:
 
@@ -600,10 +600,22 @@ inspect
 
 Goal: make webhook debugging excellent.
 
+> Implementation note: complete. `capture: true` is loaded from either config
+> source, propagated through local claims and standalone/public exposure, and
+> applied by both the local and tunnel-side target handlers. The handler wraps
+> the request body so forwarding semantics are unchanged while retaining a
+> bounded copy of headers and body. Capture starts only after public-path and
+> target matching; blocked or unmatched requests receive metadata logs without
+> retained request data. `GET /v1/requests/{id}` serves the complete entry over
+> the agent's Unix socket, and `routeup inspect` formats it for the user. The
+> 256 KiB limit includes headers and body; oversized or incomplete bodies are
+> returned as a retained prefix with `Complete: false`.
+
 Build:
 
 ```txt
 opt-in capture: true config
+redact_headers config for captured headers
 request header/body capture
 256 KiB request capture limit
 routeup inspect <request-id>

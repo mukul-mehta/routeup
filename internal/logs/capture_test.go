@@ -9,7 +9,7 @@ import (
 
 func TestMessageCaptureCopiesHeadersWithinMessageLimit(t *testing.T) {
 	headers := http.Header{"X-Test": {"original"}}
-	capture := NewMessageCapture(headers, io.NopCloser(strings.NewReader("hello")))
+	capture := NewMessageCapture(headers, io.NopCloser(strings.NewReader("hello")), nil)
 
 	forwarded, err := io.ReadAll(capture)
 	if err != nil {
@@ -31,7 +31,7 @@ func TestMessageCaptureCopiesHeadersWithinMessageLimit(t *testing.T) {
 
 func TestMessageCaptureMarksOversizedHeadersIncomplete(t *testing.T) {
 	headers := http.Header{"X-Large": {strings.Repeat("x", maxCapturedMessageBytes)}}
-	capture := NewMessageCapture(headers, io.NopCloser(strings.NewReader("body")))
+	capture := NewMessageCapture(headers, io.NopCloser(strings.NewReader("body")), nil)
 
 	forwarded, err := io.ReadAll(capture)
 	if err != nil {
@@ -52,7 +52,7 @@ func TestMessageCaptureMarksOversizedHeadersIncomplete(t *testing.T) {
 
 func TestMessageCaptureTruncatesWithoutChangingStream(t *testing.T) {
 	body := strings.Repeat("x", maxCapturedMessageBytes+1)
-	capture := NewMessageCapture(http.Header{}, io.NopCloser(strings.NewReader(body)))
+	capture := NewMessageCapture(http.Header{}, io.NopCloser(strings.NewReader(body)), nil)
 
 	forwarded, err := io.ReadAll(capture)
 	if err != nil {
@@ -72,9 +72,37 @@ func TestMessageCaptureTruncatesWithoutChangingStream(t *testing.T) {
 }
 
 func TestMessageCaptureMarksNoBodyComplete(t *testing.T) {
-	capture := NewMessageCapture(http.Header{"X-Test": {"original"}}, http.NoBody)
+	capture := NewMessageCapture(http.Header{"X-Test": {"original"}}, http.NoBody, nil)
 	message := capture.Take()
 	if !message.Complete || message.Headers.Get("X-Test") != "original" || len(message.Body) != 0 {
 		t.Fatalf("captured message = %#v, want complete empty body", message)
+	}
+}
+
+func TestMessageCaptureExcludesRedactedHeaders(t *testing.T) {
+	headers := http.Header{
+		"Authorization": {"Bearer secret"},
+		"Cookie":        {"session=secret"},
+		"X-Trace":       {"keep-me"},
+	}
+	capture := NewMessageCapture(headers, io.NopCloser(strings.NewReader("payload")), []string{"authorization", "COOKIE"})
+
+	forwarded, err := io.ReadAll(capture)
+	if err != nil {
+		t.Fatalf("ReadAll() error: %v", err)
+	}
+	if string(forwarded) != "payload" {
+		t.Fatalf("forwarded body = %q, want payload", forwarded)
+	}
+
+	message := capture.Take()
+	if message.Headers.Get("Authorization") != "" || message.Headers.Get("Cookie") != "" {
+		t.Fatalf("redacted headers retained: %#v", message.Headers)
+	}
+	if message.Headers.Get("X-Trace") != "keep-me" {
+		t.Fatalf("non-redacted header missing: %#v", message.Headers)
+	}
+	if got, want := strings.Join(message.RedactedHeaders, ","), "authorization,cookie"; got != want {
+		t.Fatalf("redacted headers = %q, want %q", got, want)
 	}
 }

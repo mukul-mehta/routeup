@@ -118,21 +118,22 @@ func startTunnel(cmd *cobra.Command, serverURL, token, localRouteName, publicRou
 		return fmt.Errorf("start agent: %w", err)
 	}
 
-	targets, port, hasLocalRoute, capture, err := exposeTargets(startCtx, client, localRouteName, portFlag, targetFlags, file)
+	targets, port, hasLocalRoute, capture, redactHeaders, err := exposeTargets(startCtx, client, localRouteName, portFlag, targetFlags, file)
 	if err != nil {
 		return err
 	}
 
 	host, stopExpose, err := holdExposure(ctx, client, ipc.ExposeRequest{
-		Name:     publicRouteName,
-		Route:    localRouteName,
-		Port:     port,
-		Targets:  targets,
-		Paths:    exposePaths,
-		Capture:  capture,
-		Server:   serverURL,
-		Token:    token,
-		OwnerPID: os.Getpid(),
+		Name:          publicRouteName,
+		Route:         localRouteName,
+		Port:          port,
+		Targets:       targets,
+		Paths:         exposePaths,
+		Capture:       capture,
+		RedactHeaders: redactHeaders,
+		Server:        serverURL,
+		Token:         token,
+		OwnerPID:      os.Getpid(),
 	})
 	if err != nil {
 		return err
@@ -153,13 +154,13 @@ func startTunnel(cmd *cobra.Command, serverURL, token, localRouteName, publicRou
 	return nil
 }
 
-func exposeTargets(ctx context.Context, client *agentctl.Client, routeName string, portFlag int, targetFlags []route.Target, file config.Config) ([]route.Target, int, bool, bool, error) {
+func exposeTargets(ctx context.Context, client *agentctl.Client, routeName string, portFlag int, targetFlags []route.Target, file config.Config) ([]route.Target, int, bool, bool, []string, error) {
 	if !hasTargetOverride(portFlag, targetFlags) {
 		claims, err := client.List(ctx)
 		if err == nil {
 			for _, claim := range claims {
 				if claim.Name == routeName && len(claim.Targets) > 0 {
-					return claim.Targets, route.PrimaryPort(claim.Targets), true, claim.Capture, nil
+					return claim.Targets, route.PrimaryPort(claim.Targets), true, claim.Capture, claim.RedactHeaders, nil
 				}
 			}
 		}
@@ -172,9 +173,9 @@ func exposeTargets(ctx context.Context, client *agentctl.Client, routeName strin
 		File:        file,
 	})
 	if err != nil {
-		return nil, 0, false, false, fmt.Errorf("resolve expose targets: %w", err)
+		return nil, 0, false, false, nil, fmt.Errorf("resolve expose targets: %w", err)
 	}
-	return targets, port, false, file.Capture, nil
+	return targets, port, false, file.Capture, file.RedactHeaders, nil
 }
 
 func hasTargetOverride(portFlag int, targetFlags []route.Target) bool {

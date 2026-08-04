@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/mukul-mehta/routeup/internal/route"
 )
@@ -30,6 +31,10 @@ type Config struct {
 	// Capture retains the original incoming request headers and body for inspect.
 	// It is disabled by default because retained data may contain secrets.
 	Capture bool `json:"capture,omitempty"`
+
+	// RedactHeaders excludes these case-insensitive headers from retained request
+	// data while still forwarding them to the upstream service.
+	RedactHeaders []string `json:"redact_headers,omitempty"`
 
 	// Script names a package.json script to resolve in runner mode.
 	Script string `json:"script,omitempty"`
@@ -71,6 +76,7 @@ func LoadRouteupJSON(path string) (Config, error) {
 //   - Port, if non-zero, must be in [1, 65535].
 //   - Targets, if non-empty, must have valid unique path prefixes and ports.
 //   - Expose paths, if non-empty, must be valid public path patterns.
+//   - RedactHeaders, if set, must contain valid HTTP header names.
 //   - Script and Command cannot both be set.
 func (c Config) Validate() error {
 	if c.Name != "" {
@@ -98,10 +104,47 @@ func (c Config) Validate() error {
 	if _, err := route.NormalizePathPatterns(c.Expose.Paths); err != nil {
 		return fmt.Errorf("invalid expose paths: %w", err)
 	}
+	if err := validateRedactHeaders(c.RedactHeaders); err != nil {
+		return err
+	}
 
 	if c.Script != "" && c.Command != "" {
 		return errors.New("set either script or command, not both")
 	}
 
 	return nil
+}
+
+func validateRedactHeaders(headers []string) error {
+	for _, raw := range headers {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			return errors.New("redact_headers contains an empty header name")
+		}
+		if !validHeaderName(name) {
+			return fmt.Errorf("invalid header name %q in redact_headers", raw)
+		}
+	}
+	return nil
+}
+
+func validHeaderName(name string) bool {
+	for i := 0; i < len(name); i++ {
+		if !isHeaderTokenByte(name[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isHeaderTokenByte(b byte) bool {
+	if (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') {
+		return true
+	}
+	switch b {
+	case '!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~':
+		return true
+	default:
+		return false
+	}
 }

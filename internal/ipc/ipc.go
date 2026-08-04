@@ -38,13 +38,14 @@ const (
 // Claim is one active route registration. The same shape is used for the
 // agent's in-memory registry record and the JSON body on /v1/routes.
 type Claim struct {
-	Name         string         `json:"name"`
-	Port         int            `json:"port,omitempty"`
-	Targets      []route.Target `json:"targets,omitempty"`
-	Capture      bool           `json:"capture,omitempty"`
-	OwnerPID     int            `json:"owner_pid"`
-	OwnerCWD     string         `json:"owner_cwd"`
-	RegisteredAt time.Time      `json:"registered_at"`
+	Name          string         `json:"name"`
+	Port          int            `json:"port,omitempty"`
+	Targets       []route.Target `json:"targets,omitempty"`
+	Capture       bool           `json:"capture,omitempty"`
+	RedactHeaders []string       `json:"redact_headers,omitempty"`
+	OwnerPID      int            `json:"owner_pid"`
+	OwnerCWD      string         `json:"owner_cwd"`
+	RegisteredAt  time.Time      `json:"registered_at"`
 
 	// PublicHost is the granted public host when this route is also exposed
 	// through a tunnel by the same owner process. Response-only: the agent
@@ -103,15 +104,16 @@ type ErrorBody struct {
 // A --random name is resolved by the CLI before this request, so Name is always
 // a concrete label here.
 type ExposeRequest struct {
-	Name     string         `json:"name"`
-	Route    string         `json:"route"`
-	Port     int            `json:"port,omitempty"`
-	Targets  []route.Target `json:"targets,omitempty"`
-	Paths    []string       `json:"paths,omitempty"`
-	Capture  bool           `json:"capture,omitempty"`
-	Server   string         `json:"server"`
-	Token    string         `json:"token,omitempty"`
-	OwnerPID int            `json:"owner_pid"`
+	Name          string         `json:"name"`
+	Route         string         `json:"route"`
+	Port          int            `json:"port,omitempty"`
+	Targets       []route.Target `json:"targets,omitempty"`
+	Paths         []string       `json:"paths,omitempty"`
+	Capture       bool           `json:"capture,omitempty"`
+	RedactHeaders []string       `json:"redact_headers,omitempty"`
+	Server        string         `json:"server"`
+	Token         string         `json:"token,omitempty"`
+	OwnerPID      int            `json:"owner_pid"`
 }
 
 // ExposeResponse is the agent's reply: the public host the server granted.

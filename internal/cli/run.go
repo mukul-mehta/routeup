@@ -81,12 +81,13 @@ func runRun(cmd *cobra.Command, cwd string) error {
 	}
 
 	claim := ipc.Claim{
-		Name:     routeName.String(),
-		Port:     appPort,
-		Targets:  targets,
-		Capture:  file.Capture,
-		OwnerPID: os.Getpid(),
-		OwnerCWD: cwd,
+		Name:          routeName.String(),
+		Port:          appPort,
+		Targets:       targets,
+		Capture:       file.Capture,
+		RedactHeaders: file.RedactHeaders,
+		OwnerPID:      os.Getpid(),
+		OwnerCWD:      cwd,
 	}
 	if _, err := client.Register(startCtx, claim); err != nil {
 		if _, ok := errors.AsType[*ipc.ConflictError](err); ok {

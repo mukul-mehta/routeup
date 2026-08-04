@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -56,13 +57,18 @@ func writeInspectEntry(out io.Writer, entry logs.Entry) error {
 	}
 
 	request := entry.Capture.Request
-	if _, err := fmt.Fprintf(out, "ID: %s\nSource: %s\nRoute: %s\nTarget: %s:%d\nStatus: %d\nDuration: %s\nComplete: %t\n\n",
+	if _, err := fmt.Fprintf(out, "Request %s\n\nMetadata\n--------\nSource: %s\nRoute: %s\nTarget: %s:%d\nStatus: %d\nDuration: %s\nCapture: %s\nBody bytes: %d\n",
 		entry.ID, entry.Source, entry.Route, entry.Target.Path, entry.Target.Port, entry.Status,
-		formatLogDuration(entry.Duration), request.Complete); err != nil {
+		formatLogDuration(entry.Duration), captureStatus(request.Complete), len(request.Body)); err != nil {
 		return fmt.Errorf("write request summary: %w", err)
 	}
-	if _, err := fmt.Fprintf(out, "%s %s\nHost: %s\n\nHeaders:\n", entry.Method, entry.RequestPath, entry.Host); err != nil {
+	if _, err := fmt.Fprintf(out, "Method: %s\nPath: %s\nHost: %s\n\nHeaders\n-------\n", entry.Method, entry.RequestPath, entry.Host); err != nil {
 		return fmt.Errorf("write request line: %w", err)
+	}
+	if len(request.RedactedHeaders) > 0 {
+		if _, err := fmt.Fprintf(out, "Redacted: %s\n", strings.Join(request.RedactedHeaders, ", ")); err != nil {
+			return fmt.Errorf("write redacted headers: %w", err)
+		}
 	}
 	if len(request.Headers) == 0 {
 		if _, err := fmt.Fprintln(out, "<none>"); err != nil {
@@ -71,7 +77,7 @@ func writeInspectEntry(out io.Writer, entry logs.Entry) error {
 	} else if err := request.Headers.Write(out); err != nil {
 		return fmt.Errorf("write request headers: %w", err)
 	}
-	if _, err := fmt.Fprintln(out, "\nBody:"); err != nil {
+	if _, err := fmt.Fprintln(out, "\nBody\n----"); err != nil {
 		return fmt.Errorf("write request body label: %w", err)
 	}
 	if len(request.Body) == 0 {
@@ -87,4 +93,11 @@ func writeInspectEntry(out io.Writer, entry logs.Entry) error {
 		return fmt.Errorf("finish request body: %w", err)
 	}
 	return nil
+}
+
+func captureStatus(complete bool) string {
+	if complete {
+		return "complete"
+	}
+	return "partial"
 }

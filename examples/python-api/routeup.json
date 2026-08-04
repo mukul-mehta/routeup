@@ -2,6 +2,7 @@
   "name": "python-api",
   "port": 8082,
   "capture": true,
+  "redact_headers": ["authorization", "cookie"],
   "expose": {
     "paths": ["/api/webhooks/*"]
   }

@@ -69,9 +69,10 @@ func TestWriteInspectEntry(t *testing.T) {
 		Status:      202,
 		Target:      route.Target{Path: "/", Port: 8080},
 		Capture: &logs.Capture{Request: logs.CapturedMessage{
-			Headers:  http.Header{"X-Webhook": {"original"}},
-			Body:     []byte("payload"),
-			Complete: true,
+			Headers:         http.Header{"X-Webhook": {"original"}},
+			RedactedHeaders: []string{"authorization"},
+			Body:            []byte("payload"),
+			Complete:        true,
 		}},
 	}
 
@@ -79,7 +80,7 @@ func TestWriteInspectEntry(t *testing.T) {
 	if err := writeInspectEntry(&output, entry); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{entry.ID, "Source: public", "Route: api.myapp", "Target: /:8080", "POST /webhooks/github?event=push", "Host: api-myapp.routeup.dev", "X-Webhook: original", "payload"} {
+	for _, want := range []string{entry.ID, "Source: public", "Route: api.myapp", "Target: /:8080", "Method: POST", "Path: /webhooks/github?event=push", "Host: api-myapp.routeup.dev", "Redacted: authorization", "X-Webhook: original", "Body bytes: 7", "payload"} {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("inspect output %q missing %q", output.String(), want)
 		}
