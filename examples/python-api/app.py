@@ -27,7 +27,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self.path == "/api/webhooks/demo":
-            self.write_json({"status": "received", "path": self.path})
+            body = self.rfile.read(int(self.headers.get("content-length", "0")))
+            self.write_json(
+                {
+                    "status": "received",
+                    "path": self.path,
+                    "capture_header": self.headers.get("x-routeup-capture", ""),
+                    "body_bytes": len(body),
+                }
+            )
             return
         self.send_error(404)
 

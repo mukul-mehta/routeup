@@ -111,3 +111,51 @@ func TestHandleLogsRejectsInvalidSource(t *testing.T) {
 		t.Fatalf("status = %d, want 400", response.Code)
 	}
 }
+
+func TestHandleInspectReturnsRetainedRequestOnly(t *testing.T) {
+	a := &Agent{logStore: logs.NewStore(), logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	_, err := a.logStore.Append(logs.Entry{
+		ID:     "req_captured",
+		Source: logs.SourceLocal,
+		Capture: &logs.Capture{Request: logs.CapturedMessage{
+			Headers:  http.Header{"X-Webhook": {"original"}},
+			Body:     []byte("payload"),
+			Complete: true,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = a.logStore.Append(logs.Entry{ID: "req_metadata", Source: logs.SourceLocal})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/requests/req_captured", nil)
+	response := httptest.NewRecorder()
+	a.apiHandler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("captured status = %d, want 200", response.Code)
+	}
+	var entry logs.Entry
+	if err := json.NewDecoder(response.Body).Decode(&entry); err != nil {
+		t.Fatal(err)
+	}
+	if entry.Capture == nil || entry.Capture.Request.Headers.Get("X-Webhook") != "original" || string(entry.Capture.Request.Body) != "payload" {
+		t.Fatalf("inspect entry = %#v", entry)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/v1/requests/req_metadata", nil)
+	response = httptest.NewRecorder()
+	a.apiHandler().ServeHTTP(response, request)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("metadata status = %d, want 409", response.Code)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/v1/requests/req_missing", nil)
+	response = httptest.NewRecorder()
+	a.apiHandler().ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("missing status = %d, want 404", response.Code)
+	}
+}

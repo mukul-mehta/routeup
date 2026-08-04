@@ -21,8 +21,20 @@ func TestClientLogsAndFollowLogs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	entry := logs.Entry{ID: "req_one", Source: logs.SourcePublic, Route: "api.myapp"}
+	entry := logs.Entry{
+		ID:     "req_one",
+		Source: logs.SourcePublic,
+		Route:  "api.myapp",
+		Capture: &logs.Capture{Request: logs.CapturedMessage{
+			Body:     []byte("payload"),
+			Complete: true,
+		}},
+	}
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/requests/req_one" {
+			_ = json.NewEncoder(w).Encode(entry)
+			return
+		}
 		if r.URL.Query().Get("route") != "api.myapp" || r.URL.Query().Get("source") != "public" {
 			http.Error(w, "unexpected query", http.StatusBadRequest)
 			return
@@ -55,6 +67,13 @@ func TestClientLogsAndFollowLogs(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].ID != entry.ID {
 		t.Fatalf("entries = %#v, want req_one", entries)
+	}
+	inspected, err := client.Inspect(context.Background(), entry.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inspected.Capture == nil || string(inspected.Capture.Request.Body) != "payload" {
+		t.Fatalf("Inspect() = %#v, want retained payload", inspected)
 	}
 
 	stop := errors.New("stop after first event")

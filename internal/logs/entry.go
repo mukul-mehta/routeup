@@ -1,8 +1,8 @@
-// Package logs defines the agent-local request log and bounded capture store.
+// Package logs defines the agent-local request log and bounded request store.
 //
 // A future proxy creates one Entry after it finishes handling an HTTP request.
 // Store retains the entry for `routeup logs`, while Capture, defined in
-// capture.go, holds optional request and response data for inspect and replay.
+// capture.go, holds an optional original request for inspect.
 //
 // An entry carries two intentionally different paths:
 //
@@ -33,7 +33,7 @@ const (
 )
 
 // Entry is one completed request handled by the local agent. Capture is nil
-// when the route did not opt in.
+// unless the route opted into retaining the incoming request.
 type Entry struct {
 	ID          string        `json:"id"`
 	StartedAt   time.Time     `json:"started_at"`

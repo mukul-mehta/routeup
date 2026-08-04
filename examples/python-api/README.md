@@ -9,7 +9,8 @@ https://python-api.<namespace>.routeup.dev/api/webhooks/* -> public when exposed
 ```
 
 The local route serves all paths. The `expose.paths` config limits public traffic
-to `/api/webhooks/*`.
+to `/api/webhooks/*`. This example enables `capture: true`, so it is also the
+recommended manual test for `routeup inspect`.
 
 ## Run
 
@@ -41,3 +42,43 @@ If you have a routeup server configured, expose only webhook paths:
 
 Run that in a third terminal while the local `serve` command remains active. It
 reuses the registered target and applies the configured `expose.paths`.
+
+## Request Capture And Inspect
+
+With the app and local route running, send a webhook-shaped request:
+
+```bash
+curl \
+  -4 \
+  -X POST \
+  -H 'X-Routeup-Capture: local-example' \
+  -H 'Content-Type: application/json' \
+  --data '{"event":"local-example"}' \
+  https://python-api.localhost/api/webhooks/demo
+```
+
+The response includes the forwarded header and body byte count. Then list local
+logs and inspect the request ID from the final column:
+
+On macOS, `-4` reaches routeup's loopback forwarder at `127.0.0.1:443`. The
+current forwarder does not listen on IPv6 loopback.
+
+```bash
+../../routeup logs python-api --local
+../../routeup inspect req_<request-id>
+```
+
+Inspect should show the original `X-Routeup-Capture` header, JSON body, target
+`/:8082`, and `Complete: true`.
+
+For public traffic, start `../../routeup expose`, copy its printed public URL,
+and post the same request to `<public-url>/api/webhooks/demo`. Then run:
+
+```bash
+../../routeup logs python-api --public
+../../routeup inspect req_<request-id>
+```
+
+The inspected entry should have `Source: public` and the same retained request
+data. A request to a public path outside `/api/webhooks/*` returns 404 and is not
+forwarded to this app.

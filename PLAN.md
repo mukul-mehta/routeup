@@ -590,7 +590,7 @@ Following the one-label-per-namespace model, the server manages a wildcard per n
 
 The other mode is `cert`: an operator-provided certificate/key (e.g. a Cloudflare origin cert, or a self-signed cert for local development). DNS provider and ACME library choices (formerly OQ-014/OQ-015) are decided as above.
 
-## Logs (Phase 9) And Inspect/Replay (Planned)
+## Logs (Phase 9) And Request Capture/Inspect (Phase 10)
 
 Route logs are first-class.
 
@@ -631,16 +631,25 @@ Request IDs are compact opaque values in `req_<16-char-random>` form. The log
 line already carries the route, method, and path, so IDs stay short enough to
 copy into the inspection commands.
 
-Phase 10 will add request inspection and replay:
+Phase 10 adds opt-in request retention and inspection:
+
+```json
+{
+  "capture": true
+}
+```
+
+Capture is disabled by default. When enabled in `routeup.json` or the
+`package.json` `routeup` block, it retains the original incoming request headers
+and body in the agent's existing request ring. Each retained request is limited
+to 256 KiB including headers and body. Captured data is unredacted and remains
+in memory only, so users must opt in only for trusted debugging traffic.
 
 ```bash
 routeup inspect req_Ap7kQ3mN8vR2xLzC
-routeup replay req_Ap7kQ3mN8vR2xLzC
 ```
 
-`routeup inspect` displays one request record. `routeup replay` sends a request
-once to its original loopback target, never to the public hostname or an
-external webhook sender.
+`routeup inspect` displays one request record and its retained request data.
 
 ## Project Constraints
 

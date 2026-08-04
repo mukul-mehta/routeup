@@ -55,6 +55,7 @@ func newRootCmd() *cobra.Command {
 		newDoctorCmd(),
 		newRoutesCmd(),
 		newLogsCmd(),
+		newInspectCmd(),
 		newServeCmd(),
 		newAgentCmd(),
 		newSetupCmd(),

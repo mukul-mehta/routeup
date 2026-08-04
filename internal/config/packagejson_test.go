@@ -89,6 +89,7 @@ func TestLoadPackageJSON(t *testing.T) {
 		{name: "routeup block name only", content: `{"routeup":{"name":"myapp"}}`, want: Config{Name: "myapp"}, wantHasBlock: true},
 		{name: "routeup block name+port", content: `{"routeup":{"name":"myapp","port":8080}}`, want: Config{Name: "myapp", Port: 8080}, wantHasBlock: true},
 		{name: "routeup block targets", content: `{"routeup":{"name":"myapp","targets":[{"path":"/","port":3000},{"path":"/api","port":8080}]}}`, want: Config{Name: "myapp", Targets: []route.Target{{Path: "/", Port: 3000}, {Path: "/api", Port: 8080}}}, wantHasBlock: true},
+		{name: "routeup block capture", content: `{"routeup":{"name":"myapp","capture":true}}`, want: Config{Name: "myapp", Capture: true}, wantHasBlock: true},
 		{name: "scoped name stripped", content: `{"routeup":{"name":"@org/myapp"}}`, want: Config{Name: "myapp"}, wantHasBlock: true},
 		{name: "sibling top-level name tolerated", content: `{"name":"app-web","routeup":{"name":"myapp"}}`, want: Config{Name: "myapp"}, wantHasBlock: true},
 		{name: "routeup null treated as absent", content: `{"routeup":null}`, want: Config{}, wantHasBlock: false},

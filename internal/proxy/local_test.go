@@ -50,9 +50,15 @@ import (
 
 type testTargetLookup map[string][]route.Target
 
-func (l testTargetLookup) LookupTargets(name string) ([]route.Target, bool) {
+func (l testTargetLookup) LookupTargets(name string) ([]route.Target, bool, bool) {
 	targets, ok := l[name]
-	return targets, ok
+	return targets, false, ok
+}
+
+type captureTargetLookup []route.Target
+
+func (l captureTargetLookup) LookupTargets(_ string) ([]route.Target, bool, bool) {
+	return l, true, true
 }
 
 func TestLocalProxy_PathTargets(t *testing.T) {
@@ -117,8 +123,57 @@ func TestLocalProxy_RecordsCompletedRequest(t *testing.T) {
 	if entry.Target.Path != "/api" || entry.Target.Port != testServerPort(t, backend.URL) {
 		t.Fatalf("target = %#v, want /api backend port", entry.Target)
 	}
+	if entry.Capture != nil {
+		t.Fatalf("entry captured request with capture disabled: %#v", entry.Capture)
+	}
 	if entry.Duration < 0 || entry.StartedAt.IsZero() {
 		t.Fatalf("timing = %s at %s", entry.Duration, entry.StartedAt)
+	}
+}
+
+func TestLocalProxy_CapturesIncomingRequest(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(body) != "webhook body" {
+			t.Fatalf("backend body = %q, want webhook body", body)
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer backend.Close()
+
+	store := logs.NewStore()
+	proxyServer := httptest.NewServer(New(captureTargetLookup{{Path: "/", Port: testServerPort(t, backend.URL)}}, store, nil))
+	defer proxyServer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/webhooks?event=push", strings.NewReader("webhook body"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Host = "myapp.localhost"
+	req.Header.Set("X-Webhook", "original")
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", response.StatusCode)
+	}
+
+	entries := store.List(logs.ListOptions{})
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	entry, ok := store.Get(entries[0].ID)
+	if !ok || entry.Capture == nil {
+		t.Fatalf("captured entry = %#v, want retained request", entry)
+	}
+	request := entry.Capture.Request
+	if request.Headers.Get("X-Webhook") != "original" || string(request.Body) != "webhook body" || !request.Complete {
+		t.Fatalf("captured request = %#v", request)
 	}
 }
 
@@ -131,14 +186,15 @@ func TestPublicProxy_RecordsCanonicalLocalRoute(t *testing.T) {
 	store := logs.NewStore()
 	proxyServer := httptest.NewServer(NewTargets([]route.Target{
 		{Path: "/", Port: testServerPort(t, backend.URL)},
-	}, nil, "api.myapp", store, nil))
+	}, nil, "api.myapp", true, store, nil))
 	defer proxyServer.Close()
 
-	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/webhooks/github", nil)
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/webhooks/github", strings.NewReader("public webhook"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.Host = "api-myapp.mukul.routeup.dev"
+	req.Header.Set("X-Public-Webhook", "original")
 	response, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -152,9 +208,15 @@ func TestPublicProxy_RecordsCanonicalLocalRoute(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("entries = %d, want 1", len(entries))
 	}
-	entry := entries[0]
+	entry, ok := store.Get(entries[0].ID)
+	if !ok {
+		t.Fatal("Get() found no public entry")
+	}
 	if entry.Source != logs.SourcePublic || entry.Route != "api.myapp" || entry.Host != "api-myapp.mukul.routeup.dev" {
 		t.Fatalf("identity = %#v, want canonical public request identity", entry)
+	}
+	if entry.Capture == nil || entry.Capture.Request.Headers.Get("X-Public-Webhook") != "original" || string(entry.Capture.Request.Body) != "public webhook" || !entry.Capture.Request.Complete {
+		t.Fatalf("public captured request = %#v", entry.Capture)
 	}
 }
 

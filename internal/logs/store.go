@@ -1,9 +1,9 @@
 // Store retains the agent's recent requests in one in-memory ring.
 //
 // The agent has no request-log database. Store owns the last 1,024 requests
-// from both local and public traffic. Each entry may include Capture data when
-// the route opted in. When the ring fills, adding a new entry removes the
-// oldest entry and its capture together.
+// from both local and public traffic. Each entry may include original request
+// data when the route opted in. When the ring fills, adding a new entry removes
+// the oldest entry and its retained request together.
 //
 //	proxy completes request
 //	  -> Store.Append
@@ -13,8 +13,8 @@
 // `routeup logs` calls ListAndWatch, which takes a metadata-only snapshot and
 // returns a signal that closes on the next append. The agent turns that signal
 // into SSE. There is no second ring or per-follower queue: a slow follower
-// re-reads this bounded ring after a change. Future inspect and replay commands
-// call Get, which returns a deep copy of the complete entry.
+// re-reads this bounded ring after a change. `routeup inspect` calls Get, which
+// returns a deep copy of the complete entry.
 //
 // Store is shared by concurrent proxy requests. Public methods lock Store.mu.
 // Helpers ending in Locked must be called only while that mutex is held; they

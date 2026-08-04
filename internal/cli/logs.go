@@ -5,7 +5,7 @@
 //
 // The command never starts an agent because its in-memory request ring exists
 // only for the lifetime of that process. --json writes one Entry per line for
-// scripts; normal output keeps IDs short and copyable for future inspect/replay.
+// scripts; normal output keeps IDs short and copyable for `routeup inspect`.
 package cli
 
 import (
@@ -79,7 +79,14 @@ func runLogs(cmd *cobra.Command, opts logs.ListOptions, commandOpts logsOpts) er
 		if ctx == nil {
 			ctx = context.Background()
 		}
+		wroteHeader := false
 		err := client.FollowLogs(ctx, opts, func(entry logs.Entry) error {
+			if !commandOpts.json && !wroteHeader {
+				if err := writeLogHeader(out); err != nil {
+					return err
+				}
+				wroteHeader = true
+			}
 			return writeLogEntry(out, entry, commandOpts.json)
 		})
 		if errors.Is(err, context.Canceled) && ctx.Err() != nil {
@@ -107,10 +114,23 @@ func runLogs(cmd *cobra.Command, opts logs.ListOptions, commandOpts logsOpts) er
 		_, _ = fmt.Fprintln(out, "no matching request logs")
 		return nil
 	}
+	if !commandOpts.json {
+		if err := writeLogHeader(out); err != nil {
+			return err
+		}
+	}
 	for _, entry := range entries {
 		if err := writeLogEntry(out, entry, commandOpts.json); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func writeLogHeader(out io.Writer) error {
+	_, err := fmt.Fprintln(out, "TIME     SOURCE ROUTE                METHOD  PATH STATUS DURATION ID")
+	if err != nil {
+		return fmt.Errorf("write request log header: %w", err)
 	}
 	return nil
 }

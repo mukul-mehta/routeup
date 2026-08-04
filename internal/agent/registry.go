@@ -81,18 +81,19 @@ func (r *Registry) List() []ipc.Claim {
 	return out
 }
 
-// LookupTargets returns the configured targets for name, if registered. Used by
-// the reverse proxy to translate Host + path -> upstream.
-func (r *Registry) LookupTargets(name string) ([]route.Target, bool) {
+// LookupTargets returns the configured targets and capture setting for name, if
+// registered. The reverse proxy uses this one snapshot to translate Host + path
+// to an upstream and decide whether to retain the incoming request.
+func (r *Registry) LookupTargets(name string) (targets []route.Target, capture bool, ok bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	c, ok := r.claims[name]
 	if !ok {
-		return nil, false
+		return nil, false, false
 	}
-	targets := make([]route.Target, len(c.Targets))
+	targets = make([]route.Target, len(c.Targets))
 	copy(targets, c.Targets)
-	return targets, true
+	return targets, c.Capture, true
 }
 
 // Lookup returns a registered claim snapshot for name.

@@ -18,6 +18,7 @@ func (a *Agent) apiHandler() http.Handler {
 	mux.HandleFunc("DELETE "+ipc.PathRoutes+"/{name}", a.handleUnregister)
 	mux.HandleFunc("GET "+ipc.PathRoutes, a.handleList)
 	mux.HandleFunc("GET "+ipc.PathLogs, a.handleLogs)
+	mux.HandleFunc("GET "+ipc.PathRequests+"/{id}", a.handleInspect)
 	mux.HandleFunc("GET "+ipc.PathStatus, a.handleStatus)
 	mux.HandleFunc("POST "+ipc.PathShutdown, a.handleShutdown)
 	mux.HandleFunc("POST "+ipc.PathExpose, a.handleExpose)

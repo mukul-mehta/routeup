@@ -31,9 +31,9 @@ Phase definitions and acceptance criteria live in [docs/MILESTONES.md](docs/MILE
 - [x] **Phase 8 — Local process runner:** configured command execution, route environment, process-group ownership, and cleanup
 - [ ] **Phase 8.5 — Runner exposure & framework adapters:** config-driven public runner exposure and unchanged `vite` support
 - [x] **Phase 9 — Route logs:** local/public request metadata, `routeup logs --follow`
-- [ ] **Phase 10 — Inspect & replay:** `routeup inspect`/`replay`
+- [ ] **Phase 10 — Request capture & inspect:** opt-in `capture: true`, `routeup inspect`
 
-### Logs And Replay
+### Logs And Request Capture
 
 Phase 9 provides an agent-local 1024-entry request-log ring for completed local
 and public traffic. Use `routeup logs [route]` with `--local`, `--public`,
@@ -44,8 +44,18 @@ The log records request metadata only: source, route, method, path/query,
 matched target, status, and duration. SSE, WebSocket, and other long-lived
 requests appear after their exchange completes.
 
-Phase 10 will add `routeup inspect <request-id>` and
-`routeup replay <request-id>`.
+Phase 10 adds opt-in request retention and `routeup inspect <request-id>`:
+
+```json
+{
+  "capture": true
+}
+```
+
+When enabled for a route, routeup retains the original incoming request headers
+and body in the same agent-memory ring. Each retained request is limited to 256
+KiB including headers and body. Capture is disabled by default and unredacted,
+so enable it only for locally trusted debugging traffic.
 
 ## LLM Usage
 
@@ -198,7 +208,7 @@ Firefox uses its own trust store too: import `~/.routeup/ca.crt` under Settings 
 
 - **[Portless](https://portless.dev)** — local-first developer story. Stable HTTPS hostnames for local services, no port juggling, transparent integration with Node scripts.
 - **[localtunnel](https://github.com/localtunnel/localtunnel)** — friction-free, token-less, ephemeral public URLs. `routeup`'s public namespace (`try.routeup.dev`) follows this model.
-- **[ngrok](https://ngrok.com)** — what a polished public-tunnel CLI feels like. Request inspect/replay UX sets the bar for what `routeup` aims at long-term.
+- **[ngrok](https://ngrok.com)** — what a polished public-tunnel CLI feels like. Request inspection UX sets the bar for what `routeup` aims at long-term.
 - **[Tailscale Funnel](https://tailscale.com/kb/1223/funnel)** — identity-as-namespace. Funnel binds public hostnames to tailnet identity; `routeup` binds them to token allow patterns. Same shape: who you are determines what you can claim.
 - **[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)** — wildcard TLS via ACME DNS-01 and persistent named tunnels. The TLS automation pattern is what the `routeup` server uses.
 - **[inlets](https://github.com/inlets/inlets)** / **[frp](https://github.com/fatedier/frp)** — WebSocket + yamux stream multiplexing as the public-tunnel protocol.

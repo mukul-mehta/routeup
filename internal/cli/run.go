@@ -84,6 +84,7 @@ func runRun(cmd *cobra.Command, cwd string) error {
 		Name:     routeName.String(),
 		Port:     appPort,
 		Targets:  targets,
+		Capture:  file.Capture,
 		OwnerPID: os.Getpid(),
 		OwnerCWD: cwd,
 	}

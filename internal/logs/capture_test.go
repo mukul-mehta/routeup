@@ -70,3 +70,11 @@ func TestMessageCaptureTruncatesWithoutChangingStream(t *testing.T) {
 		t.Fatalf("captured body length = %d, want %d", len(message.Body), maxCapturedMessageBytes)
 	}
 }
+
+func TestMessageCaptureMarksNoBodyComplete(t *testing.T) {
+	capture := NewMessageCapture(http.Header{"X-Test": {"original"}}, http.NoBody)
+	message := capture.Take()
+	if !message.Complete || message.Headers.Get("X-Test") != "original" || len(message.Body) != 0 {
+		t.Fatalf("captured message = %#v, want complete empty body", message)
+	}
+}

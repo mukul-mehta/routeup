@@ -27,6 +27,10 @@ type Config struct {
 	// Expose configures public exposure for this route.
 	Expose ExposeConfig `json:"expose,omitempty"`
 
+	// Capture retains the original incoming request headers and body for inspect.
+	// It is disabled by default because retained data may contain secrets.
+	Capture bool `json:"capture,omitempty"`
+
 	// Script names a package.json script to resolve in runner mode.
 	Script string `json:"script,omitempty"`
 

@@ -121,7 +121,6 @@ GET    /v1/status               agent status, version, uptime, boot id
 POST   /v1/shutdown             graceful shutdown (used by `agent stop`/restart)
 GET    /v1/logs?route=&source=&follow=  access-log list or SSE stream
 GET    /v1/requests/{id}                 inspect one request (planned, Phase 10)
-POST   /v1/requests/{id}/replay          replay one request locally (planned, Phase 10)
 POST   /v1/expose               start public exposure for a claimed route
 POST   /v1/unexpose             stop public exposure
 ```
@@ -132,7 +131,7 @@ boot id, and re-register if the agent restarts or becomes unreachable. This
 client-driven reconciliation keeps the registry in memory: live foreground
 commands are the source of truth.
 
-### Request Logs (Phase 9) And Inspect/Replay (Planned)
+### Request Logs (Phase 9) And Request Capture/Inspect (Phase 10)
 
 The agent is the canonical record for traffic that reaches a local route. Every
 local `.localhost` request and every public request received through a tunnel
@@ -146,9 +145,19 @@ route, source, method, path/query, matched target, status, and duration. They
 disappear when the agent restarts. The public server may retain minimal
 operator-side metadata, but `routeup logs` always reads from the agent.
 
-Phase 10 will add `routeup inspect <request-id>` and
-`routeup replay <request-id>`. Replay will always use the original loopback
-target, never the public hostname or an external webhook sender.
+Phase 10 adds per-route opt-in request retention:
+
+```json
+{
+  "capture": true
+}
+```
+
+Capture is disabled by default. When enabled, the agent retains the original
+incoming request headers and body in the same 1024-entry request ring. Each
+retained request is limited to 256 KiB including headers and body. Captured data
+is unredacted and remains in agent memory only. `routeup inspect <request-id>`
+displays the retained request over the user's local Unix socket.
 
 ### Public Server
 

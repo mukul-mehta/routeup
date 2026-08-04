@@ -29,6 +29,7 @@ const (
 	PathStatus   = "/v1/status"
 	PathRoutes   = "/v1/routes"
 	PathLogs     = "/v1/logs"
+	PathRequests = "/v1/requests"
 	PathShutdown = "/v1/shutdown"
 	PathExpose   = "/v1/expose"
 	PathUnexpose = "/v1/unexpose"
@@ -40,6 +41,7 @@ type Claim struct {
 	Name         string         `json:"name"`
 	Port         int            `json:"port,omitempty"`
 	Targets      []route.Target `json:"targets,omitempty"`
+	Capture      bool           `json:"capture,omitempty"`
 	OwnerPID     int            `json:"owner_pid"`
 	OwnerCWD     string         `json:"owner_cwd"`
 	RegisteredAt time.Time      `json:"registered_at"`
@@ -106,6 +108,7 @@ type ExposeRequest struct {
 	Port     int            `json:"port,omitempty"`
 	Targets  []route.Target `json:"targets,omitempty"`
 	Paths    []string       `json:"paths,omitempty"`
+	Capture  bool           `json:"capture,omitempty"`
 	Server   string         `json:"server"`
 	Token    string         `json:"token,omitempty"`
 	OwnerPID int            `json:"owner_pid"`

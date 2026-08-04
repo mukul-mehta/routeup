@@ -24,6 +24,7 @@ func TestConfig_Validate(t *testing.T) {
 		{name: "port-only config", cfg: Config{Port: 8080}, errSubstr: ""},
 		{name: "name+port config", cfg: Config{Name: "myapp", Port: 8080}, errSubstr: ""},
 		{name: "targets config", cfg: Config{Targets: []route.Target{{Path: "/", Port: 3000}, {Path: "/api", Port: 8080}}}, errSubstr: ""},
+		{name: "capture config", cfg: Config{Capture: true}, errSubstr: ""},
 
 		// Invalid cases
 		{name: "double dot in name", cfg: Config{Name: "api..myapp"}, errSubstr: "invalid name"},
@@ -79,6 +80,7 @@ func TestLoadRouteupJSON(t *testing.T) {
 		{name: "name-only", content: `{"name":"myapp"}`, want: Config{Name: "myapp"}, errSubstr: ""},
 		{name: "port-only", content: `{"port": 8080}`, want: Config{Port: 8080}, errSubstr: ""},
 		{name: "targets", content: `{"name":"myapp","targets":[{"path":"/","port":3000},{"path":"/api","port":8080}]}`, want: Config{Name: "myapp", Targets: []route.Target{{Path: "/", Port: 3000}, {Path: "/api", Port: 8080}}}, errSubstr: ""},
+		{name: "capture", content: `{"name":"myapp","capture":true}`, want: Config{Name: "myapp", Capture: true}, errSubstr: ""},
 		{name: "valid name+port+unknown field", content: `{"name":"myapp","port":8080,"paths":["/api/webhooks"]}`, want: Config{Name: "myapp", Port: 8080}, errSubstr: ""},
 
 		// Invalid cases

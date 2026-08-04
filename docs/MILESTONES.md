@@ -322,7 +322,6 @@ Do not build yet:
 WebSocket upgrades
 SSE hardening
 large body tuning
-request replay
 accounts or OAuth
 ```
 
@@ -376,7 +375,6 @@ client disconnect cancels upstream work
 Do not build yet:
 
 ```txt
-replay
 GUI inspection
 ```
 
@@ -419,7 +417,6 @@ https://myapp.routeup.dev/api/* -> API backend
 Do not build yet:
 
 ```txt
-replay
 advanced ACLs
 team namespaces
 ```
@@ -494,7 +491,6 @@ Do not build yet:
 config-driven public runner exposure (Phase 8.5)
 framework command adaptation (Phase 8.5)
 request inspect
-replay
 ```
 
 ## Phase 8.5: Runner Exposure And Framework Adapters
@@ -560,7 +556,6 @@ generic shell-command rewriting or an adapter plugin system
 package-manager lifecycle hook emulation
 untested adapters for additional frameworks
 request inspect
-replay
 ```
 
 ## Phase 9: Route Logs
@@ -571,7 +566,7 @@ Goal: make local and public traffic visible.
 > for local and public completed request metadata. `routeup logs [route]` reads
 > the JSON agent API, and `--follow` consumes its SSE stream. The proxy records
 > the matched target, status, and duration without buffering request or response
-> bodies; inspect and replay remain Phase 10 work.
+> bodies; request capture and inspect remain Phase 10 work.
 
 Build:
 
@@ -599,30 +594,32 @@ Do not build yet:
 
 ```txt
 inspect
-replay
 ```
 
-## Phase 10: Inspect And Replay
+## Phase 10: Request Capture And Inspect
 
 Goal: make webhook debugging excellent.
 
 Build:
 
 ```txt
+opt-in capture: true config
+request header/body capture
+256 KiB request capture limit
 routeup inspect <request-id>
-routeup replay <request-id>
 ```
 
 Acceptance:
 
 ```bash
 routeup inspect req_Ap7kQ3mN8vR2xLzC
-routeup replay req_Ap7kQ3mN8vR2xLzC
 ```
 
-`routeup inspect` displays one recorded request. `routeup replay` sends that
-request once to its original loopback target, then prints the result. It never
-sends to a public hostname or an external webhook sender.
+`capture` is disabled by default. When set to `true` in `routeup.json` or the
+`package.json` `routeup` block, it retains the original incoming request headers
+and body for that route. The retained request is unredacted, remains only in the
+agent's 1024-entry in-memory ring, and is limited to 256 KiB including headers
+and body. `routeup inspect` displays the retained request.
 
 ## Milestone Discipline
 
@@ -633,7 +630,7 @@ route model before networking
 high-port local routing before privileged setup
 server claims before tunnel forwarding
 plain HTTP forwarding before WebSocket/SSE
-logs before inspect/replay
+logs before request capture and inspect
 ```
 
 Process Runner sits late on purpose: local TLS, tunnels, streaming, and path

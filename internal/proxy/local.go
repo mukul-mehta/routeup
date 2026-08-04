@@ -41,7 +41,7 @@ const localTargetHost = "localhost"
 // Depending on this interface instead of the concrete *agent.Registry keeps the
 // dependency one-directional.
 type TargetLookup interface {
-	LookupTargets(name string) (targets []route.Target, ok bool)
+	LookupTargets(name string) (targets []route.Target, capture bool, ok bool)
 }
 
 // New returns an HTTP handler that reverse-proxies requests to the registered
@@ -57,13 +57,13 @@ func New(lookup TargetLookup, logStore *logs.Store, logger *slog.Logger) http.Ha
 			return
 		}
 
-		targets, ok := lookup.LookupTargets(name)
+		targets, capture, ok := lookup.LookupTargets(name)
 		if !ok {
 			writeNotFound(w, host, "no route is currently registered for "+name)
 			return
 		}
 
-		serveTargets(w, r, targets, nil, logStore, logger, logs.Entry{
+		serveTargets(w, r, targets, nil, capture, logStore, logger, logs.Entry{
 			Source: logs.SourceLocal,
 			Route:  name,
 			Host:   host,
@@ -74,10 +74,10 @@ func New(lookup TargetLookup, logStore *logs.Store, logger *slog.Logger) http.Ha
 // NewTargets returns a handler that path-routes requests across targets. When
 // exposedPaths is non-empty, requests outside those public paths return 404.
 // routeName is the dotted local route, not the normalized public claim label.
-func NewTargets(targets []route.Target, exposedPaths []string, routeName string, logStore *logs.Store, logger *slog.Logger) http.Handler {
+func NewTargets(targets []route.Target, exposedPaths []string, routeName string, capture bool, logStore *logs.Store, logger *slog.Logger) http.Handler {
 	logger = defaultLogger(logger)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		serveTargets(w, r, targets, exposedPaths, logStore, logger, logs.Entry{
+		serveTargets(w, r, targets, exposedPaths, capture, logStore, logger, logs.Entry{
 			Source: logs.SourcePublic,
 			Route:  routeName,
 			Host:   stripPort(r.Host),
@@ -92,13 +92,14 @@ func defaultLogger(logger *slog.Logger) *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-func serveTargets(w http.ResponseWriter, r *http.Request, targets []route.Target, exposedPaths []string, logStore *logs.Store, logger *slog.Logger, entry logs.Entry) {
+func serveTargets(w http.ResponseWriter, r *http.Request, targets []route.Target, exposedPaths []string, capture bool, logStore *logs.Store, logger *slog.Logger, entry logs.Entry) {
 	startedAt := time.Now()
 	entry.StartedAt = startedAt
 	entry.Method = r.Method
 	entry.RequestPath = r.URL.RequestURI()
 	response := &statusWriter{ResponseWriter: w}
 	var target route.Target
+	var requestCapture *logs.MessageCapture
 
 	defer func() {
 		if logStore == nil {
@@ -107,6 +108,9 @@ func serveTargets(w http.ResponseWriter, r *http.Request, targets []route.Target
 		entry.Duration = time.Since(startedAt)
 		entry.Status = response.status
 		entry.Target = target
+		if requestCapture != nil {
+			entry.Capture = &logs.Capture{Request: requestCapture.Take()}
+		}
 		if _, err := logStore.Append(entry); err != nil {
 			logger.Warn("record request log", "route", entry.Route, "err", err)
 		}
@@ -126,6 +130,10 @@ func serveTargets(w http.ResponseWriter, r *http.Request, targets []route.Target
 		response.WriteHeader(http.StatusNotFound)
 		_, _ = fmt.Fprintf(response, "routeup: no target for path %q\n", r.URL.Path)
 		return
+	}
+	if capture {
+		requestCapture = logs.NewMessageCapture(r.Header, r.Body)
+		r.Body = requestCapture
 	}
 
 	// See localTargetHost for why this is a hostname, not a literal IP.

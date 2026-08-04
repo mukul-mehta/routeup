@@ -63,7 +63,7 @@ func (m *tunnelManager) Expose(reqCtx context.Context, req ipc.ExposeRequest) (s
 	if err != nil {
 		return "", err
 	}
-	handler := proxy.NewTargets(targets, paths, req.Route, m.logs, m.logger)
+	handler := proxy.NewTargets(targets, paths, req.Route, req.Capture, m.logs, m.logger)
 
 	tunnelCtx, cancel := context.WithCancel(m.parent)
 	grantedCh := make(chan string, 1)
