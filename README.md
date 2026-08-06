@@ -87,6 +87,10 @@ ROUTEUP_URL       — https://myapp.localhost  (same as local until expose.enabl
 The route is registered before the app starts and unregistered when the process
 exits. Your command must honor `PORT` and `HOST`.
 
+Most frameworks that respect `PORT` (Next.js, Nuxt, Express) work with no
+changes. Vite and Astro need one line of config — see
+[Framework setup](https://routeup.dev/docs/configuration/frameworks).
+
 `name` is optional — if omitted, routeup uses the working-directory basename
 (e.g. running from a directory called `myapp` gives `https://myapp.localhost`
 automatically).
@@ -190,8 +194,11 @@ Enable opt-in capture for webhook debugging:
 
 ```json
 {
-  "capture": true,
-  "redact_headers": ["authorization", "x-webhook-signature"]
+  "capture": {
+    "request": true,
+    "response": true,
+    "redact_headers": ["authorization", "x-webhook-signature"]
+  }
 }
 ```
 
@@ -212,6 +219,28 @@ routeup doctor      # check CA, OS trust, port 443, and agent health
 routeup update      # self-update (use brew upgrade for Homebrew installs)
 routeup uninstall   # remove the CA, port-443 helper, and ~/.routeup
 ```
+
+## Shell completions
+
+`routeup completion` generates a script for your shell. One-time install:
+
+```bash
+# Zsh
+routeup completion zsh > "${fpath[1]}/_routeup"
+
+# Bash
+routeup completion bash > ~/.local/share/bash-completion/completions/routeup
+
+# Fish
+routeup completion fish > ~/.config/fish/completions/routeup.fish
+```
+
+Subcommands and flags complete statically. When the agent is running,
+`routeup logs <Tab>` completes active route names and
+`routeup inspect <Tab>` completes captured request IDs.
+
+See [Shell completions](https://routeup.dev/docs/cli-reference/completion) for
+PowerShell and full install instructions.
 
 ## Non-browser clients
 
@@ -236,7 +265,7 @@ Runnable examples live in [`examples/`](examples/):
 | `node-runner` | Runner mode: bare `routeup` starts the app, injects `PORT`/`HOST`/`ROUTEUP_*` |
 | `node-runner-expose` | Runner mode + `expose.enabled: true` — public URL in `ROUTEUP_URL` before child launch |
 | `go-split` | Path routing: frontend at `/` and API at `/api` behind one route |
-| `python-api` | Webhook debugging: `capture: true`, `redact_headers`, `expose.paths` |
+| `python-api` | Webhook debugging: `capture.request`, `redact_headers`, `expose.paths` |
 
 ## Docs
 

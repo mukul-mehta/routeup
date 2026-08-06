@@ -51,6 +51,12 @@ homebrew_casks:
     caveats: |
       Run `routeup setup` once to create and trust a local CA and bind port 443:
         routeup setup
+    generate_completions_from_executable:
+      shell_parameter_format: cobra
+      shells:
+        - bash
+        - zsh
+        - fish
 
 release:
   github:

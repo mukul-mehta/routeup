@@ -29,6 +29,29 @@ func newInspectCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runInspect(cmd, args[0])
 		},
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			if len(args) != 0 {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			socketPath, err := state.AgentSocketPath()
+			if err != nil {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			c := agentctl.NewClient(socketPath, "", cmd.Root().Version)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			entries, err := c.Logs(ctx, logs.ListOptions{})
+			if err != nil {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			var ids []string
+			for _, e := range entries {
+				if e.Capture != nil {
+					ids = append(ids, e.ID)
+				}
+			}
+			return ids, cobra.ShellCompDirectiveNoFileComp
+		},
 	}
 }
 

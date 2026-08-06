@@ -58,6 +58,27 @@ func newLogsCmd() *cobra.Command {
 			}
 			return runLogs(cmd, logOpts, opts)
 		},
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			if len(args) != 0 {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			socketPath, err := state.AgentSocketPath()
+			if err != nil {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			c := agentctl.NewClient(socketPath, "", cmd.Root().Version)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			claims, err := c.List(ctx)
+			if err != nil {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			names := make([]string, 0, len(claims))
+			for _, claim := range claims {
+				names = append(names, claim.Name)
+			}
+			return names, cobra.ShellCompDirectiveNoFileComp
+		},
 	}
 	cmd.Flags().BoolVar(&opts.follow, "follow", false, "stream new matching requests")
 	cmd.Flags().BoolVar(&opts.public, "public", false, "show only public tunnel requests")
