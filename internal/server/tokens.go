@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -114,6 +115,7 @@ func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query tokens: %w", err)
 	}
+	defer func() { _ = rows.Close() }()
 	var out []Token
 	for rows.Next() {
 		var (
@@ -122,7 +124,6 @@ func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
 			revoked  sql.NullInt64
 		)
 		if err := rows.Scan(&id, &name, &created, &revoked); err != nil {
-			_ = rows.Close()
 			return nil, fmt.Errorf("scan token: %w", err)
 		}
 		out = append(out, Token{
@@ -133,10 +134,8 @@ func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
 		})
 	}
 	if err := rows.Err(); err != nil {
-		_ = rows.Close()
 		return nil, err
 	}
-	_ = rows.Close()
 
 	for i := range out {
 		patterns, err := s.loadPatterns(ctx, out[i].ID)
@@ -186,7 +185,8 @@ func (s *Store) TokenBases(ctx context.Context) ([]string, error) {
 		}
 		p, err := ParseAllowPattern(raw)
 		if err != nil {
-			continue // skip a malformed stored pattern rather than failing
+			slog.Default().Warn("skipping malformed stored allow pattern", "pattern", raw, "err", err)
+			continue
 		}
 		if _, ok := seen[p.Base()]; ok {
 			continue
@@ -229,7 +229,7 @@ func generateSecret() (string, error) {
 }
 
 func generateTokenID() (string, error) {
-	buf := make([]byte, 6)
+	buf := make([]byte, 12)
 	if _, err := rand.Read(buf); err != nil {
 		return "", fmt.Errorf("generate token id: %w", err)
 	}

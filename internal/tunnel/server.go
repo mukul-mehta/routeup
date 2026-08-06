@@ -161,9 +161,12 @@ func (reg *TunnelRegistry) ServeConn(ctx context.Context, conn net.Conn, token s
 	// --- session lifetime (until disconnect) ---
 
 	// Server-shutdown path: cancelling ctx closes the session, which unblocks the
-	// read below.
+	// read below. The derived context ensures this goroutine exits when ServeConn
+	// returns, even if ctx is still live (agent disconnected naturally).
+	sessionCtx, sessionCancel := context.WithCancel(ctx)
+	defer sessionCancel()
 	go func() {
-		<-ctx.Done()
+		<-sessionCtx.Done()
 		_ = session.Close()
 	}()
 	// Hold the session open for the tunnel's whole life. There's no payload to

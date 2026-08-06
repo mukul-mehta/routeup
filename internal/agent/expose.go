@@ -32,7 +32,7 @@ type tunnelManager struct {
 	logger *slog.Logger
 	logs   *logs.Store
 
-	mu                   sync.Mutex
+	mu                   sync.RWMutex
 	activeTunnelSessions map[string]*tunnelSession
 }
 
@@ -144,8 +144,8 @@ func (m *tunnelManager) ReapDeadOwners() int {
 // so the routes listing can show which local routes are currently exposed. A
 // serve process owns at most one tunnel, so one PID maps to one host.
 func (m *tunnelManager) publicExposures() map[int]publicExposure {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	out := make(map[int]publicExposure, len(m.activeTunnelSessions))
 	for _, s := range m.activeTunnelSessions {
 		out[s.ownerPID] = publicExposure{host: s.host, paths: append([]string(nil), s.paths...)}

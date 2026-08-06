@@ -27,6 +27,7 @@ func (a *Agent) apiHandler() http.Handler {
 }
 
 func (a *Agent) handleRegister(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	defer func() { _ = r.Body.Close() }()
 
 	var in ipc.Claim
@@ -106,6 +107,7 @@ func (a *Agent) handleShutdown(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Agent) handleExpose(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	defer func() { _ = r.Body.Close() }()
 
 	var in ipc.ExposeRequest
@@ -128,6 +130,7 @@ func (a *Agent) handleExpose(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Agent) handleUnexpose(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	defer func() { _ = r.Body.Close() }()
 
 	var in ipc.UnexposeRequest

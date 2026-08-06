@@ -53,7 +53,10 @@ func (i *Issuer) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, e
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	if cert, ok := i.cache[name]; ok {
-		return cert, nil
+		if time.Until(cert.Leaf.NotAfter) > 30*24*time.Hour {
+			return cert, nil
+		}
+		delete(i.cache, name)
 	}
 
 	cert, err := i.issueLeafCert(name)

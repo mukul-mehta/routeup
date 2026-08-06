@@ -265,7 +265,7 @@ func clearStaleSocket(path string) error {
 		return fmt.Errorf("another agent is already listening on %s", path)
 	}
 
-	if err := os.Remove(path); err != nil {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove stale socket %s: %w", path, err)
 	}
 	return nil

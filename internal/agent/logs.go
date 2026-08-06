@@ -95,5 +95,5 @@ func entriesAfter(entries []logs.Entry, lastID string) []logs.Entry {
 			return entries[i+1:]
 		}
 	}
-	return entries
+	return entries[:0]
 }
