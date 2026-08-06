@@ -11,11 +11,11 @@ import (
 func TestRegistryLookupTargetsIncludesCaptureSetting(t *testing.T) {
 	registry := NewRegistry()
 	_, err := registry.Register(ipc.Claim{
-		Name:          "myapp",
-		Targets:       []route.Target{{Path: "/", Port: 8080}},
+		Name:           "myapp",
+		Targets:        []route.Target{{Path: "/", Port: 8080}},
 		CaptureRequest: true,
 		RedactHeaders:  []string{"Authorization"},
-		OwnerPID:      os.Getpid(),
+		OwnerPID:       os.Getpid(),
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -124,18 +124,43 @@ func startTunnel(cmd *cobra.Command, serverURL, token, localRouteName, publicRou
 		return err
 	}
 
+	// Standalone expose: no pre-existing local claim, so register one now.
+	// This makes the route visible in `routeup routes` and enables local
+	// HTTPS proxying at https://<route>.localhost for the duration of the
+	// expose session. Conflict or other errors are soft — the public tunnel
+	// still works without a local claim.
+	if !hasLocalRoute {
+		cwd, _ := os.Getwd()
+		if _, regErr := client.Register(startCtx, ipc.Claim{
+			Name:            localRouteName,
+			Targets:         targets,
+			CaptureRequest:  captureRequest,
+			CaptureResponse: captureResponse,
+			RedactHeaders:   redactHeaders,
+			OwnerPID:        os.Getpid(),
+			OwnerCWD:        cwd,
+		}); regErr == nil {
+			hasLocalRoute = true
+			defer func() {
+				unCtx, c := context.WithTimeout(context.Background(), 3*time.Second)
+				defer c()
+				_ = client.Unregister(unCtx, localRouteName)
+			}()
+		}
+	}
+
 	host, stopExpose, err := holdExposure(ctx, client, ipc.ExposeRequest{
-		Name:          publicRouteName,
-		Route:         localRouteName,
-		Port:          port,
-		Targets:       targets,
-		Paths:         exposePaths,
+		Name:            publicRouteName,
+		Route:           localRouteName,
+		Port:            port,
+		Targets:         targets,
+		Paths:           exposePaths,
 		CaptureRequest:  captureRequest,
 		CaptureResponse: captureResponse,
 		RedactHeaders:   redactHeaders,
-		Server:        serverURL,
-		Token:         token,
-		OwnerPID:      os.Getpid(),
+		Server:          serverURL,
+		Token:           token,
+		OwnerPID:        os.Getpid(),
 	})
 	if err != nil {
 		return err

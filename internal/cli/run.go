@@ -82,14 +82,14 @@ func runRun(cmd *cobra.Command, cwd string) error {
 	}
 
 	claim := ipc.Claim{
-		Name:          routeName.String(),
-		Port:          appPort,
-		Targets:       targets,
+		Name:            routeName.String(),
+		Port:            appPort,
+		Targets:         targets,
 		CaptureRequest:  file.Capture.Request,
 		CaptureResponse: file.Capture.Response,
 		RedactHeaders:   file.Capture.RedactHeaders,
-		OwnerPID:      os.Getpid(),
-		OwnerCWD:      cwd,
+		OwnerPID:        os.Getpid(),
+		OwnerCWD:        cwd,
 	}
 	if _, err := client.Register(startCtx, claim); err != nil {
 		if _, ok := errors.AsType[*ipc.ConflictError](err); ok {
@@ -126,17 +126,17 @@ func runRun(cmd *cobra.Command, cwd string) error {
 			return err
 		}
 		host, stopExpose, err := holdExposure(ctx, client, ipc.ExposeRequest{
-			Name:          normalizePublicName(routeName),
-			Route:         routeName.String(),
-			Port:          appPort,
-			Targets:       targets,
-			Paths:         exposePaths,
+			Name:            normalizePublicName(routeName),
+			Route:           routeName.String(),
+			Port:            appPort,
+			Targets:         targets,
+			Paths:           exposePaths,
 			CaptureRequest:  file.Capture.Request,
 			CaptureResponse: file.Capture.Response,
 			RedactHeaders:   file.Capture.RedactHeaders,
-			Server:        serverURL,
-			Token:         token,
-			OwnerPID:      os.Getpid(),
+			Server:          serverURL,
+			Token:           token,
+			OwnerPID:        os.Getpid(),
 		})
 		if err != nil {
 			return err

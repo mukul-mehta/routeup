@@ -131,14 +131,14 @@ func runServe(cmd *cobra.Command, args []string, cwd string, opts serveOpts) err
 	}
 
 	claim := ipc.Claim{
-		Name:          resolved.Route.String(),
-		Port:          resolved.Port,
-		Targets:       resolved.Targets,
+		Name:            resolved.Route.String(),
+		Port:            resolved.Port,
+		Targets:         resolved.Targets,
 		CaptureRequest:  discovered.Config.Capture.Request,
 		CaptureResponse: discovered.Config.Capture.Response,
 		RedactHeaders:   discovered.Config.Capture.RedactHeaders,
-		OwnerPID:      os.Getpid(),
-		OwnerCWD:      cwd,
+		OwnerPID:        os.Getpid(),
+		OwnerCWD:        cwd,
 	}
 
 	if _, err := client.Register(startCtx, claim); err != nil {
@@ -190,17 +190,17 @@ func serveExpose(ctx context.Context, client *agentctl.Client, routeName route.N
 	}
 
 	return holdExposure(ctx, client, ipc.ExposeRequest{
-		Name:          normalizePublicName(routeName),
-		Route:         routeName.String(),
-		Port:          route.PrimaryPort(targets),
-		Targets:       targets,
-		Paths:         paths,
+		Name:            normalizePublicName(routeName),
+		Route:           routeName.String(),
+		Port:            route.PrimaryPort(targets),
+		Targets:         targets,
+		Paths:           paths,
 		CaptureRequest:  captureRequest,
 		CaptureResponse: captureResponse,
 		RedactHeaders:   redactHeaders,
-		Server:        serverURL,
-		Token:         token,
-		OwnerPID:      os.Getpid(),
+		Server:          serverURL,
+		Token:           token,
+		OwnerPID:        os.Getpid(),
 	})
 }
 
