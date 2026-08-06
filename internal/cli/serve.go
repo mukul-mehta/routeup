@@ -134,8 +134,9 @@ func runServe(cmd *cobra.Command, args []string, cwd string, opts serveOpts) err
 		Name:          resolved.Route.String(),
 		Port:          resolved.Port,
 		Targets:       resolved.Targets,
-		Capture:       discovered.Config.Capture,
-		RedactHeaders: discovered.Config.RedactHeaders,
+		CaptureRequest:  discovered.Config.Capture.Request,
+		CaptureResponse: discovered.Config.Capture.Response,
+		RedactHeaders:   discovered.Config.Capture.RedactHeaders,
 		OwnerPID:      os.Getpid(),
 		OwnerCWD:      cwd,
 	}
@@ -160,7 +161,7 @@ func runServe(cmd *cobra.Command, args []string, cwd string, opts serveOpts) err
 
 	var publicHost string
 	if opts.expose {
-		host, stopExpose, err := serveExpose(ctx, client, resolved.Route, resolved.Targets, exposePaths, discovered.Config.Capture, discovered.Config.RedactHeaders, opts)
+		host, stopExpose, err := serveExpose(ctx, client, resolved.Route, resolved.Targets, exposePaths, discovered.Config.Capture.Request, discovered.Config.Capture.Response, discovered.Config.Capture.RedactHeaders, opts)
 		if err != nil {
 			return err
 		}
@@ -182,7 +183,7 @@ func runServe(cmd *cobra.Command, args []string, cwd string, opts serveOpts) err
 	return nil
 }
 
-func serveExpose(ctx context.Context, client *agentctl.Client, routeName route.Name, targets []route.Target, paths []string, capture bool, redactHeaders []string, opts serveOpts) (string, func(), error) {
+func serveExpose(ctx context.Context, client *agentctl.Client, routeName route.Name, targets []route.Target, paths []string, captureRequest bool, captureResponse bool, redactHeaders []string, opts serveOpts) (string, func(), error) {
 	serverURL, token := resolveServerToken(opts.server, opts.token)
 	if serverURL == "" {
 		return "", nil, errors.New("--expose needs a server — pass --server, set ROUTEUP_SERVER, or run `routeup setup --server …`")
@@ -194,8 +195,9 @@ func serveExpose(ctx context.Context, client *agentctl.Client, routeName route.N
 		Port:          route.PrimaryPort(targets),
 		Targets:       targets,
 		Paths:         paths,
-		Capture:       capture,
-		RedactHeaders: redactHeaders,
+		CaptureRequest:  captureRequest,
+		CaptureResponse: captureResponse,
+		RedactHeaders:   redactHeaders,
 		Server:        serverURL,
 		Token:         token,
 		OwnerPID:      os.Getpid(),

@@ -28,19 +28,29 @@ type Config struct {
 	// Expose configures public exposure for this route.
 	Expose ExposeConfig `json:"expose,omitempty"`
 
-	// Capture retains the original incoming request headers and body for inspect.
-	// It is disabled by default because retained data may contain secrets.
-	Capture bool `json:"capture,omitempty"`
-
-	// RedactHeaders excludes these case-insensitive headers from retained request
-	// data while still forwarding them to the upstream service.
-	RedactHeaders []string `json:"redact_headers,omitempty"`
+	// Capture configures per-direction request/response retention for inspect.
+	// Disabled by default because retained data may contain secrets.
+	Capture CaptureConfig `json:"capture,omitempty"`
 
 	// Script names a package.json script to resolve in runner mode.
 	Script string `json:"script,omitempty"`
 
 	// Command is the resolved shell command run in runner mode.
 	Command string `json:"command,omitempty"`
+}
+
+// CaptureConfig controls which parts of each request/response exchange routeup
+// retains for `routeup inspect`. All fields default to false (no capture).
+type CaptureConfig struct {
+	// Request retains incoming request headers and body.
+	Request bool `json:"request,omitempty"`
+
+	// Response retains upstream response headers and body.
+	Response bool `json:"response,omitempty"`
+
+	// RedactHeaders lists case-insensitive header names to omit from both the
+	// retained request and response while still forwarding them upstream.
+	RedactHeaders []string `json:"redact_headers,omitempty"`
 }
 
 // ExposeConfig holds public exposure constraints loaded from config.
@@ -110,7 +120,7 @@ func (c Config) Validate() error {
 	if _, err := route.NormalizePathPatterns(c.Expose.Paths); err != nil {
 		return fmt.Errorf("invalid expose paths: %w", err)
 	}
-	if err := validateRedactHeaders(c.RedactHeaders); err != nil {
+	if err := validateRedactHeaders(c.Capture.RedactHeaders); err != nil {
 		return err
 	}
 

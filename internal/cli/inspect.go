@@ -56,43 +56,57 @@ func writeInspectEntry(out io.Writer, entry logs.Entry) error {
 		return fmt.Errorf("request %s was not captured", entry.ID)
 	}
 
-	request := entry.Capture.Request
-	if _, err := fmt.Fprintf(out, "Request %s\n\nMetadata\n--------\nSource: %s\nRoute: %s\nTarget: %s:%d\nStatus: %d\nDuration: %s\nCapture: %s\nBody bytes: %d\n",
+	if _, err := fmt.Fprintf(out, "Request %s\n\nMetadata\n--------\nSource: %s\nRoute: %s\nTarget: %s:%d\nStatus: %d\nDuration: %s\nMethod: %s\nPath: %s\nHost: %s\n",
 		entry.ID, entry.Source, entry.Route, entry.Target.Path, entry.Target.Port, entry.Status,
-		formatLogDuration(entry.Duration), captureStatus(request.Complete), len(request.Body)); err != nil {
-		return fmt.Errorf("write request summary: %w", err)
+		formatLogDuration(entry.Duration), entry.Method, entry.RequestPath, entry.Host); err != nil {
+		return fmt.Errorf("write metadata: %w", err)
 	}
-	if _, err := fmt.Fprintf(out, "Method: %s\nPath: %s\nHost: %s\n\nHeaders\n-------\n", entry.Method, entry.RequestPath, entry.Host); err != nil {
-		return fmt.Errorf("write request line: %w", err)
+
+	if err := writeCapturedMessage(out, "Request", entry.Capture.Request); err != nil {
+		return err
 	}
-	if len(request.RedactedHeaders) > 0 {
-		if _, err := fmt.Fprintf(out, "Redacted: %s\n", strings.Join(request.RedactedHeaders, ", ")); err != nil {
-			return fmt.Errorf("write redacted headers: %w", err)
-		}
+	return writeCapturedMessage(out, "Response", entry.Capture.Response)
+}
+
+func writeCapturedMessage(out io.Writer, label string, msg logs.CapturedMessage) error {
+	if _, err := fmt.Fprintf(out, "\n%s\n%s\n", label, strings.Repeat("-", len(label))); err != nil {
+		return fmt.Errorf("write %s label: %w", label, err)
 	}
-	if len(request.Headers) == 0 {
-		if _, err := fmt.Fprintln(out, "<none>"); err != nil {
-			return fmt.Errorf("write request headers: %w", err)
-		}
-	} else if err := request.Headers.Write(out); err != nil {
-		return fmt.Errorf("write request headers: %w", err)
-	}
-	if _, err := fmt.Fprintln(out, "\nBody\n----"); err != nil {
-		return fmt.Errorf("write request body label: %w", err)
-	}
-	if len(request.Body) == 0 {
-		if _, err := fmt.Fprintln(out, "<empty>"); err != nil {
-			return fmt.Errorf("write empty request body: %w", err)
+	if msg.Headers == nil {
+		if _, err := fmt.Fprintln(out, "<not captured>"); err != nil {
+			return fmt.Errorf("write %s not-captured: %w", label, err)
 		}
 		return nil
 	}
-	if _, err := out.Write(request.Body); err != nil {
-		return fmt.Errorf("write request body: %w", err)
+	if _, err := fmt.Fprintf(out, "Capture: %s\nBody bytes: %d\n", captureStatus(msg.Complete), len(msg.Body)); err != nil {
+		return fmt.Errorf("write %s capture status: %w", label, err)
 	}
-	if _, err := fmt.Fprintln(out); err != nil {
-		return fmt.Errorf("finish request body: %w", err)
+	if len(msg.RedactedHeaders) > 0 {
+		if _, err := fmt.Fprintf(out, "Redacted: %s\n", strings.Join(msg.RedactedHeaders, ", ")); err != nil {
+			return fmt.Errorf("write %s redacted headers: %w", label, err)
+		}
 	}
-	return nil
+	if len(msg.Headers) == 0 {
+		if _, err := fmt.Fprintln(out, "<no headers>"); err != nil {
+			return fmt.Errorf("write %s empty headers: %w", label, err)
+		}
+	} else if err := msg.Headers.Write(out); err != nil {
+		return fmt.Errorf("write %s headers: %w", label, err)
+	}
+	if _, err := fmt.Fprintln(out, "\nBody\n----"); err != nil {
+		return fmt.Errorf("write %s body label: %w", label, err)
+	}
+	if len(msg.Body) == 0 {
+		if _, err := fmt.Fprintln(out, "<empty>"); err != nil {
+			return fmt.Errorf("write %s empty body: %w", label, err)
+		}
+		return nil
+	}
+	if _, err := out.Write(msg.Body); err != nil {
+		return fmt.Errorf("write %s body: %w", label, err)
+	}
+	_, err := fmt.Fprintln(out)
+	return err
 }
 
 func captureStatus(complete bool) string {

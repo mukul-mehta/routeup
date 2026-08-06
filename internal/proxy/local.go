@@ -41,7 +41,7 @@ const localTargetHost = "localhost"
 // Depending on this interface instead of the concrete *agent.Registry keeps the
 // dependency one-directional.
 type TargetLookup interface {
-	LookupTargets(name string) (targets []route.Target, capture bool, redactHeaders []string, ok bool)
+	LookupTargets(name string) (targets []route.Target, captureRequest bool, captureResponse bool, redactHeaders []string, ok bool)
 }
 
 // New returns an HTTP handler that reverse-proxies requests to the registered
@@ -57,13 +57,13 @@ func New(lookup TargetLookup, logStore *logs.Store, logger *slog.Logger) http.Ha
 			return
 		}
 
-		targets, capture, redactHeaders, ok := lookup.LookupTargets(name)
+		targets, captureRequest, captureResponse, redactHeaders, ok := lookup.LookupTargets(name)
 		if !ok {
 			writeNotFound(w, host, "no route is currently registered for "+name)
 			return
 		}
 
-		serveTargets(w, r, targets, nil, capture, redactHeaders, logStore, logger, logs.Entry{
+		serveTargets(w, r, targets, nil, captureRequest, captureResponse, redactHeaders, logStore, logger, logs.Entry{
 			Source: logs.SourceLocal,
 			Route:  name,
 			Host:   host,
@@ -74,10 +74,10 @@ func New(lookup TargetLookup, logStore *logs.Store, logger *slog.Logger) http.Ha
 // NewTargets returns a handler that path-routes requests across targets. When
 // exposedPaths is non-empty, requests outside those public paths return 404.
 // routeName is the dotted local route, not the normalized public claim label.
-func NewTargets(targets []route.Target, exposedPaths []string, routeName string, capture bool, redactHeaders []string, logStore *logs.Store, logger *slog.Logger) http.Handler {
+func NewTargets(targets []route.Target, exposedPaths []string, routeName string, captureRequest bool, captureResponse bool, redactHeaders []string, logStore *logs.Store, logger *slog.Logger) http.Handler {
 	logger = defaultLogger(logger)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		serveTargets(w, r, targets, exposedPaths, capture, redactHeaders, logStore, logger, logs.Entry{
+		serveTargets(w, r, targets, exposedPaths, captureRequest, captureResponse, redactHeaders, logStore, logger, logs.Entry{
 			Source: logs.SourcePublic,
 			Route:  routeName,
 			Host:   stripPort(r.Host),
@@ -92,7 +92,7 @@ func defaultLogger(logger *slog.Logger) *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-func serveTargets(w http.ResponseWriter, r *http.Request, targets []route.Target, exposedPaths []string, capture bool, redactHeaders []string, logStore *logs.Store, logger *slog.Logger, entry logs.Entry) {
+func serveTargets(w http.ResponseWriter, r *http.Request, targets []route.Target, exposedPaths []string, captureRequest bool, captureResponse bool, redactHeaders []string, logStore *logs.Store, logger *slog.Logger, entry logs.Entry) {
 	startedAt := time.Now()
 	entry.StartedAt = startedAt
 	entry.Method = r.Method
@@ -100,6 +100,7 @@ func serveTargets(w http.ResponseWriter, r *http.Request, targets []route.Target
 	response := &statusWriter{ResponseWriter: w}
 	var target route.Target
 	var requestCapture *logs.MessageCapture
+	var responseCapture *logs.MessageCapture
 
 	defer func() {
 		if logStore == nil {
@@ -108,8 +109,15 @@ func serveTargets(w http.ResponseWriter, r *http.Request, targets []route.Target
 		entry.Duration = time.Since(startedAt)
 		entry.Status = response.status
 		entry.Target = target
-		if requestCapture != nil {
-			entry.Capture = &logs.Capture{Request: requestCapture.Take()}
+		if requestCapture != nil || responseCapture != nil {
+			c := &logs.Capture{}
+			if requestCapture != nil {
+				c.Request = requestCapture.Take()
+			}
+			if responseCapture != nil {
+				c.Response = responseCapture.Take()
+			}
+			entry.Capture = c
 		}
 		if _, err := logStore.Append(entry); err != nil {
 			logger.Warn("record request log", "route", entry.Route, "err", err)
@@ -131,7 +139,7 @@ func serveTargets(w http.ResponseWriter, r *http.Request, targets []route.Target
 		_, _ = fmt.Fprintf(response, "routeup: no target for path %q\n", r.URL.Path)
 		return
 	}
-	if capture {
+	if captureRequest {
 		requestCapture = logs.NewMessageCapture(r.Header, r.Body, redactHeaders)
 		r.Body = requestCapture
 	}
@@ -156,6 +164,10 @@ func serveTargets(w http.ResponseWriter, r *http.Request, targets []route.Target
 		},
 		ModifyResponse: func(upstream *http.Response) error {
 			response.status = upstream.StatusCode
+			if captureResponse {
+				responseCapture = logs.NewMessageCapture(upstream.Header, upstream.Body, redactHeaders)
+				upstream.Body = responseCapture
+			}
 			return nil
 		},
 	}

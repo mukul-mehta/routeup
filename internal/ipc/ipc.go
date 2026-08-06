@@ -41,9 +41,10 @@ type Claim struct {
 	Name          string         `json:"name"`
 	Port          int            `json:"port,omitempty"`
 	Targets       []route.Target `json:"targets,omitempty"`
-	Capture       bool           `json:"capture,omitempty"`
-	RedactHeaders []string       `json:"redact_headers,omitempty"`
-	OwnerPID      int            `json:"owner_pid"`
+	CaptureRequest  bool           `json:"capture_request,omitempty"`
+	CaptureResponse bool           `json:"capture_response,omitempty"`
+	RedactHeaders   []string       `json:"redact_headers,omitempty"`
+	OwnerPID        int            `json:"owner_pid"`
 	OwnerCWD      string         `json:"owner_cwd"`
 	RegisteredAt  time.Time      `json:"registered_at"`
 
@@ -109,9 +110,10 @@ type ExposeRequest struct {
 	Port          int            `json:"port,omitempty"`
 	Targets       []route.Target `json:"targets,omitempty"`
 	Paths         []string       `json:"paths,omitempty"`
-	Capture       bool           `json:"capture,omitempty"`
-	RedactHeaders []string       `json:"redact_headers,omitempty"`
-	Server        string         `json:"server"`
+	CaptureRequest  bool           `json:"capture_request,omitempty"`
+	CaptureResponse bool           `json:"capture_response,omitempty"`
+	RedactHeaders   []string       `json:"redact_headers,omitempty"`
+	Server          string         `json:"server"`
 	Token         string         `json:"token,omitempty"`
 	OwnerPID      int            `json:"owner_pid"`
 }

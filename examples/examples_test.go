@@ -51,8 +51,8 @@ func TestExampleRouteupConfigs(t *testing.T) {
 			if cfg.Port != tc.port {
 				t.Fatalf("port = %d, want %d", cfg.Port, tc.port)
 			}
-			if cfg.Capture != tc.capture {
-				t.Fatalf("capture = %t, want %t", cfg.Capture, tc.capture)
+			if cfg.Capture.Request != tc.capture {
+				t.Fatalf("capture.request = %t, want %t", cfg.Capture.Request, tc.capture)
 			}
 			if len(cfg.Targets) != tc.targetCount {
 				t.Fatalf("target count = %d, want %d", len(cfg.Targets), tc.targetCount)

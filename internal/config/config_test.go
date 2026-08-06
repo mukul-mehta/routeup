@@ -24,8 +24,8 @@ func TestConfig_Validate(t *testing.T) {
 		{name: "port-only config", cfg: Config{Port: 8080}, errSubstr: ""},
 		{name: "name+port config", cfg: Config{Name: "myapp", Port: 8080}, errSubstr: ""},
 		{name: "targets config", cfg: Config{Targets: []route.Target{{Path: "/", Port: 3000}, {Path: "/api", Port: 8080}}}, errSubstr: ""},
-		{name: "capture config", cfg: Config{Capture: true}, errSubstr: ""},
-		{name: "redacted headers config", cfg: Config{RedactHeaders: []string{"Authorization", "cookie"}}, errSubstr: ""},
+		{name: "capture config", cfg: Config{Capture: CaptureConfig{Request: true}}, errSubstr: ""},
+		{name: "redacted headers config", cfg: Config{Capture: CaptureConfig{RedactHeaders: []string{"Authorization", "cookie"}}}, errSubstr: ""},
 
 		// Invalid cases
 		{name: "double dot in name", cfg: Config{Name: "api..myapp"}, errSubstr: "invalid name"},
@@ -33,7 +33,7 @@ func TestConfig_Validate(t *testing.T) {
 		{name: "negative port", cfg: Config{Port: -1}, errSubstr: "port -1 out of range"},
 		{name: "port above limit", cfg: Config{Port: 72000}, errSubstr: "port 72000 out of range"},
 		{name: "duplicate root port", cfg: Config{Port: 3000, Targets: []route.Target{{Path: "/", Port: 8080}}}, errSubstr: "port and targets path"},
-		{name: "invalid redacted header", cfg: Config{RedactHeaders: []string{"bad header"}}, errSubstr: "invalid header name"},
+		{name: "invalid redacted header", cfg: Config{Capture: CaptureConfig{RedactHeaders: []string{"bad header"}}}, errSubstr: "invalid header name"},
 	}
 
 	for _, tc := range cases {
@@ -82,8 +82,8 @@ func TestLoadRouteupJSON(t *testing.T) {
 		{name: "name-only", content: `{"name":"myapp"}`, want: Config{Name: "myapp"}, errSubstr: ""},
 		{name: "port-only", content: `{"port": 8080}`, want: Config{Port: 8080}, errSubstr: ""},
 		{name: "targets", content: `{"name":"myapp","targets":[{"path":"/","port":3000},{"path":"/api","port":8080}]}`, want: Config{Name: "myapp", Targets: []route.Target{{Path: "/", Port: 3000}, {Path: "/api", Port: 8080}}}, errSubstr: ""},
-		{name: "capture", content: `{"name":"myapp","capture":true}`, want: Config{Name: "myapp", Capture: true}, errSubstr: ""},
-		{name: "redacted headers", content: `{"name":"myapp","capture":true,"redact_headers":["Authorization","cookie"]}`, want: Config{Name: "myapp", Capture: true, RedactHeaders: []string{"Authorization", "cookie"}}, errSubstr: ""},
+		{name: "capture", content: `{"name":"myapp","capture":{"request":true}}`, want: Config{Name: "myapp", Capture: CaptureConfig{Request: true}}, errSubstr: ""},
+		{name: "redacted headers", content: `{"name":"myapp","capture":{"request":true,"redact_headers":["Authorization","cookie"]}}`, want: Config{Name: "myapp", Capture: CaptureConfig{Request: true, RedactHeaders: []string{"Authorization", "cookie"}}}, errSubstr: ""},
 		{name: "valid name+port+unknown field", content: `{"name":"myapp","port":8080,"paths":["/api/webhooks"]}`, want: Config{Name: "myapp", Port: 8080}, errSubstr: ""},
 
 		// Invalid cases

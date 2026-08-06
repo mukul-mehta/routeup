@@ -1,21 +1,21 @@
-// Capture is the optional original-request data retained with one log Entry.
+// Capture is the optional request/response data retained with one log Entry.
 //
-// Capture exists because a later proxy needs to inspect a body without changing
-// the bytes or errors that reach the upstream service. Reading an HTTP body into
-// memory before proxying would break streaming and allow an arbitrarily large
-// request to exhaust the agent.
+// Capture exists because the proxy needs to inspect a body without changing
+// the bytes or errors that reach the upstream service or the client. Reading
+// an HTTP body into memory before proxying would break streaming and allow an
+// arbitrarily large message to exhaust the agent.
 //
-// MessageCapture hides that bookkeeping from the proxy. It copies headers,
-// exposes an io.ReadCloser the proxy can use normally, then creates a
-// CapturedMessage when Take is called after forwarding ends.
+// MessageCapture hides that bookkeeping. It copies headers, exposes an
+// io.ReadCloser the proxy can use normally, then creates a CapturedMessage
+// when Take is called after forwarding ends.
 //
 //	incoming HTTP message
 //	  -> NewMessageCapture
 //	  -> proxy reads MessageCapture as its body
 //	  -> Take returns CapturedMessage
-//	  -> request field on Capture
+//	  -> Request or Response field on Capture
 //
-// A captured request is limited to 256 KiB, including headers and body.
+// Each captured message is limited to 256 KiB, including headers and body.
 // Complete is false when the full message did not fit or the body did not reach
 // EOF. Inspect may still display the retained prefix.
 package logs
@@ -30,7 +30,7 @@ import (
 
 const maxCapturedMessageBytes = 256 << 10
 
-// CapturedMessage is one captured HTTP request.
+// CapturedMessage is one captured HTTP message (request or response).
 type CapturedMessage struct {
 	Headers         http.Header `json:"headers,omitempty"`
 	RedactedHeaders []string    `json:"redacted_headers,omitempty"`
@@ -38,9 +38,11 @@ type CapturedMessage struct {
 	Complete        bool        `json:"complete"`
 }
 
-// Capture holds the original request data retained for an inspected entry.
+// Capture holds the optional request and response data retained for inspect.
+// A nil field means that direction was not captured.
 type Capture struct {
-	Request CapturedMessage `json:"request"`
+	Request  CapturedMessage `json:"request"`
+	Response CapturedMessage `json:"response"`
 }
 
 // MessageCapture is an io.ReadCloser that forwards its source body unchanged
@@ -58,8 +60,8 @@ type MessageCapture struct {
 	truncated       bool
 }
 
-// NewMessageCapture starts a bounded capture for one request's headers and
-// body. The returned value can replace an HTTP request body directly.
+// NewMessageCapture starts a bounded capture for one message's headers and
+// body. The returned value can replace an HTTP request or response body directly.
 func NewMessageCapture(headers http.Header, body io.ReadCloser, redactHeaders []string) *MessageCapture {
 	redacted := redactedHeaderSet(redactHeaders)
 	capturedHeaders, remaining, complete := captureHeaders(headers, maxCapturedMessageBytes, redacted)
@@ -100,7 +102,7 @@ func (capture *MessageCapture) Close() error {
 
 // Take returns a copy of the retained data as it exists at call time. A reverse
 // proxy can finish an exchange after an upstream returns early, so this remains
-// race-safe even if a transport is still closing the request body.
+// race-safe even if a transport is still closing the body.
 func (capture *MessageCapture) Take() CapturedMessage {
 	capture.mu.Lock()
 	defer capture.mu.Unlock()
@@ -179,6 +181,9 @@ func (capture *Capture) clone() *Capture {
 	out.Request.Headers = capture.Request.Headers.Clone()
 	out.Request.RedactedHeaders = append([]string(nil), capture.Request.RedactedHeaders...)
 	out.Request.Body = append([]byte(nil), capture.Request.Body...)
+	out.Response.Headers = capture.Response.Headers.Clone()
+	out.Response.RedactedHeaders = append([]string(nil), capture.Response.RedactedHeaders...)
+	out.Response.Body = append([]byte(nil), capture.Response.Body...)
 	return &out
 }
 
@@ -186,7 +191,8 @@ func (capture *Capture) withinLimit() bool {
 	if capture == nil {
 		return true
 	}
-	return messageBytes(capture.Request) <= maxCapturedMessageBytes
+	return messageBytes(capture.Request) <= maxCapturedMessageBytes &&
+		messageBytes(capture.Response) <= maxCapturedMessageBytes
 }
 
 func messageBytes(message CapturedMessage) int {

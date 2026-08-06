@@ -19,7 +19,13 @@ func waitForRunnerTarget(ctx context.Context, port int, results <-chan runnerRes
 	startupCtx, cancel := context.WithTimeout(ctx, runnerStartupTimeout)
 	defer cancel()
 
-	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	portStr := strconv.Itoa(port)
+	// Probe both IPv4 and IPv6 loopback: Node.js 17+ defaults localhost to ::1,
+	// so services may bind either address depending on their framework.
+	probeAddrs := []string{
+		net.JoinHostPort("127.0.0.1", portStr),
+		net.JoinHostPort("::1", portStr),
+	}
 	dialer := net.Dialer{Timeout: 100 * time.Millisecond}
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -31,9 +37,7 @@ func waitForRunnerTarget(ctx context.Context, port int, results <-chan runnerRes
 		default:
 		}
 
-		conn, err := dialer.DialContext(startupCtx, "tcp", address)
-		if err == nil {
-			_ = conn.Close() // The readiness probe carries no data.
+		if dialAny(startupCtx, &dialer, probeAddrs) {
 			select {
 			case result := <-results:
 				return result, true, nil
@@ -49,10 +53,23 @@ func waitForRunnerTarget(ctx context.Context, port int, results <-chan runnerRes
 			if ctx.Err() != nil {
 				return runnerResult{}, false, ctx.Err()
 			}
-			return runnerResult{}, false, fmt.Errorf("target did not listen on %s within %s", address, runnerStartupTimeout)
+			return runnerResult{}, false, fmt.Errorf("target did not listen on %s or %s within %s",
+				probeAddrs[0], probeAddrs[1], runnerStartupTimeout)
 		case <-ticker.C:
 		}
 	}
+}
+
+// dialAny returns true if a TCP connection to any of addrs succeeds.
+func dialAny(ctx context.Context, d *net.Dialer, addrs []string) bool {
+	for _, addr := range addrs {
+		conn, err := d.DialContext(ctx, "tcp", addr)
+		if err == nil {
+			_ = conn.Close()
+			return true
+		}
+	}
+	return false
 }
 
 func runnerResultError(result runnerResult, port int, beforeReady bool) error {

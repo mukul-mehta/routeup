@@ -50,21 +50,21 @@ import (
 
 type testTargetLookup map[string][]route.Target
 
-func (l testTargetLookup) LookupTargets(name string) ([]route.Target, bool, []string, bool) {
+func (l testTargetLookup) LookupTargets(name string) ([]route.Target, bool, bool, []string, bool) {
 	targets, ok := l[name]
-	return targets, false, nil, ok
+	return targets, false, false, nil, ok
 }
 
 type captureTargetLookup []route.Target
 
-func (l captureTargetLookup) LookupTargets(_ string) ([]route.Target, bool, []string, bool) {
-	return l, true, nil, true
+func (l captureTargetLookup) LookupTargets(_ string) ([]route.Target, bool, bool, []string, bool) {
+	return l, true, false, nil, true
 }
 
 type redactingTargetLookup []route.Target
 
-func (l redactingTargetLookup) LookupTargets(_ string) ([]route.Target, bool, []string, bool) {
-	return l, true, []string{"Authorization", "Cookie"}, true
+func (l redactingTargetLookup) LookupTargets(_ string) ([]route.Target, bool, bool, []string, bool) {
+	return l, true, false, []string{"Authorization", "Cookie"}, true
 }
 
 func TestLocalProxy_PathTargets(t *testing.T) {
@@ -242,7 +242,7 @@ func TestPublicProxy_RecordsCanonicalLocalRoute(t *testing.T) {
 	store := logs.NewStore()
 	proxyServer := httptest.NewServer(NewTargets([]route.Target{
 		{Path: "/", Port: testServerPort(t, backend.URL)},
-	}, nil, "api.myapp", true, nil, store, nil))
+	}, nil, "api.myapp", true, false, nil, store, nil))
 	defer proxyServer.Close()
 
 	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/webhooks/github", strings.NewReader("public webhook"))

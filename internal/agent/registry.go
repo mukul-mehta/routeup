@@ -84,17 +84,17 @@ func (r *Registry) List() []ipc.Claim {
 // LookupTargets returns the configured targets and capture settings for name,
 // if registered. The reverse proxy uses this one snapshot to translate Host +
 // path to an upstream and decide whether to retain the incoming request.
-func (r *Registry) LookupTargets(name string) (targets []route.Target, capture bool, redactHeaders []string, ok bool) {
+func (r *Registry) LookupTargets(name string) (targets []route.Target, captureRequest bool, captureResponse bool, redactHeaders []string, ok bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	c, ok := r.claims[name]
 	if !ok {
-		return nil, false, nil, false
+		return nil, false, false, nil, false
 	}
 	targets = make([]route.Target, len(c.Targets))
 	copy(targets, c.Targets)
 	redactHeaders = append([]string(nil), c.RedactHeaders...)
-	return targets, c.Capture, redactHeaders, true
+	return targets, c.CaptureRequest, c.CaptureResponse, redactHeaders, true
 }
 
 // Lookup returns a registered claim snapshot for name.
