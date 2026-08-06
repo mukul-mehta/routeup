@@ -149,6 +149,7 @@ func runRun(cmd *cobra.Command, cwd string) error {
 	local := localURL(routeName.LocalHost(), tlsPort)
 	childEnv := process.InjectEnv(os.Environ(), process.EnvInputs{
 		Port:       appPort,
+		PortEnvVar: file.PortEnvVar,
 		Host:       "127.0.0.1",
 		LocalURL:   local,
 		PublicURL:  publicURL,

@@ -37,6 +37,11 @@ type Config struct {
 
 	// Command is the resolved shell command run in runner mode.
 	Command string `json:"command,omitempty"`
+
+	// PortEnvVar, when set, injects the assigned port as an additional
+	// environment variable with this name alongside PORT. Useful when the child
+	// process reads a custom variable (e.g. WEBHOOK_CONSUMER_PORT) instead of PORT.
+	PortEnvVar string `json:"port_env_var,omitempty"`
 }
 
 // CaptureConfig controls which parts of each request/response exchange routeup
@@ -126,6 +131,10 @@ func (c Config) Validate() error {
 
 	if c.Script != "" && c.Command != "" {
 		return errors.New("set either script or command, not both")
+	}
+
+	if c.PortEnvVar != "" && strings.ContainsAny(c.PortEnvVar, "= \t\n") {
+		return fmt.Errorf("port_env_var %q is not a valid environment variable name", c.PortEnvVar)
 	}
 
 	return nil

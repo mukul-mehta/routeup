@@ -11,6 +11,9 @@ import (
 type EnvInputs struct {
 	// Port is the assigned or configured app port, exported as PORT.
 	Port int
+	// PortEnvVar, when non-empty, also exports Port under this variable name.
+	// Useful for services that read a custom variable instead of PORT.
+	PortEnvVar string
 	// Host is exported as HOST. Empty defaults to 127.0.0.1.
 	Host string
 	// LocalURL is exported as ROUTEUP_LOCAL_URL. Also sets ROUTEUP_URL unless
@@ -40,7 +43,11 @@ func InjectEnv(base []string, in EnvInputs) []string {
 		env = prependPath(env, filepath.Join(in.WorkDir, "node_modules", ".bin"))
 	}
 	if in.Port > 0 {
-		env = upsert(env, "PORT", strconv.Itoa(in.Port))
+		portVar := "PORT"
+		if in.PortEnvVar != "" {
+			portVar = in.PortEnvVar
+		}
+		env = upsert(env, portVar, strconv.Itoa(in.Port))
 	}
 	host := in.Host
 	if host == "" {

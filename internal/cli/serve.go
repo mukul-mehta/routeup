@@ -160,7 +160,7 @@ func runServe(cmd *cobra.Command, args []string, cwd string, opts serveOpts) err
 	}
 
 	var publicHost string
-	if opts.expose {
+	if opts.expose || discovered.Config.Expose.Enabled {
 		host, stopExpose, err := serveExpose(ctx, client, resolved.Route, resolved.Targets, exposePaths, discovered.Config.Capture.Request, discovered.Config.Capture.Response, discovered.Config.Capture.RedactHeaders, opts)
 		if err != nil {
 			return err
