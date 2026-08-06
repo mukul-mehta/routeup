@@ -14,31 +14,26 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// newForwardCmd builds the hidden `routeup forward <from> <to>` subcommand,
-// a TCP byte-pipe used only by the macOS LaunchDaemon. Refuses non-loopback
-// targets at startup.
+// newForwardCmd builds the hidden `routeup forward <from>... <to>` subcommand,
+// a TCP byte-pipe used only by the macOS LaunchDaemon. Accepts one or more
+// from-addrs (all but the last arg); the final arg is the target. Refuses
+// non-loopback targets at startup.
 func newForwardCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:    "forward <from-addr> <to-addr>",
+		Use:    "forward <from-addr> [<from-addr>...] <to-addr>",
 		Short:  "(internal) tcp forwarder used by the macOS launchd plist",
 		Hidden: true,
-		Args:   cobra.ExactArgs(2),
+		Args:   cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runForward(cmd, args[0], args[1])
+			return runForward(cmd, args[:len(args)-1], args[len(args)-1])
 		},
 	}
 }
 
-func runForward(cmd *cobra.Command, fromAddr, toAddr string) error {
+func runForward(cmd *cobra.Command, fromAddrs []string, toAddr string) error {
 	if err := validateLoopback(toAddr); err != nil {
 		return fmt.Errorf("invalid forwarding target %q: %w", toAddr, err)
 	}
-
-	listener, err := net.Listen("tcp", fromAddr)
-	if err != nil {
-		return fmt.Errorf("bind %s: %w", fromAddr, err)
-	}
-	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "routeup forwarder: %s -> %s\n", listener.Addr(), toAddr)
 
 	parent := cmd.Context()
 	if parent == nil {
@@ -47,28 +42,52 @@ func runForward(cmd *cobra.Command, fromAddr, toAddr string) error {
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Close on shutdown so Accept returns.
+	var listeners []net.Listener
+	for _, fromAddr := range fromAddrs {
+		l, err := net.Listen("tcp", fromAddr)
+		if err != nil {
+			for _, opened := range listeners {
+				_ = opened.Close()
+			}
+			return fmt.Errorf("bind %s: %w", fromAddr, err)
+		}
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "routeup forwarder: %s -> %s\n", l.Addr(), toAddr)
+		listeners = append(listeners, l)
+	}
+
+	// Close all listeners on shutdown so Accept returns.
 	go func() {
 		<-ctx.Done()
-		_ = listener.Close()
+		for _, l := range listeners {
+			_ = l.Close()
+		}
 	}()
 
 	var wg sync.WaitGroup
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			if ctx.Err() != nil {
-				wg.Wait()
-				return nil
-			}
-			return fmt.Errorf("accept: %w", err)
-		}
+	for _, l := range listeners {
 		wg.Add(1)
-		go func() {
+		go func(l net.Listener) {
 			defer wg.Done()
-			handleForward(conn, toAddr, cmd.ErrOrStderr())
-		}()
+			for {
+				conn, err := l.Accept()
+				if err != nil {
+					if ctx.Err() == nil {
+						_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "routeup forwarder: accept on %s: %v\n", l.Addr(), err)
+					}
+					return
+				}
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					handleForward(conn, toAddr, cmd.ErrOrStderr())
+				}()
+			}
+		}(l)
 	}
+
+	<-ctx.Done()
+	wg.Wait()
+	return nil
 }
 
 func handleForward(client net.Conn, toAddr string, logOut io.Writer) {

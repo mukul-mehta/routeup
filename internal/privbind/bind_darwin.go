@@ -22,8 +22,8 @@ const (
 )
 
 // install writes a LaunchDaemon plist that runs `routeup forward
-// 127.0.0.1:userPort 127.0.0.1:47443` as root, then bootstraps it via
-// launchctl. One sudo prompt covers both calls. Idempotent on rerun.
+// 127.0.0.1:userPort [::1]:userPort 127.0.0.1:47443` as root, then bootstraps
+// it via launchctl. One sudo prompt covers both calls. Idempotent on rerun.
 func install(ctx context.Context, userPort int) error {
 	if userPort >= 1024 {
 		return nil // no privileged bind needed
@@ -84,8 +84,11 @@ func check(userPort int, configuredBinPath string) (Health, string) {
 }
 
 // renderPlist emits the plist. RunAtLoad + KeepAlive: start at boot, restart on exit.
+// Both IPv4 and IPv6 loopback addrs are forwarded so clients that prefer ::1
+// (curl, browsers on macOS Ventura+) reach the agent just like 127.0.0.1 clients.
 func renderPlist(binaryPath string, userPort, internalPort int) []byte {
-	fromAddr := "127.0.0.1:" + strconv.Itoa(userPort)
+	fromV4 := "127.0.0.1:" + strconv.Itoa(userPort)
+	fromV6 := "[::1]:" + strconv.Itoa(userPort)
 	toAddr := "127.0.0.1:" + strconv.Itoa(internalPort)
 
 	return fmt.Appendf(nil, `<?xml version="1.0" encoding="UTF-8"?>
@@ -100,6 +103,7 @@ func renderPlist(binaryPath string, userPort, internalPort int) []byte {
         <string>forward</string>
         <string>%s</string>
         <string>%s</string>
+        <string>%s</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -111,7 +115,7 @@ func renderPlist(binaryPath string, userPort, internalPort int) []byte {
     <string>%s</string>
 </dict>
 </plist>
-`, plistLabel, binaryPath, fromAddr, toAddr, stdLogPath, stdLogPath)
+`, plistLabel, binaryPath, fromV4, fromV6, toAddr, stdLogPath, stdLogPath)
 }
 
 // sudoWriteFile pipes content into `sudo tee path`. Result is root-owned, 0644.
