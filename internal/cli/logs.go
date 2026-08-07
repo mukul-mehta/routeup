@@ -149,7 +149,7 @@ func runLogs(cmd *cobra.Command, opts logs.ListOptions, commandOpts logsOpts) er
 }
 
 func writeLogHeader(out io.Writer) error {
-	_, err := fmt.Fprintln(out, "TIME     SOURCE ROUTE                METHOD  PATH STATUS DURATION ID")
+	_, err := fmt.Fprintln(out, "TIME      SOURCE  ROUTE                 METHOD   PATH                                      STATUS  DURATION  ID")
 	if err != nil {
 		return fmt.Errorf("write request log header: %w", err)
 	}
@@ -163,7 +163,7 @@ func writeLogEntry(out io.Writer, entry logs.Entry, jsonOutput bool) error {
 		}
 		return nil
 	}
-	_, err := fmt.Fprintf(out, "%s %-6s %-20s %-7s %s %d %s %s\n",
+	_, err := fmt.Fprintf(out, "%s  %-6s  %-20s  %-7s  %-40s  %-6d  %-8s  %s\n",
 		entry.StartedAt.Local().Format("15:04:05"), entry.Source, entry.Route,
 		entry.Method, entry.RequestPath, entry.Status, formatLogDuration(entry.Duration), entry.ID)
 	if err != nil {

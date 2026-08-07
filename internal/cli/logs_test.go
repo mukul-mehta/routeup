@@ -52,7 +52,7 @@ func TestWriteLogHeader(t *testing.T) {
 	if err := writeLogHeader(&output); err != nil {
 		t.Fatal(err)
 	}
-	const want = "TIME     SOURCE ROUTE                METHOD  PATH STATUS DURATION ID\n"
+	const want = "TIME      SOURCE  ROUTE                 METHOD   PATH                                      STATUS  DURATION  ID\n"
 	if output.String() != want {
 		t.Fatalf("header = %q, want %q", output.String(), want)
 	}
