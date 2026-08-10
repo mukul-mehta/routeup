@@ -36,6 +36,9 @@ routeup setup
 ```
 
 You'll be asked for Touch ID or your password once. No sudo is needed after that.
+Setup exits nonzero if a requested trust or privileged-port change fails and
+does not record an unusable setup marker. To skip privileged port setup, choose
+an explicit high port: `routeup setup --no-bind --port 8443`.
 
 Check everything is healthy at any time:
 
@@ -125,11 +128,16 @@ Or save them permanently:
 
 ```bash
 routeup setup --server https://routeup.dev
+routeup setup --server none             # clear the saved server and token
 ```
 
-### Integrated into runner mode (`expose.enabled`)
+Remote public servers must use HTTPS. Plain HTTP is accepted only for loopback
+testing, and a saved token is reused only with the server it was saved for.
 
-Add `expose.enabled: true` to your config to have `routeup` claim a public route
+### Integrated exposure (`expose.enabled`)
+
+Add `expose.enabled: true` to your config to make `routeup serve` publish the
+route without `--expose`. Bare runner mode also claims the public route
 **before** launching the child process:
 
 ```json
@@ -157,6 +165,8 @@ public: https://myapp.<your-namespace>.routeup.dev
 
 `ROUTEUP_LOCAL_URL` stays local. `ROUTEUP_URL` holds the public address. No
 second terminal needed — the tunnel releases with the process.
+Foreground commands restore their route and public exposure if the local agent
+restarts or a tunnel terminates unexpectedly.
 
 ## Frontend + API
 
@@ -188,6 +198,7 @@ go through the public tunnel.
 routeup logs myapp                   # recent traffic
 routeup logs myapp --follow          # live stream
 routeup logs myapp --public --json   # public traffic as JSON
+routeup logs myapp --since 10m --method POST --status 202 --limit 50
 ```
 
 Enable opt-in capture for webhook debugging:
@@ -202,23 +213,32 @@ Enable opt-in capture for webhook debugging:
 }
 ```
 
-Then inspect individual requests:
+Then inspect individual exchanges:
 
 ```bash
 routeup inspect req_Ap7kQ3mN8vR2xLzC
+routeup inspect req_Ap7kQ3mN8vR2xLzC --json
 ```
 
-Captured data lives in agent memory only (256 KiB limit per request, 1024-entry
-ring). It resets when the agent restarts. Capture is off by default.
+The default report escapes control and binary bytes so captured traffic cannot
+write terminal control sequences. `--raw` restores unescaped retained values
+and is unsafe for direct terminal output; `--json` emits byte-exact bodies as
+base64. Captured data lives in agent memory only (256 KiB per captured request
+or response, 1024-entry ring). It resets when the agent restarts. Capture is off
+by default.
 
 ## Other commands
 
 ```bash
 routeup routes      # list active local routes (PUBLIC annotation when exposed)
 routeup doctor      # check CA, OS trust, port 443, and agent health
+routeup config      # show the discovered file and resolved non-secret settings
 routeup update      # self-update (use brew upgrade for Homebrew installs)
 routeup uninstall   # remove the CA, port-443 helper, and ~/.routeup
 ```
+
+`routes`, `doctor`, `agent status`, `config`, and `inspect` support `--json`.
+`logs --json` remains NDJSON and writes no human messages to stdout.
 
 ## Shell completions
 

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mukul-mehta/routeup/internal/logs"
 )
@@ -112,12 +113,33 @@ func TestHandleLogsRejectsInvalidSource(t *testing.T) {
 	}
 }
 
+func TestEntriesAfterResumesWhenCursorWasEvicted(t *testing.T) {
+	entries := []logs.Entry{{ID: "req_new_one"}, {ID: "req_new_two"}}
+	got := entriesAfter(entries, "req_evicted")
+	if len(got) != len(entries) || got[0].ID != entries[0].ID {
+		t.Fatalf("entriesAfter = %#v, want all retained entries", got)
+	}
+}
+
+func TestParseLogOptionsFilters(t *testing.T) {
+	since := time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC)
+	request := httptest.NewRequest(http.MethodGet,
+		"/v1/logs?route=api&source=public&method=POST&status=202&limit=10&since="+since.Format(time.RFC3339Nano)+"&follow=true", nil)
+	opts, follow, err := parseLogOptions(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !follow || opts.Route != "api" || opts.Source != logs.SourcePublic || opts.Method != "POST" || opts.Status != 202 || opts.Limit != 10 || !opts.Since.Equal(since) {
+		t.Fatalf("options = %#v, follow=%v", opts, follow)
+	}
+}
+
 func TestHandleInspectReturnsRetainedRequestOnly(t *testing.T) {
 	a := &Agent{logStore: logs.NewStore(), logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	_, err := a.logStore.Append(logs.Entry{
 		ID:     "req_captured",
 		Source: logs.SourceLocal,
-		Capture: &logs.Capture{Request: logs.CapturedMessage{
+		Capture: &logs.Capture{Request: &logs.CapturedMessage{
 			Headers:  http.Header{"X-Webhook": {"original"}},
 			Body:     []byte("payload"),
 			Complete: true,

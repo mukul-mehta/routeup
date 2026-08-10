@@ -87,6 +87,7 @@ type fakeBroker struct {
 	held          map[string]bool
 	released      map[string]bool
 	mockFailToken string // if token == mockFailToken, Hold rejects, tests failure condition of actual broker
+	generation    int64
 }
 
 func newFakeBroker() *fakeBroker {
@@ -101,20 +102,22 @@ type codedErr struct {
 func (e *codedErr) Error() string   { return e.msg }
 func (e *codedErr) StatusCode() int { return e.code }
 
-func (k *fakeBroker) Hold(_ context.Context, token string, spec ClaimSpec) (string, error) {
+func (k *fakeBroker) Hold(_ context.Context, token string, spec ClaimSpec) (RouteLease, error) {
 	if token == k.mockFailToken {
-		return "", &codedErr{msg: "invalid token", code: http.StatusUnauthorized}
+		return RouteLease{}, &codedErr{msg: "invalid token", code: http.StatusUnauthorized}
 	}
 	host := spec.Route + ".alice.routeup.dev"
 	k.mu.Lock()
+	k.generation++
+	generation := k.generation
 	k.held[host] = true
 	k.mu.Unlock()
-	return host, nil
+	return RouteLease{Host: host, Generation: generation}, nil
 }
 
-func (k *fakeBroker) Release(host string) {
+func (k *fakeBroker) Release(lease RouteLease) {
 	k.mu.Lock()
-	k.released[host] = true
+	k.released[lease.Host] = true
 	k.mu.Unlock()
 }
 
@@ -122,6 +125,56 @@ func (k *fakeBroker) wasReleased(host string) bool {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	return k.released[host]
+}
+
+func TestTunnelRegistryOldReleaseDoesNotRemoveReplacement(t *testing.T) {
+	broker := newFakeBroker()
+	registry := NewTunnelRegistry(broker, nil)
+	host := "api.alice.routeup.dev"
+	old := &tunnelRoute{handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})}
+	replacement := &tunnelRoute{handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})}
+
+	registry.register(host, old)
+	registry.register(host, replacement)
+	registry.release(RouteLease{Host: host, Generation: 1}, old)
+	if _, ok := registry.Handler(host); !ok {
+		t.Fatal("old session release removed replacement")
+	}
+	if broker.wasReleased(host) {
+		t.Fatal("old session release freed replacement hold")
+	}
+
+	registry.release(RouteLease{Host: host, Generation: 2}, replacement)
+	if _, ok := registry.Handler(host); ok {
+		t.Fatal("replacement release left route registered")
+	}
+	if !broker.wasReleased(host) {
+		t.Fatal("replacement release did not free hold")
+	}
+}
+
+func TestClientRejectsPlaintextRemoteServer(t *testing.T) {
+	client := NewClient(ClientOptions{ServerURL: "http://edge.example"})
+	if _, err := client.wsURL(); err == nil {
+		t.Fatal("remote plaintext tunnel server accepted")
+	}
+	client = NewClient(ClientOptions{ServerURL: "http://127.0.0.1:8080"})
+	if got, err := client.wsURL(); err != nil || got != "ws://127.0.0.1:8080/_routeup/tunnel" {
+		t.Fatalf("loopback tunnel URL = %q, %v", got, err)
+	}
+}
+
+func TestValidGrantedHost(t *testing.T) {
+	for _, host := range []string{"api.routeup.dev", "api-myapp.alice.routeup.dev", "foo.try.localhost"} {
+		if !validGrantedHost(host) {
+			t.Errorf("valid host %q rejected", host)
+		}
+	}
+	for _, host := range []string{"", ".routeup.dev", "api..routeup.dev", "api_unsafe.routeup.dev", "api\x1b[2J.routeup.dev"} {
+		if validGrantedHost(host) {
+			t.Errorf("invalid host %q accepted", host)
+		}
+	}
 }
 
 func TestTunnel_EndToEnd(t *testing.T) {

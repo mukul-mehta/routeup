@@ -3,6 +3,8 @@ package cli
 import (
 	"bufio"
 	"bytes"
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -184,6 +186,78 @@ func TestSetup_SavesServerAndTokenFromFlags(t *testing.T) {
 	}
 }
 
+func TestSetup_RejectsNoBindForPrivilegedPort(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "default port", args: []string{"--no-bind"}},
+		{name: "explicit privileged port", args: []string{"--no-bind", "--port", "1023"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := newSetupCmd()
+			cmd.SetArgs(tt.args)
+			err := cmd.Execute()
+			if err == nil || !strings.Contains(err.Error(), "--port 1024 or higher") {
+				t.Fatalf("error = %v, want --port 1024 or higher", err)
+			}
+
+			certPath, pathErr := state.CACertPath()
+			if pathErr != nil {
+				t.Fatalf("CACertPath: %v", pathErr)
+			}
+			if _, statErr := os.Stat(certPath); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("CA created before validation: %v", statErr)
+			}
+		})
+	}
+}
+
+func TestSetup_TrustFailureDoesNotWriteMarker(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := state.WriteSetupMarker(&state.SetupMarker{Version: 1, TLSPort: 8443}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	cmd := newSetupCmd()
+	cmd.SetContext(ctx)
+	cmd.SetArgs([]string{"--no-start", "--no-bind", "--port", "47443", "--server=", "--token="})
+
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "trusting certificate") {
+		t.Fatalf("error = %v, want trust failure", err)
+	}
+	assertNoSetupMarker(t)
+}
+
+func TestSetup_PrivBindFailureDoesNotWriteMarker(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	cmd := newSetupCmd()
+	cmd.SetContext(ctx)
+	cmd.SetArgs([]string{"--no-start", "--no-trust", "--port", "443", "--server=", "--token="})
+
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "setting up port 443") {
+		t.Fatalf("error = %v, want port setup failure", err)
+	}
+	assertNoSetupMarker(t)
+}
+
+func assertNoSetupMarker(t *testing.T) {
+	t.Helper()
+	marker, err := state.ReadSetupMarker()
+	if marker != nil || !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("setup marker = %#v, error = %v; want no marker", marker, err)
+	}
+}
+
 // TestServerCredPrompter_Collect drives the interactive question flow with a
 // scripted reader and a fake secret reader, covering the branch the user asked
 // for: ask the token only when a server is set, and keep saved values on blank.
@@ -199,7 +273,9 @@ func TestServerCredPrompter_Collect(t *testing.T) {
 		startToken       string
 		wantServer       string
 		wantToken        string
+		wantClear        bool
 		wantSecretCalled bool
+		wantErr          string
 	}{
 		{
 			name:             "server and token typed",
@@ -230,6 +306,7 @@ func TestServerCredPrompter_Collect(t *testing.T) {
 			input:            "none\n",
 			wantServer:       "",
 			wantToken:        "",
+			wantClear:        true,
 			wantSecretCalled: false,
 		},
 		{
@@ -245,9 +322,18 @@ func TestServerCredPrompter_Collect(t *testing.T) {
 			name:             "blank token keeps the saved token",
 			input:            "https://edge.routeup.dev\n",
 			secret:           "",
-			cc:               state.ClientConfig{Token: "sk_saved"},
+			cc:               state.ClientConfig{Server: "https://edge.routeup.dev", Token: "sk_saved"},
 			wantServer:       "https://edge.routeup.dev",
 			wantToken:        "sk_saved",
+			wantSecretCalled: true,
+		},
+		{
+			name:             "blank token does not reuse token from another server",
+			input:            "https://new.example\n",
+			secret:           "",
+			cc:               state.ClientConfig{Server: "https://old.example", Token: "sk_old"},
+			wantServer:       "https://new.example",
+			wantToken:        "",
 			wantSecretCalled: true,
 		},
 		{
@@ -268,6 +354,14 @@ func TestServerCredPrompter_Collect(t *testing.T) {
 			wantToken:        "sk_flag",
 			wantSecretCalled: false,
 		},
+		{
+			name:          "token flag conflicts with interactive opt-out",
+			input:         "none\n",
+			tokenFromFlag: true,
+			startToken:    "sk_flag",
+			wantToken:     "sk_flag",
+			wantErr:       "--token cannot be combined",
+		},
 	}
 
 	for _, tt := range tests {
@@ -283,7 +377,16 @@ func TestServerCredPrompter_Collect(t *testing.T) {
 			}
 			opts := &runSetupOpts{server: tt.startServer, token: tt.startToken}
 
-			p.collect(tt.cc, tt.serverFromFlag, tt.tokenFromFlag, opts)
+			err := p.collect(tt.cc, tt.serverFromFlag, tt.tokenFromFlag, opts)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
 
 			if opts.server != tt.wantServer {
 				t.Errorf("server = %q, want %q", opts.server, tt.wantServer)
@@ -294,6 +397,70 @@ func TestServerCredPrompter_Collect(t *testing.T) {
 			if called != tt.wantSecretCalled {
 				t.Errorf("secret reader called = %v, want %v", called, tt.wantSecretCalled)
 			}
+			if opts.clearClient != tt.wantClear {
+				t.Errorf("clear client = %v, want %v", opts.clearClient, tt.wantClear)
+			}
 		})
+	}
+}
+
+func TestSaveClientCredsDoesNotCarryTokenAcrossServers(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := state.WriteClientConfig(state.ClientConfig{Server: "https://old.example", Token: "sk_old"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveClientCreds(&bytes.Buffer{}, "https://new.example", "", false); err != nil {
+		t.Fatal(err)
+	}
+	config, err := state.ReadClientConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Server != "https://new.example" || config.Token != "" {
+		t.Fatalf("client config = %#v, want new server without old token", config)
+	}
+
+	if err := saveClientCreds(&bytes.Buffer{}, "", "", true); err != nil {
+		t.Fatal(err)
+	}
+	config, err = state.ReadClientConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Server != "" || config.Token != "" {
+		t.Fatalf("client config after clear = %#v", config)
+	}
+}
+
+func TestSaveClientCredsClearsTokenWithoutServerIdentity(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := state.WriteClientConfig(state.ClientConfig{Token: "orphaned-token"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveClientCreds(&bytes.Buffer{}, "https://new.example", "", false); err != nil {
+		t.Fatal(err)
+	}
+	config, err := state.ReadClientConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Server != "https://new.example" || config.Token != "" {
+		t.Fatalf("client config = %#v, want new server without orphaned token", config)
+	}
+}
+
+func TestSaveClientCredsRejectsTokenWithoutServer(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	err := saveClientCreds(&bytes.Buffer{}, "", "orphaned-token", false)
+	if err == nil || !strings.Contains(err.Error(), "requires a public server") {
+		t.Fatalf("error = %v, want missing server error", err)
+	}
+}
+
+func TestSetupRejectsTokenWhenClearingServer(t *testing.T) {
+	cmd := newSetupCmd()
+	cmd.SetArgs([]string{"--server", "none", "--token", "secret"})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("error = %v, want conflicting clear/token error", err)
 	}
 }

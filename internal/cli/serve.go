@@ -42,14 +42,17 @@ func newServeCmd() *cobra.Command {
 			"  serve myapp      ->  https://myapp.localhost\n" +
 			"  serve api        ->  https://api.<project>.localhost\n" +
 			"  serve api.myapp  ->  https://api.myapp.localhost\n\n" +
-			"Add --expose to also publish it publicly through a routeup server (the\n" +
-			"same as `routeup expose`); the public name is a single label under your\n" +
-			"token's namespace.",
+			"Add --expose, or set expose.enabled in config, to also publish it through\n" +
+			"a routeup server (the same as `routeup expose`); the public name is a\n" +
+			"single label under your token's namespace.",
 		Example: "  routeup serve myapp --port 3000\n" +
 			"  routeup serve api.myapp --port 8080\n" +
 			"  routeup serve myapp --port 3000 --expose",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if opts.random && len(args) != 0 {
+				return errors.New("a route name and --random cannot be used together")
+			}
 			cwd, err := os.Getwd()
 			if err != nil {
 				return fmt.Errorf("getting cwd: %w", err)
@@ -151,7 +154,7 @@ func runServe(cmd *cobra.Command, args []string, cwd string, opts serveOpts) err
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		_ = client.Unregister(shutdownCtx, claim.Name)
+		_ = client.Unregister(shutdownCtx, claim.Name, claim.OwnerPID)
 	}()
 
 	exposePaths, err := route.NormalizePathPatterns(discovered.Config.Expose.Paths)
@@ -160,13 +163,15 @@ func runServe(cmd *cobra.Command, args []string, cwd string, opts serveOpts) err
 	}
 
 	var publicHost string
+	var exposeReq *ipc.ExposeRequest
 	if opts.expose || discovered.Config.Expose.Enabled {
-		host, stopExpose, err := serveExpose(ctx, client, resolved.Route, resolved.Targets, exposePaths, discovered.Config.Capture.Request, discovered.Config.Capture.Response, discovered.Config.Capture.RedactHeaders, opts)
+		host, request, stopExpose, err := serveExpose(ctx, client, resolved.Route, resolved.Targets, exposePaths, discovered.Config.Capture.Request, discovered.Config.Capture.Response, discovered.Config.Capture.RedactHeaders, opts)
 		if err != nil {
 			return err
 		}
 		defer stopExpose()
 		publicHost = host
+		exposeReq = &request
 	}
 
 	_, _ = fmt.Fprintf(out, "route: %s\n", resolved.Route)
@@ -179,17 +184,22 @@ func runServe(cmd *cobra.Command, args []string, cwd string, opts serveOpts) err
 	_, _ = fmt.Fprintln(out, "")
 	_, _ = fmt.Fprintln(out, "press Ctrl-C to stop")
 
-	client.MaintainClaim(ctx, claim, cmd.ErrOrStderr())
+	client.Maintain(ctx, agentctl.DesiredState{
+		Claim: &claim, Exposure: exposeReq, PublicHost: publicHost,
+	}, cmd.ErrOrStderr())
 	return nil
 }
 
-func serveExpose(ctx context.Context, client *agentctl.Client, routeName route.Name, targets []route.Target, paths []string, captureRequest bool, captureResponse bool, redactHeaders []string, opts serveOpts) (string, func(), error) {
-	serverURL, token := resolveServerToken(opts.server, opts.token)
+func serveExpose(ctx context.Context, client *agentctl.Client, routeName route.Name, targets []route.Target, paths []string, captureRequest bool, captureResponse bool, redactHeaders []string, opts serveOpts) (string, ipc.ExposeRequest, func(), error) {
+	serverURL, token, err := resolveServerToken(opts.server, opts.token)
+	if err != nil {
+		return "", ipc.ExposeRequest{}, nil, err
+	}
 	if serverURL == "" {
-		return "", nil, errors.New("--expose needs a server — pass --server, set ROUTEUP_SERVER, or run `routeup setup --server …`")
+		return "", ipc.ExposeRequest{}, nil, errors.New("public exposure needs a server — pass --server, set ROUTEUP_SERVER, or run `routeup setup --server …`")
 	}
 
-	return holdExposure(ctx, client, ipc.ExposeRequest{
+	req := ipc.ExposeRequest{
 		Name:            normalizePublicName(routeName),
 		Route:           routeName.String(),
 		Port:            route.PrimaryPort(targets),
@@ -201,7 +211,9 @@ func serveExpose(ctx context.Context, client *agentctl.Client, routeName route.N
 		Server:          serverURL,
 		Token:           token,
 		OwnerPID:        os.Getpid(),
-	})
+	}
+	host, stop, err := holdExposure(ctx, client, req)
+	return host, req, stop, err
 }
 
 func localURL(host string, port int) string {

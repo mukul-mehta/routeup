@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Target is one local upstream behind a route. Path is a path prefix such as
@@ -138,6 +140,9 @@ func PathAllowed(patterns []string, requestPath string) bool {
 }
 
 func normalizeTargetPath(path string) (string, error) {
+	if !utf8.ValidString(path) || strings.IndexFunc(path, unicode.IsControl) >= 0 {
+		return "", errors.New("target path must not contain invalid UTF-8 or control characters")
+	}
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return "", errors.New("target path is required")
@@ -152,6 +157,9 @@ func normalizeTargetPath(path string) (string, error) {
 }
 
 func normalizePathPattern(pattern string) (string, error) {
+	if !utf8.ValidString(pattern) || strings.IndexFunc(pattern, unicode.IsControl) >= 0 {
+		return "", errors.New("expose path must not contain invalid UTF-8 or control characters")
+	}
 	pattern = strings.TrimSpace(pattern)
 	if pattern == "" {
 		return "", errors.New("expose path is required")

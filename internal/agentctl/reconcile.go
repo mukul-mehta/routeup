@@ -9,93 +9,138 @@ import (
 	"github.com/mukul-mehta/routeup/internal/ipc"
 )
 
-// reconcileInterval is how often MaintainClaim re-checks that the claim is
-// still held by the agent instance it registered with.
-const reconcileInterval = 2 * time.Second
+const (
+	reconcileInterval  = 2 * time.Second
+	maxExposureBackoff = 30 * time.Second
+)
 
-// MaintainClaim keeps claim registered with the agent until ctx is cancelled.
-//
-// The agent holds its registry in memory, so a crash or restart drops every
-// route. The foreground claim owner (serve or runner) is still running and
-// still wants its route, so it re-registers when needed instead of registering
-// once and hoping the agent remembers.
-//
-// The loop tracks the agent's BootID, which the agent picks once at startup.
-// The same BootID means the same agent that still has our claim; a different
-// one (or an unreachable agent) means we lost it and register again.
-//
-// One tick, every reconcileInterval:
-//
-//	Status() ─┬─ error ──────────────▶ agent gone: spawn one, then re-register
-//	          ├─ ok, BootID changed ──▶ agent restarted: re-register
-//	          └─ ok, BootID matches ──▶ nothing to do
-//
-// After a re-register the loop records the new BootID, so the following ticks
-// fall back to the do-nothing case. Messages go to w; the caller unregisters
-// when ctx is cancelled.
-func (c *Client) MaintainClaim(ctx context.Context, claim ipc.Claim, w io.Writer) {
-	bootID := c.currentBootID(ctx)
+// DesiredState is the local claim and public exposure a foreground command owns.
+// The exact exposure request remains in the CLI process so tokens are never
+// persisted by the agent.
+type DesiredState struct {
+	Claim      *ipc.Claim
+	Exposure   *ipc.ExposeRequest
+	PublicHost string
+}
 
-	t := time.NewTicker(reconcileInterval)
-	defer t.Stop()
+// Maintain restores desired state after an agent restart or terminal tunnel
+// failure. It blocks until ctx is cancelled.
+func (c *Client) Maintain(ctx context.Context, desired DesiredState, w io.Writer) {
+	bootID, exposureFailed := c.reconcileDesired(ctx, desired, "", w)
+	exposureBackoff := reconcileInterval
+	nextExposureAttempt := time.Time{}
+	if exposureFailed {
+		nextExposureAttempt = time.Now().Add(exposureBackoff)
+	}
+	ticker := time.NewTicker(reconcileInterval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-t.C:
-			bootID = c.reconcileTick(ctx, claim, bootID, w)
+		case <-ticker.C:
+			attemptExposure := nextExposureAttempt.IsZero() || !time.Now().Before(nextExposureAttempt)
+			tickDesired := desired
+			if !attemptExposure {
+				tickDesired.Exposure = nil
+			}
+			bootID, exposureFailed = c.reconcileDesired(ctx, tickDesired, bootID, w)
+			if !attemptExposure {
+				continue
+			}
+			if exposureFailed {
+				nextExposureAttempt = time.Now().Add(exposureBackoff)
+				exposureBackoff *= 2
+				if exposureBackoff > maxExposureBackoff {
+					exposureBackoff = maxExposureBackoff
+				}
+				continue
+			}
+			nextExposureAttempt = time.Time{}
+			exposureBackoff = reconcileInterval
 		}
 	}
 }
 
-// reconcileTick performs one reconciliation pass and returns the boot id the
-// claim is now registered against (unchanged when nothing needed doing).
-func (c *Client) reconcileTick(ctx context.Context, claim ipc.Claim, bootID string, w io.Writer) string {
-	statusCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+// MaintainClaim keeps the existing claim-only API for local-only callers.
+func (c *Client) MaintainClaim(ctx context.Context, claim ipc.Claim, w io.Writer) {
+	c.Maintain(ctx, DesiredState{Claim: &claim}, w)
+}
+
+func (c *Client) reconcileDesired(ctx context.Context, desired DesiredState, bootID string, w io.Writer) (string, bool) {
+	if ctx.Err() != nil {
+		return bootID, false
+	}
+	statusCtx, cancelStatus := context.WithTimeout(ctx, 3*time.Second)
 	status, err := c.Status(statusCtx)
-	cancel()
-
-	switch {
-	case err != nil:
-		_, _ = fmt.Fprintf(w, "routeup: agent unreachable; restarting and re-registering %q\n", claim.Name)
-		ensureCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
-		defer cancel()
-		if _, e := c.EnsureRunning(ensureCtx); e != nil {
-			_, _ = fmt.Fprintf(w, "routeup: could not restart agent: %v\n", e)
-			return bootID
+	cancelStatus()
+	if err != nil {
+		if ctx.Err() != nil {
+			return bootID, false
 		}
-		return c.restoreClaim(ctx, claim, bootID, w)
-
-	case status.BootID != bootID:
-		_, _ = fmt.Fprintf(w, "routeup: agent restarted; re-registering %q\n", claim.Name)
-		return c.restoreClaim(ctx, claim, bootID, w)
-
-	default:
-		return bootID
+		if !IsUnavailable(err) {
+			_, _ = fmt.Fprintf(w, "routeup: agent status check failed: %v\n", err)
+			return bootID, false
+		}
+		_, _ = fmt.Fprintln(w, "routeup: agent stopped; restarting")
+		ensureCtx, cancelEnsure := context.WithTimeout(ctx, 12*time.Second)
+		_, ensureErr := c.EnsureRunning(ensureCtx)
+		cancelEnsure()
+		if ensureErr != nil {
+			_, _ = fmt.Fprintf(w, "routeup: could not restart agent: %v\n", ensureErr)
+			return bootID, false
+		}
+		statusCtx, cancelStatus = context.WithTimeout(ctx, 3*time.Second)
+		status, err = c.Status(statusCtx)
+		cancelStatus()
+		if err != nil {
+			_, _ = fmt.Fprintf(w, "routeup: could not read restarted agent status: %v\n", err)
+			return bootID, false
+		}
 	}
+
+	restarted := bootID == "" || status.BootID != bootID
+	if restarted && desired.Claim != nil {
+		opCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		_, err := c.Register(opCtx, *desired.Claim)
+		cancel()
+		if err != nil {
+			_, _ = fmt.Fprintf(w, "routeup: re-register %q failed: %v\n", desired.Claim.Name, err)
+			return bootID, false
+		}
+		if bootID != "" {
+			_, _ = fmt.Fprintf(w, "routeup: agent restarted; restored route %q\n", desired.Claim.Name)
+		}
+	}
+
+	if desired.Exposure != nil && !hasExposure(status, *desired.Exposure, desired.PublicHost) {
+		opCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		response, exposeErr := c.Expose(opCtx, *desired.Exposure)
+		cancel()
+		if exposeErr != nil {
+			_, _ = fmt.Fprintf(w, "routeup: restore public exposure failed: %v\n", exposeErr)
+			return status.BootID, true
+		}
+		if desired.PublicHost != "" && response.Host != desired.PublicHost {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 3*time.Second)
+			_ = c.Unexpose(cleanupCtx, ipc.UnexposeRequest{
+				Host: response.Host, Route: desired.Exposure.Route, OwnerPID: desired.Exposure.OwnerPID,
+			})
+			cleanupCancel()
+			_, _ = fmt.Fprintf(w, "routeup: restored exposure changed host from %s to %s; released replacement\n", desired.PublicHost, response.Host)
+			return status.BootID, true
+		}
+		_, _ = fmt.Fprintf(w, "routeup: restored public exposure at https://%s\n", response.Host)
+	}
+
+	return status.BootID, false
 }
 
-// restoreClaim re-registers the claim and returns the agent's current boot id
-// so the caller can track the (possibly new) instance. On failure it logs and
-// keeps the old boot id so the next tick retries.
-func (c *Client) restoreClaim(ctx context.Context, claim ipc.Claim, bootID string, w io.Writer) string {
-	opCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	if _, err := c.Register(opCtx, claim); err != nil {
-		_, _ = fmt.Fprintf(w, "routeup: re-register failed: %v\n", err)
-		return bootID
+func hasExposure(status ipc.Status, req ipc.ExposeRequest, host string) bool {
+	for _, exposure := range status.Exposures {
+		if exposure.OwnerPID == req.OwnerPID && exposure.Route == req.Route && (host == "" || exposure.Host == host) {
+			return true
+		}
 	}
-	return c.currentBootID(opCtx)
-}
-
-// currentBootID returns the running agent's boot id, or "" if it can't be read.
-// A "" result is safe: the next reconcile tick will see a mismatch and re-sync.
-func (c *Client) currentBootID(ctx context.Context) string {
-	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	if s, err := c.Status(probeCtx); err == nil {
-		return s.BootID
-	}
-	return ""
+	return false
 }

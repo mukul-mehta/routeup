@@ -3,7 +3,7 @@
 // The agent has no request-log database. Store owns the last 1,024 requests
 // from both local and public traffic. Each entry may include original request
 // data when the route opted in. When the ring fills, adding a new entry removes
-// the oldest entry and its retained request together.
+// the oldest entry and its retained exchange together.
 //
 //	proxy completes request
 //	  -> Store.Append
@@ -27,6 +27,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -48,6 +49,9 @@ type ListOptions struct {
 	Route  string
 	Source Source
 	Limit  int
+	Since  time.Time
+	Method string
+	Status int
 }
 
 // Store holds bounded chronological request entries. It is safe for concurrent use
@@ -94,6 +98,7 @@ func (store *Store) Append(entry Entry) (Entry, error) {
 	if _, exists := store.byID[entry.ID]; exists {
 		return Entry{}, fmt.Errorf("%s: %w", entry.ID, ErrDuplicateID)
 	}
+	entry.Captured = entry.Capture != nil
 	if !entry.Capture.withinLimit() {
 		return Entry{}, fmt.Errorf("capture exceeds the message limit: %w", ErrInvalidEntry)
 	}
@@ -146,6 +151,15 @@ func (opts ListOptions) matches(entry Entry) bool {
 		return false
 	}
 	if opts.Source != "" && opts.Source != entry.Source {
+		return false
+	}
+	if !opts.Since.IsZero() && entry.StartedAt.Before(opts.Since) {
+		return false
+	}
+	if opts.Method != "" && !strings.EqualFold(opts.Method, entry.Method) {
+		return false
+	}
+	if opts.Status != 0 && opts.Status != entry.Status {
 		return false
 	}
 	return true

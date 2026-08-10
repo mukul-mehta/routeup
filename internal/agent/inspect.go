@@ -1,9 +1,9 @@
-// Inspect reads one retained request from the agent-local log ring:
+// Inspect reads one retained exchange from the agent-local log ring:
 //
 //	routeup inspect -> GET /v1/requests/{id} -> logs.Store.Get -> JSON Entry
 //
 // Normal log listing deliberately omits headers and bodies. This endpoint is
-// served only over the user's 0600 Unix socket and returns retained request data
+// served only over the user's 0600 Unix socket and returns retained exchange data
 // only for routes that explicitly enabled capture.
 package agent
 

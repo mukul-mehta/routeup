@@ -61,6 +61,9 @@ func (s *Store) HoldRoute(ctx context.Context, req HoldRequest) (RouteHold, erro
 	if found && holdBlocked(existing, req, now) {
 		return RouteHold{}, ErrRouteConflict
 	}
+	if found && !now.After(existing.HeldAt) {
+		now = existing.HeldAt.Add(time.Nanosecond)
+	}
 
 	h := RouteHold{
 		Host:      req.Host,
@@ -82,10 +85,24 @@ func (s *Store) HoldRoute(ctx context.Context, req HoldRequest) (RouteHold, erro
 func (s *Store) Release(ctx context.Context, host string) error {
 	s.holdMu.Lock()
 	defer s.holdMu.Unlock()
+	return s.releaseLocked(ctx, host, 0)
+}
 
+// ReleaseGeneration releases host only if its current hold has the supplied
+// HeldAt generation. A zero generation retains the unconditional legacy path.
+func (s *Store) ReleaseGeneration(ctx context.Context, host string, generation int64) error {
+	s.holdMu.Lock()
+	defer s.holdMu.Unlock()
+	return s.releaseLocked(ctx, host, generation)
+}
+
+func (s *Store) releaseLocked(ctx context.Context, host string, generation int64) error {
 	existing, found, err := s.GetHold(ctx, host)
 	if err != nil || !found {
 		return err
+	}
+	if generation != 0 && existing.HeldAt.UnixNano() != generation {
+		return nil
 	}
 	if existing.Ephemeral || existing.Kind == HoldByNamespace {
 		return s.deleteHold(ctx, host)

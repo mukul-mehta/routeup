@@ -63,6 +63,7 @@ routeup expose <name>
 routeup agent status
 routeup routes
 routeup logs
+routeup config
 routeup doctor
 routeup setup
 ```
@@ -115,20 +116,24 @@ Agent API surface:
 
 ```txt
 POST   /v1/routes               register a route claim
-DELETE /v1/routes/{name}        release a claim
+DELETE /v1/routes/{name}?owner_pid=  release a claim if ownership still matches
 GET    /v1/routes               list active routes
-GET    /v1/status               agent status, version, uptime, boot id
+GET    /v1/status               agent status, boot id, and managed exposures
 POST   /v1/shutdown             graceful shutdown (used by `agent stop`/restart)
-GET    /v1/logs?route=&source=&follow=  access-log list or SSE stream
-GET    /v1/requests/{id}                 inspect one retained request
+GET    /v1/logs?route=&source=&method=&status=&since=&limit=&follow=  access-log list or SSE stream
+GET    /v1/requests/{id}                 inspect one retained exchange
 POST   /v1/expose               start public exposure for a claimed route
 POST   /v1/unexpose             stop public exposure
 ```
 
-The status response carries a `boot_id` generated once per agent process.
-Foreground `serve` and runner commands register their claims, remember that
-boot id, and re-register if the agent restarts or becomes unreachable. This
-client-driven reconciliation keeps the registry in memory: live foreground
+The status response carries a `boot_id` generated once per agent process and a
+non-secret snapshot of managed public exposures. Foreground `serve`, `expose`,
+and runner commands retain their exact desired claim/exposure state. They
+re-register and re-expose after an agent restart, and re-expose when a tunnel
+terminates permanently. Transient tunnel reconnects remain agent-owned and are
+reported as `reconnecting`, preventing duplicate sessions. Cleanup includes the
+owner PID so an old process cannot remove a replacement. This client-driven
+reconciliation keeps the registry and tunnel state in memory: live foreground
 commands are the source of truth.
 
 ### Request Logs (Phase 9) And Request Capture/Inspect (Phase 10)
@@ -150,20 +155,22 @@ Phase 10 adds per-route opt-in request retention:
 
 ```json
 {
-  "capture": true,
-  "redact_headers": ["authorization", "cookie", "x-webhook-signature"]
+  "capture": {
+    "request": true,
+    "response": true,
+    "redact_headers": ["authorization", "cookie", "x-webhook-signature"]
+  }
 }
 ```
 
-Capture is disabled by default. When enabled, the agent retains the incoming
-request headers and body after public-path and target matching in the same
-1024-entry request ring. Each retained request is limited to 256 KiB including
-headers and body. Non-redacted captured data remains unredacted and in agent
-memory only. If the body exceeds the limit or forwarding ends before EOF, the
-retained prefix is marked `Complete: false`. `redact_headers` is case-insensitive;
-configured headers are forwarded normally but excluded from capture and listed by
-`routeup inspect`. `routeup inspect <request-id>` displays the retained request
-over the user's local Unix socket. Path-filtered and unmatched-target requests
+Capture is disabled by default. The agent can retain request and response data
+independently after public-path and target matching in the same 1024-entry ring.
+Each captured direction is limited to 256 KiB including headers and body.
+Non-redacted data remains in agent memory only. If a body exceeds the limit or
+forwarding ends before EOF, the retained prefix is marked `Complete: false`.
+Configured redacted headers are forwarded normally but excluded from capture.
+`routeup inspect <request-id>` escapes untrusted bytes by default; `--raw` and
+`--json` are explicit alternatives. Path-filtered and unmatched-target requests
 still produce metadata logs when they reach the agent, but are not captured.
 
 ### Public Server
@@ -216,6 +223,10 @@ github.com/hashicorp/yamux   stream multiplexing inside the WebSocket
 ```
 
 Each public HTTP request becomes one yamux stream end-to-end. WebSocket on 443 looks like normal HTTPS traffic and survives corporate proxies, NAT, and most hotel and mobile networks. This is the same pattern used by `inlets`, `boringproxy`, and `frp`.
+
+Client server URLs require HTTPS except for explicit loopback testing. Saved
+tokens are reused only with their saved server, preventing a server override
+from receiving another server's bearer credential.
 
 Protocol version is prefixed in the WebSocket handshake. Client and server refuse mismatched versions with a clear error.
 
@@ -542,10 +553,11 @@ targets. `port: 5173` means `targets: [{path: "/", port: 5173}]`; explicit
 targets support frontend/API routing behind one route. `expose.paths` limits
 public exposure only and defaults to all paths.
 
-`expose.enabled` is implemented. When set, bare `routeup` obtains the public
-route before child launch, injects the granted URL into `ROUTEUP_URL` (while
-`ROUTEUP_LOCAL_URL` stays local), and releases the tunnel alongside the route and
-child group on exit. The Vite framework adapter from Phase 8.5 is still deferred.
+`expose.enabled` is implemented. When set, `routeup serve` publishes its route
+without requiring `--expose`. Bare `routeup` obtains the public route before
+child launch, injects the granted URL into `ROUTEUP_URL` (while
+`ROUTEUP_LOCAL_URL` stays local), and releases the tunnel alongside the route
+and child group on exit. The Vite framework adapter from Phase 8.5 is still deferred.
 An `expose` object that only contains `paths` constrains standalone exposure and
 does not trigger runner-mode exposure on its own.
 
@@ -608,9 +620,10 @@ For `routeup serve --port 8080 --expose`:
 3. CLI registers the local route and targets.
 4. CLI separately requests exposure through `POST /v1/expose`.
 5. Agent dials the public server and claims the public route over the WebSocket + yamux session.
-6. CLI prints route status and blocks until Ctrl-C.
-7. CLI tells the agent to release the claim.
-8. Agent tears down the tunnel for this route, leaving other tunnels unaffected.
+6. CLI prints route status and reconciles the claim and exposure until Ctrl-C.
+7. If the agent restarts or a tunnel dies permanently, the CLI restores both.
+8. CLI sends owner-conditional releases on exit.
+9. Agent tears down the tunnel for this route, leaving other tunnels unaffected.
 ```
 
 Standalone `routeup expose <name>` starts the agent but does not register a

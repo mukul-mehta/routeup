@@ -2,7 +2,6 @@ package tunnel
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -56,7 +55,11 @@ type TunnelRegistry struct {
 	logger *slog.Logger
 
 	mu     sync.RWMutex
-	routes map[string]http.Handler // public host -> reverse proxy over its session
+	routes map[string]*tunnelRoute // public host -> reverse proxy over its session
+}
+
+type tunnelRoute struct {
+	handler http.Handler
 }
 
 // NewTunnelRegistry returns a registry backed by broker.
@@ -67,7 +70,7 @@ func NewTunnelRegistry(broker RouteBroker, logger *slog.Logger) *TunnelRegistry 
 	return &TunnelRegistry{
 		broker: broker,
 		logger: logger,
-		routes: make(map[string]http.Handler),
+		routes: make(map[string]*tunnelRoute),
 	}
 }
 
@@ -128,8 +131,8 @@ func (reg *TunnelRegistry) ServeConn(ctx context.Context, conn net.Conn, token s
 	}
 
 	// Read the single claim message; reject anything that isn't a valid claim.
-	var msg HandshakeMessage
-	if err := json.NewDecoder(ctrl).Decode(&msg); err != nil {
+	msg, err := readHandshakeMessage(ctrl)
+	if err != nil {
 		return fmt.Errorf("decode claim: %w", err)
 	}
 	if msg.Type != msgClaim || msg.Claim == nil || msg.Claim.Route == "" {
@@ -139,17 +142,19 @@ func (reg *TunnelRegistry) ServeConn(ctx context.Context, conn net.Conn, token s
 
 	// Authorize + persist + ensure cert, via the RouteBroker. Returns the public
 	// host the server granted, or a coded error (401/403/409) relayed verbatim.
-	host, err := reg.broker.Hold(ctx, token, *msg.Claim)
+	lease, err := reg.broker.Hold(ctx, token, *msg.Claim)
 	if err != nil {
 		_ = writeHandshakeMessage(ctrl, HandshakeMessage{Type: msgClaimErr, Error: err.Error(), Code: statusCodeOf(err)})
 		return err
 	}
+	host := lease.Host
 
 	// Make the host serviceable: store host -> a reverse proxy bound to THIS
 	// session, so serveIngress can route public requests to it. The deferred
 	// release (on return) removes the route and frees the hold (grace window).
-	reg.register(host, newSessionProxy(session, host, reg.logger))
-	defer reg.release(host)
+	registered := &tunnelRoute{handler: newSessionProxy(session, host, reg.logger)}
+	reg.register(host, registered)
+	defer reg.release(lease, registered)
 
 	// Grant: tell the agent its host; its handshake unblocks and it begins
 	// serving request streams.
@@ -185,9 +190,12 @@ func (reg *TunnelRegistry) ServeConn(ctx context.Context, conn net.Conn, token s
 // serveIngress dispatches each public request to it; a missing entry is a 503.
 func (reg *TunnelRegistry) Handler(host string) (http.Handler, bool) {
 	reg.mu.RLock()
-	h, ok := reg.routes[host]
+	route, ok := reg.routes[host]
 	reg.mu.RUnlock()
-	return h, ok
+	if !ok {
+		return nil, false
+	}
+	return route.handler, true
 }
 
 // newSessionProxy builds the reverse proxy that carries a public request to the
@@ -216,15 +224,19 @@ func newSessionProxy(session *yamux.Session, host string, logger *slog.Logger) h
 	}
 }
 
-func (reg *TunnelRegistry) register(host string, h http.Handler) {
+func (reg *TunnelRegistry) register(host string, route *tunnelRoute) {
 	reg.mu.Lock()
-	reg.routes[host] = h
+	reg.routes[host] = route
 	reg.mu.Unlock()
 }
 
-func (reg *TunnelRegistry) release(host string) {
+func (reg *TunnelRegistry) release(lease RouteLease, route *tunnelRoute) {
 	reg.mu.Lock()
-	delete(reg.routes, host)
+	if reg.routes[lease.Host] != route {
+		reg.mu.Unlock()
+		return
+	}
+	delete(reg.routes, lease.Host)
 	reg.mu.Unlock()
-	reg.broker.Release(host)
+	reg.broker.Release(lease)
 }

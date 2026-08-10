@@ -56,12 +56,13 @@ func (r *Registry) Register(c ipc.Claim) (ipc.Claim, error) {
 	return normalized, nil
 }
 
-// Unregister removes the claim for name. It returns true if a claim was
-// removed. Missing claims are not an error: DELETE is idempotent.
-func (r *Registry) Unregister(name string) bool {
+// Unregister removes the claim only when name and ownerPID still match. Missing
+// or replaced claims are not errors: DELETE is idempotent.
+func (r *Registry) Unregister(name string, ownerPID int) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.claims[name]; !ok {
+	claim, ok := r.claims[name]
+	if !ok || claim.OwnerPID != ownerPID {
 		return false
 	}
 	delete(r.claims, name)

@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/mukul-mehta/routeup/internal/logs"
 )
@@ -41,8 +42,13 @@ func (a *Agent) handleLogs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 
 	lastID := ""
+	first := true
 	for {
 		entries, changed := a.logStore.ListAndWatch(opts)
+		if first {
+			first = false
+			opts.Limit = 0
+		}
 		entries = entriesAfter(entries, lastID)
 		for _, entry := range entries {
 			body, err := json.Marshal(entry)
@@ -66,16 +72,38 @@ func (a *Agent) handleLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 func parseLogOptions(r *http.Request) (logs.ListOptions, bool, error) {
-	opts := logs.ListOptions{Route: r.URL.Query().Get("route")}
-	source := r.URL.Query().Get("source")
+	query := r.URL.Query()
+	opts := logs.ListOptions{Route: query.Get("route"), Method: query.Get("method")}
+	source := query.Get("source")
 	if source != "" {
 		opts.Source = logs.Source(source)
 		if opts.Source != logs.SourceLocal && opts.Source != logs.SourcePublic {
 			return logs.ListOptions{}, false, fmt.Errorf("invalid log source %q", source)
 		}
 	}
+	if value := query.Get("status"); value != "" {
+		status, err := strconv.Atoi(value)
+		if err != nil || status < 100 || status > 599 {
+			return logs.ListOptions{}, false, fmt.Errorf("invalid status value %q", value)
+		}
+		opts.Status = status
+	}
+	if value := query.Get("limit"); value != "" {
+		limit, err := strconv.Atoi(value)
+		if err != nil || limit <= 0 {
+			return logs.ListOptions{}, false, fmt.Errorf("invalid limit value %q", value)
+		}
+		opts.Limit = limit
+	}
+	if value := query.Get("since"); value != "" {
+		since, err := time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			return logs.ListOptions{}, false, fmt.Errorf("invalid since value %q", value)
+		}
+		opts.Since = since
+	}
 
-	followText := r.URL.Query().Get("follow")
+	followText := query.Get("follow")
 	if followText == "" {
 		return opts, false, nil
 	}
@@ -95,5 +123,7 @@ func entriesAfter(entries []logs.Entry, lastID string) []logs.Entry {
 			return entries[i+1:]
 		}
 	}
-	return entries[:0]
+	// The cursor fell out of the bounded ring. Every retained entry is newer
+	// than it, so resume from the oldest entry still available.
+	return entries
 }

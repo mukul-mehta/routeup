@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -109,17 +111,94 @@ func TestResolveServerToken_Precedence(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if s, tok := resolveServerToken("", ""); s != "https://cfg.example" || tok != "cfg-token" {
-		t.Errorf("config: got %q/%q", s, tok)
+	if s, tok, err := resolveServerToken("", ""); err != nil || s != "https://cfg.example" || tok != "cfg-token" {
+		t.Errorf("config: got %q/%q (%v)", s, tok, err)
 	}
 
 	t.Setenv("ROUTEUP_SERVER", "https://env.example")
 	t.Setenv("ROUTEUP_TOKEN", "env-token")
-	if s, tok := resolveServerToken("", ""); s != "https://env.example" || tok != "env-token" {
-		t.Errorf("env: got %q/%q", s, tok)
+	if s, tok, err := resolveServerToken("", ""); err != nil || s != "https://env.example" || tok != "env-token" {
+		t.Errorf("env: got %q/%q (%v)", s, tok, err)
 	}
 
-	if s, tok := resolveServerToken("https://flag.example", "flag-token"); s != "https://flag.example" || tok != "flag-token" {
-		t.Errorf("flag: got %q/%q", s, tok)
+	if s, tok, err := resolveServerToken("https://flag.example", "flag-token"); err != nil || s != "https://flag.example" || tok != "flag-token" {
+		t.Errorf("flag: got %q/%q (%v)", s, tok, err)
+	}
+}
+
+func TestResolveServerTokenDoesNotReuseTokenForAnotherServer(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ROUTEUP_SERVER", "")
+	t.Setenv("ROUTEUP_TOKEN", "")
+	if err := state.WriteClientConfig(state.ClientConfig{Server: "https://old.example", Token: "saved-token"}); err != nil {
+		t.Fatal(err)
+	}
+	server, token, err := resolveServerToken("https://new.example", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if server != "https://new.example" || token != "" {
+		t.Fatalf("resolved %q/%q, want new server without saved token", server, token)
+	}
+}
+
+func TestNormalizeServerURLRejectsPlaintextRemoteServer(t *testing.T) {
+	if _, err := normalizeServerURL("http://edge.example"); err == nil {
+		t.Fatal("remote HTTP server accepted")
+	}
+	if got, err := normalizeServerURL("http://127.0.0.1:8080"); err != nil || got != "http://127.0.0.1:8080" {
+		t.Fatalf("loopback server = %q, %v", got, err)
+	}
+}
+
+func TestNormalizeServerURLCanonicalizesEquivalentServers(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: "https://EDGE.Example:443/", want: "https://edge.example"},
+		{input: "http://LOCALHOST:80/", want: "http://localhost"},
+		{input: "https://edge.example:8443", want: "https://edge.example:8443"},
+	}
+	for _, tt := range tests {
+		got, err := normalizeServerURL(tt.input)
+		if err != nil {
+			t.Fatalf("normalizeServerURL(%q): %v", tt.input, err)
+		}
+		if got != tt.want {
+			t.Errorf("normalizeServerURL(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestResolveServerTokenReusesTokenForEquivalentDefaultPort(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ROUTEUP_SERVER", "")
+	t.Setenv("ROUTEUP_TOKEN", "")
+	if err := state.WriteClientConfig(state.ClientConfig{Server: "https://edge.example:443", Token: "saved-token"}); err != nil {
+		t.Fatal(err)
+	}
+	server, token, err := resolveServerToken("https://edge.example", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if server != "https://edge.example" || token != "saved-token" {
+		t.Fatalf("resolved %q/%q, want equivalent server with saved token", server, token)
+	}
+}
+
+func TestResolveServerTokenReturnsClientConfigErrors(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("ROUTEUP_SERVER", "")
+	t.Setenv("ROUTEUP_TOKEN", "")
+	if err := os.MkdirAll(filepath.Join(home, ".routeup"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".routeup", "client.json"), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := resolveServerToken("", ""); err == nil {
+		t.Fatal("malformed client config ignored")
 	}
 }

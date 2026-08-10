@@ -2,6 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -21,6 +24,12 @@ func isolateRouteupState(t *testing.T) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_RUNTIME_DIR", "")
+	dir, err := os.MkdirTemp("", "rup-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	t.Setenv("ROUTEUP_AGENT_SOCKET", filepath.Join(dir, "missing.sock"))
 }
 
 func TestDoctor_NoSetupFails(t *testing.T) {
@@ -35,6 +44,26 @@ func TestDoctor_NoSetupFails(t *testing.T) {
 	}
 	if !strings.Contains(out, "routeup setup") {
 		t.Errorf("output missing 'routeup setup' hint: %s", out)
+	}
+}
+
+func TestDoctor_JSONReportsFailedChecks(t *testing.T) {
+	isolateRouteupState(t)
+	stdout, _, err := runRoot(t, "doctor", "--json")
+	if err == nil {
+		t.Fatal("expected failed doctor exit")
+	}
+	var output struct {
+		Healthy bool `json:"healthy"`
+		Checks  []struct {
+			Level string `json:"level"`
+		} `json:"checks"`
+	}
+	if decodeErr := json.Unmarshal([]byte(stdout), &output); decodeErr != nil {
+		t.Fatalf("decode doctor json: %v\n%s", decodeErr, stdout)
+	}
+	if output.Healthy || len(output.Checks) == 0 {
+		t.Fatalf("doctor output = %#v", output)
 	}
 }
 

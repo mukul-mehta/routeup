@@ -49,9 +49,9 @@ func (c *Client) Expose(ctx context.Context, req ipc.ExposeRequest) (ipc.ExposeR
 	return out, nil
 }
 
-// Unexpose sends POST /v1/unexpose for host. It is idempotent.
-func (c *Client) Unexpose(ctx context.Context, host string) error {
-	body, err := json.Marshal(ipc.UnexposeRequest{Host: host})
+// Unexpose sends an owner-conditional POST /v1/unexpose. It is idempotent.
+func (c *Client) Unexpose(ctx context.Context, unexpose ipc.UnexposeRequest) error {
+	body, err := json.Marshal(unexpose)
 	if err != nil {
 		return fmt.Errorf("encode unexpose: %w", err)
 	}

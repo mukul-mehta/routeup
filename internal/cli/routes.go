@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"text/tabwriter"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mukul-mehta/routeup/internal/agentctl"
+	"github.com/mukul-mehta/routeup/internal/ipc"
 	"github.com/mukul-mehta/routeup/internal/state"
 )
 
@@ -16,7 +18,8 @@ import (
 // is not running, nothing is active by definition, and the command says so
 // without spawning one (queries shouldn't have side effects).
 func newRoutesCmd() *cobra.Command {
-	return &cobra.Command{
+	var jsonOutput bool
+	cmd := &cobra.Command{
 		Use:   "routes",
 		Short: "List active routes",
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -31,17 +34,28 @@ func newRoutesCmd() *cobra.Command {
 
 			out := cmd.OutOrStdout()
 
-			if _, err := client.Status(ctx); err != nil {
+			claims, err := client.List(ctx)
+			if agentctl.IsUnavailable(err) {
+				if jsonOutput {
+					return json.NewEncoder(out).Encode([]ipc.Claim{})
+				}
 				_, _ = fmt.Fprintln(out, "no active routes (agent not running)")
 				return nil
 			}
-
-			claims, err := client.List(ctx)
 			if err != nil {
-				return err
+				return fmt.Errorf("list active routes: %w", err)
 			}
 			if len(claims) == 0 {
+				if jsonOutput {
+					return json.NewEncoder(out).Encode([]ipc.Claim{})
+				}
 				_, _ = fmt.Fprintln(out, "no active routes")
+				return nil
+			}
+			if jsonOutput {
+				if err := json.NewEncoder(out).Encode(claims); err != nil {
+					return fmt.Errorf("write routes json: %w", err)
+				}
 				return nil
 			}
 
@@ -52,14 +66,20 @@ func newRoutesCmd() *cobra.Command {
 				public, paths := "-", "-"
 				if c.PublicHost != "" {
 					public, paths = "https://"+c.PublicHost, formatExposePaths(c.PublicPaths)
+					if c.PublicState == ipc.ExposureReconnecting {
+						public += " (reconnecting)"
+					}
 				}
 				_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
-					c.Name, formatTargets(c.Targets), public, paths, c.OwnerPID,
-					humanDuration(now.Sub(c.RegisteredAt)), c.OwnerCWD)
+					terminalEscapeString(c.Name), terminalEscapeString(formatTargets(c.Targets)),
+					terminalEscapeString(public), terminalEscapeString(paths), c.OwnerPID,
+					humanDuration(now.Sub(c.RegisteredAt)), terminalEscapeString(c.OwnerCWD))
 			}
 			return tw.Flush()
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "write active routes as JSON")
+	return cmd
 }
 
 func humanDuration(d time.Duration) string {

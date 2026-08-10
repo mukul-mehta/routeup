@@ -54,7 +54,8 @@ func (r EnsureResult) String() string {
 // subcommand, detaches it via setsid, redirects stdio to the agent log file,
 // and polls /v1/status until it responds (default 5 s budget).
 func (c *Client) EnsureRunning(ctx context.Context) (EnsureResult, error) {
-	if status, err := c.Status(ctx); err == nil {
+	status, err := c.Status(ctx)
+	if err == nil {
 		stale, _ := c.IsStale(status)
 		if !stale {
 			return EnsureAlreadyRunning, nil
@@ -66,6 +67,9 @@ func (c *Client) EnsureRunning(ctx context.Context) (EnsureResult, error) {
 			return 0, err
 		}
 		return EnsureRestarted, nil
+	}
+	if !IsUnavailable(err) {
+		return 0, fmt.Errorf("check agent status: %w", err)
 	}
 
 	// No reachable agent. Spawn one. If the spawn fails because a stray agent
@@ -90,6 +94,9 @@ func (c *Client) EnsureRunning(ctx context.Context) (EnsureResult, error) {
 // port), it falls back to the PID file and signals the process directly.
 func (c *Client) Stop(ctx context.Context) (bool, error) {
 	if _, err := c.Status(ctx); err != nil {
+		if !IsUnavailable(err) {
+			return false, fmt.Errorf("check agent status: %w", err)
+		}
 		return c.stopByPIDFile(ctx)
 	}
 

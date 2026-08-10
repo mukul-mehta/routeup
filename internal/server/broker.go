@@ -21,7 +21,7 @@ type routeBroker struct {
 
 // Hold authorizes spec for token, persists the hold, and ensures a cert for its
 // namespace. It returns the resolved public host.
-func (k *routeBroker) Hold(ctx context.Context, token string, spec tunnel.ClaimSpec) (string, error) {
+func (k *routeBroker) Hold(ctx context.Context, token string, spec tunnel.ClaimSpec) (tunnel.RouteLease, error) {
 	decision, err := k.authorizer.Authorize(ctx, ClaimAttempt{
 		TokenSecret: token,
 		Route:       spec.Route,
@@ -29,16 +29,17 @@ func (k *routeBroker) Hold(ctx context.Context, token string, spec tunnel.ClaimS
 	if err != nil {
 		var ae *AuthzError
 		if errors.As(err, &ae) {
-			return "", &codedError{msg: ae.Reason, code: ae.Status}
+			return tunnel.RouteLease{}, &codedError{msg: ae.Reason, code: ae.Status}
 		}
-		return "", err
+		return tunnel.RouteLease{}, err
 	}
 
-	if _, err := k.store.HoldRoute(ctx, decision.HoldRequest()); err != nil {
+	hold, err := k.store.HoldRoute(ctx, decision.HoldRequest())
+	if err != nil {
 		if errors.Is(err, ErrRouteConflict) {
-			return "", &codedError{msg: "route already claimed", code: http.StatusConflict}
+			return tunnel.RouteLease{}, &codedError{msg: "route already claimed", code: http.StatusConflict}
 		}
-		return "", err
+		return tunnel.RouteLease{}, err
 	}
 
 	// Ensure a wildcard certificate exists for this namespace (lazy issuance
@@ -46,12 +47,12 @@ func (k *routeBroker) Hold(ctx context.Context, token string, spec tunnel.ClaimS
 	if k.ensureNamespace != nil {
 		k.ensureNamespace(ctx, decision.Base)
 	}
-	return decision.Host, nil
+	return tunnel.RouteLease{Host: decision.Host, Generation: hold.HeldAt.UnixNano()}, nil
 }
 
-// Release ends the hold for host (grace window for token holds).
-func (k *routeBroker) Release(host string) {
-	_ = k.store.Release(context.Background(), host)
+// Release ends only the hold generation represented by lease.
+func (k *routeBroker) Release(lease tunnel.RouteLease) {
+	_ = k.store.ReleaseGeneration(context.Background(), lease.Host, lease.Generation)
 }
 
 // codedError carries an HTTP-style status code back through the tunnel to the

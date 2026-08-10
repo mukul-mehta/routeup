@@ -2,8 +2,10 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -40,7 +42,8 @@ type checkResult struct {
 }
 
 func newDoctorCmd() *cobra.Command {
-	return &cobra.Command{
+	var jsonOutput bool
+	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Check that routeup is set up correctly",
 		Long: "Read-only checks against the local routeup state:\n" +
@@ -50,11 +53,13 @@ func newDoctorCmd() *cobra.Command {
 			"  - is the agent reachable?\n\n" +
 			"Exits 0 if every check is ok or warn, non-zero if any check fails.",
 		Args: cobra.NoArgs,
-		RunE: runDoctor,
+		RunE: func(cmd *cobra.Command, _ []string) error { return runDoctor(cmd, jsonOutput) },
 	}
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "write check results as JSON")
+	return cmd
 }
 
-func runDoctor(cmd *cobra.Command, _ []string) error {
+func runDoctor(cmd *cobra.Command, jsonOutput bool) error {
 	out := cmd.OutOrStdout()
 
 	caRes, ca, certPath := checkCA()
@@ -65,10 +70,29 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 	checks := []checkResult{caRes, trustRes, bindRes, agentRes}
 
 	anyFail := false
-	for _, c := range checks {
-		_, _ = fmt.Fprintf(out, "  %-6s %s\n", c.level.label(), c.msg)
+	type jsonCheck struct {
+		ID      string `json:"id"`
+		Level   string `json:"level"`
+		Message string `json:"message"`
+	}
+	checkIDs := []string{"ca", "trust", "bind", "agent"}
+	jsonChecks := make([]jsonCheck, 0, len(checks))
+	for i, c := range checks {
+		if jsonOutput {
+			jsonChecks = append(jsonChecks, jsonCheck{ID: checkIDs[i], Level: strings.Trim(c.level.label(), "[]"), Message: c.msg})
+		} else {
+			_, _ = fmt.Fprintf(out, "  %-6s %s\n", c.level.label(), c.msg)
+		}
 		if c.level == checkFail {
 			anyFail = true
+		}
+	}
+	if jsonOutput {
+		if err := json.NewEncoder(out).Encode(struct {
+			Healthy bool        `json:"healthy"`
+			Checks  []jsonCheck `json:"checks"`
+		}{Healthy: !anyFail, Checks: jsonChecks}); err != nil {
+			return fmt.Errorf("write doctor json: %w", err)
 		}
 	}
 	if anyFail {
@@ -167,8 +191,11 @@ func checkAgent(cmd *cobra.Command) checkResult {
 	defer cancel()
 
 	status, err := client.Status(ctx)
-	if err != nil {
+	if agentctl.IsUnavailable(err) {
 		return checkResult{checkWarn, "agent not running (it starts on demand via bare `routeup` or `routeup serve`)"}
+	}
+	if err != nil {
+		return checkResult{checkFail, fmt.Sprintf("agent status probe failed: %v", err)}
 	}
 	return checkResult{checkOK, fmt.Sprintf("agent running (version %s, uptime %ds)",
 		status.Version, status.UptimeSeconds)}

@@ -98,26 +98,21 @@ func runRun(cmd *cobra.Command, cwd string) error {
 		return fmt.Errorf("register route: %w", err)
 	}
 
-	maintainCtx, cancelMaintain := context.WithCancel(ctx)
-	maintainDone := make(chan struct{})
-	go func() {
-		defer close(maintainDone)
-		client.MaintainClaim(maintainCtx, claim, errOut)
-	}()
-
 	defer func() {
-		cancelMaintain()
-		<-maintainDone
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		if err := client.Unregister(shutdownCtx, claim.Name); err != nil {
+		if err := client.Unregister(shutdownCtx, claim.Name, claim.OwnerPID); err != nil {
 			_, _ = fmt.Fprintf(errOut, "routeup: unregister %q: %v\n", claim.Name, err)
 		}
 	}()
 
 	publicURL := ""
+	var exposeReq *ipc.ExposeRequest
 	if file.Expose.Enabled {
-		serverURL, token := resolveServerToken("", "")
+		serverURL, token, err := resolveServerToken("", "")
+		if err != nil {
+			return err
+		}
 		if serverURL == "" {
 			return errors.New("expose.enabled requires a server — set ROUTEUP_SERVER or run `routeup setup --server …`")
 		}
@@ -125,7 +120,7 @@ func runRun(cmd *cobra.Command, cwd string) error {
 		if err != nil {
 			return err
 		}
-		host, stopExpose, err := holdExposure(ctx, client, ipc.ExposeRequest{
+		request := ipc.ExposeRequest{
 			Name:            normalizePublicName(routeName),
 			Route:           routeName.String(),
 			Port:            appPort,
@@ -137,13 +132,28 @@ func runRun(cmd *cobra.Command, cwd string) error {
 			Server:          serverURL,
 			Token:           token,
 			OwnerPID:        os.Getpid(),
-		})
+		}
+		host, stopExpose, err := holdExposure(ctx, client, request)
 		if err != nil {
 			return err
 		}
 		defer stopExpose()
 		publicURL = "https://" + host
+		exposeReq = &request
 	}
+
+	maintainCtx, cancelMaintain := context.WithCancel(ctx)
+	maintainDone := make(chan struct{})
+	go func() {
+		defer close(maintainDone)
+		client.Maintain(maintainCtx, agentctl.DesiredState{
+			Claim: &claim, Exposure: exposeReq, PublicHost: strings.TrimPrefix(publicURL, "https://"),
+		}, errOut)
+	}()
+	defer func() {
+		cancelMaintain()
+		<-maintainDone
+	}()
 
 	caCertPath, _ := state.CACertPath()
 	local := localURL(routeName.LocalHost(), tlsPort)

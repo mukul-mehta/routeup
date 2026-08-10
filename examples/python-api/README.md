@@ -9,7 +9,7 @@ https://python-api.<namespace>.routeup.dev/api/webhooks/* -> public when exposed
 ```
 
 The local route serves all paths. The `expose.paths` config limits public traffic
-to `/api/webhooks/*`. This example enables `capture: true` and redacts
+to `/api/webhooks/*`. This example enables `capture.request` and redacts
 `Authorization` and `Cookie` from retained data, so it is also the recommended
 manual test for `routeup inspect`.
 

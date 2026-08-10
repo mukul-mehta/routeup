@@ -26,3 +26,22 @@ func TestRegistryLookupTargetsIncludesCaptureSetting(t *testing.T) {
 		t.Fatalf("LookupTargets() = %#v, %t, %#v, %t", targets, captureReq, redactHeaders, ok)
 	}
 }
+
+func TestRegistryUnregisterRequiresOwner(t *testing.T) {
+	registry := NewRegistry()
+	_, err := registry.Register(ipc.Claim{
+		Name: "myapp", Targets: []route.Target{{Path: "/", Port: 8080}}, OwnerPID: os.Getpid(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if registry.Unregister("myapp", os.Getpid()+1) {
+		t.Fatal("different owner removed claim")
+	}
+	if _, ok := registry.Lookup("myapp"); !ok {
+		t.Fatal("claim missing after mismatched unregister")
+	}
+	if !registry.Unregister("myapp", os.Getpid()) {
+		t.Fatal("owner could not unregister claim")
+	}
+}

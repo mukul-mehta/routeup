@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/netip"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -43,6 +46,9 @@ func newExposeCmd() *cobra.Command {
 		Example: "routeup expose api-myapp --port 8080",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if opts.random && len(args) != 0 {
+				return errors.New("a route name and --random cannot be used together")
+			}
 			cwd, err := os.Getwd()
 			if err != nil {
 				return fmt.Errorf("getting cwd: %w", err)
@@ -64,7 +70,10 @@ func runExpose(cmd *cobra.Command, args []string, cwd string, opts exposeOpts) e
 		return err
 	}
 
-	serverURL, token := resolveServerToken(opts.server, opts.token)
+	serverURL, token, err := resolveServerToken(opts.server, opts.token)
+	if err != nil {
+		return err
+	}
 	if serverURL == "" {
 		return errors.New("no server set — pass --server, set ROUTEUP_SERVER, or run `routeup setup --server …`")
 	}
@@ -124,32 +133,7 @@ func startTunnel(cmd *cobra.Command, serverURL, token, localRouteName, publicRou
 		return err
 	}
 
-	// Standalone expose: no pre-existing local claim, so register one now.
-	// This makes the route visible in `routeup routes` and enables local
-	// HTTPS proxying at https://<route>.localhost for the duration of the
-	// expose session. Conflict or other errors are soft — the public tunnel
-	// still works without a local claim.
-	if !hasLocalRoute {
-		cwd, _ := os.Getwd()
-		if _, regErr := client.Register(startCtx, ipc.Claim{
-			Name:            localRouteName,
-			Targets:         targets,
-			CaptureRequest:  captureRequest,
-			CaptureResponse: captureResponse,
-			RedactHeaders:   redactHeaders,
-			OwnerPID:        os.Getpid(),
-			OwnerCWD:        cwd,
-		}); regErr == nil {
-			hasLocalRoute = true
-			defer func() {
-				unCtx, c := context.WithTimeout(context.Background(), 3*time.Second)
-				defer c()
-				_ = client.Unregister(unCtx, localRouteName)
-			}()
-		}
-	}
-
-	host, stopExpose, err := holdExposure(ctx, client, ipc.ExposeRequest{
+	exposeReq := ipc.ExposeRequest{
 		Name:            publicRouteName,
 		Route:           localRouteName,
 		Port:            port,
@@ -161,7 +145,8 @@ func startTunnel(cmd *cobra.Command, serverURL, token, localRouteName, publicRou
 		Server:          serverURL,
 		Token:           token,
 		OwnerPID:        os.Getpid(),
-	})
+	}
+	host, stopExpose, err := holdExposure(ctx, client, exposeReq)
 	if err != nil {
 		return err
 	}
@@ -177,13 +162,18 @@ func startTunnel(cmd *cobra.Command, serverURL, token, localRouteName, publicRou
 	_, _ = fmt.Fprintln(out, "")
 	_, _ = fmt.Fprintln(out, "press Ctrl-C to stop")
 
-	<-ctx.Done()
+	client.Maintain(ctx, agentctl.DesiredState{
+		Exposure: &exposeReq, PublicHost: host,
+	}, cmd.ErrOrStderr())
 	return nil
 }
 
 func exposeTargets(ctx context.Context, client *agentctl.Client, routeName string, portFlag int, targetFlags []route.Target, file config.Config) ([]route.Target, int, bool, bool, bool, []string, error) {
 	if !hasTargetOverride(portFlag, targetFlags) {
 		claims, err := client.List(ctx)
+		if err != nil && !agentctl.IsUnavailable(err) {
+			return nil, 0, false, false, false, nil, fmt.Errorf("list active routes: %w", err)
+		}
 		if err == nil {
 			for _, claim := range claims {
 				if claim.Name == routeName && len(claim.Targets) > 0 {
@@ -223,7 +213,9 @@ func holdExposure(ctx context.Context, client *agentctl.Client, req ipc.ExposeRe
 	stop := func() {
 		stopCtx, c := context.WithTimeout(context.Background(), 3*time.Second)
 		defer c()
-		_ = client.Unexpose(stopCtx, resp.Host)
+		_ = client.Unexpose(stopCtx, ipc.UnexposeRequest{
+			Host: resp.Host, Route: req.Route, OwnerPID: req.OwnerPID,
+		})
 	}
 	return resp.Host, stop, nil
 }
@@ -252,11 +244,80 @@ func resolveExposeRoute(positional string, file config.Config, random bool, cwd 
 	})
 }
 
-func resolveServerToken(flagServer, flagToken string) (server, token string) {
-	cc, _ := state.ReadClientConfig()
-	server = firstNonEmpty(flagServer, strings.TrimSpace(os.Getenv("ROUTEUP_SERVER")), cc.Server)
-	token = firstNonEmpty(flagToken, strings.TrimSpace(os.Getenv("ROUTEUP_TOKEN")), cc.Token)
-	return server, token
+func resolveServerToken(flagServer, flagToken string) (server, token string, err error) {
+	envServer := strings.TrimSpace(os.Getenv("ROUTEUP_SERVER"))
+	envToken := strings.TrimSpace(os.Getenv("ROUTEUP_TOKEN"))
+	server = firstNonEmpty(flagServer, envServer)
+	token = firstNonEmpty(flagToken, envToken)
+
+	var cc state.ClientConfig
+	if server == "" || token == "" {
+		cc, err = state.ReadClientConfig()
+		if err != nil {
+			return "", "", err
+		}
+	}
+	if server == "" {
+		server = cc.Server
+	}
+	server, err = normalizeServerURL(server)
+	if err != nil {
+		return "", "", err
+	}
+	if token == "" && sameServer(server, cc.Server) {
+		token = cc.Token
+	}
+	return server, token, nil
+}
+
+func normalizeServerURL(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Host == "" {
+		return "", fmt.Errorf("invalid public server URL %q", value)
+	}
+	if parsed.User != nil {
+		return "", errors.New("public server URL cannot contain user information")
+	}
+	if parsed.ForceQuery || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
+		return "", errors.New("public server URL cannot contain a path, query, or fragment")
+	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	hostname := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
+	if hostname == "" {
+		return "", fmt.Errorf("invalid public server URL %q", value)
+	}
+	if parsed.Scheme != "https" {
+		loopback := hostname == "localhost"
+		if address, parseErr := netip.ParseAddr(hostname); parseErr == nil {
+			loopback = address.IsLoopback()
+		}
+		if parsed.Scheme != "http" || !loopback {
+			return "", errors.New("public server URL must use HTTPS (HTTP is allowed only for loopback testing)")
+		}
+	}
+	port := parsed.Port()
+	if (parsed.Scheme == "https" && port == "443") || (parsed.Scheme == "http" && port == "80") {
+		port = ""
+	}
+	if port != "" {
+		parsed.Host = net.JoinHostPort(hostname, port)
+	} else if strings.Contains(hostname, ":") {
+		parsed.Host = "[" + hostname + "]"
+	} else {
+		parsed.Host = hostname
+	}
+	parsed.Path = ""
+	return parsed.String(), nil
+}
+
+func sameServer(a, b string) bool {
+	normalizedA, errA := normalizeServerURL(a)
+	normalizedB, errB := normalizeServerURL(b)
+	return errA == nil && errB == nil && normalizedA != "" && normalizedA == normalizedB
 }
 
 func normalizePublicName(name route.Name) string {

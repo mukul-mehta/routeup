@@ -39,10 +39,9 @@ type CapturedMessage struct {
 }
 
 // Capture holds the optional request and response data retained for inspect.
-// A nil field means that direction was not captured.
 type Capture struct {
-	Request  CapturedMessage `json:"request"`
-	Response CapturedMessage `json:"response"`
+	Request  *CapturedMessage `json:"request,omitempty"`
+	Response *CapturedMessage `json:"response,omitempty"`
 }
 
 // MessageCapture is an io.ReadCloser that forwards its source body unchanged
@@ -178,12 +177,19 @@ func (capture *Capture) clone() *Capture {
 		return nil
 	}
 	out := *capture
-	out.Request.Headers = capture.Request.Headers.Clone()
-	out.Request.RedactedHeaders = append([]string(nil), capture.Request.RedactedHeaders...)
-	out.Request.Body = append([]byte(nil), capture.Request.Body...)
-	out.Response.Headers = capture.Response.Headers.Clone()
-	out.Response.RedactedHeaders = append([]string(nil), capture.Response.RedactedHeaders...)
-	out.Response.Body = append([]byte(nil), capture.Response.Body...)
+	out.Request = cloneCapturedMessage(capture.Request)
+	out.Response = cloneCapturedMessage(capture.Response)
+	return &out
+}
+
+func cloneCapturedMessage(message *CapturedMessage) *CapturedMessage {
+	if message == nil {
+		return nil
+	}
+	out := *message
+	out.Headers = message.Headers.Clone()
+	out.RedactedHeaders = append([]string(nil), message.RedactedHeaders...)
+	out.Body = append([]byte(nil), message.Body...)
 	return &out
 }
 
@@ -195,7 +201,10 @@ func (capture *Capture) withinLimit() bool {
 		messageBytes(capture.Response) <= maxCapturedMessageBytes
 }
 
-func messageBytes(message CapturedMessage) int {
+func messageBytes(message *CapturedMessage) int {
+	if message == nil {
+		return 0
+	}
 	return headerBytes(message.Headers) + len(message.Body)
 }
 

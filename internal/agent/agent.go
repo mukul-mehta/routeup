@@ -138,8 +138,10 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.writePIDFile()
 	defer a.removePIDFile()
 
+	agentCtx, cancelAgent := context.WithCancel(ctx)
+	defer cancelAgent()
 	a.startedAt = time.Now()
-	a.tunnels = newTunnelManager(ctx, a.logStore, a.logger)
+	a.tunnels = newTunnelManager(agentCtx, a.logStore, a.logger)
 	a.logger.Info("agent started",
 		"socket", a.sockPath,
 		"tls_addr", a.tlsListenAddr,
@@ -148,12 +150,12 @@ func (a *Agent) Run(ctx context.Context) error {
 	apiSrv := &http.Server{
 		Handler:           a.apiHandler(),
 		ReadHeaderTimeout: 5 * time.Second,
-		BaseContext:       func(_ net.Listener) context.Context { return ctx },
+		BaseContext:       func(_ net.Listener) context.Context { return agentCtx },
 	}
 	proxySrv := &http.Server{
 		Handler:           proxy.New(a.reg, a.logStore, a.logger),
 		ReadHeaderTimeout: 10 * time.Second,
-		BaseContext:       func(_ net.Listener) context.Context { return ctx },
+		BaseContext:       func(_ net.Listener) context.Context { return agentCtx },
 	}
 
 	errCh := make(chan error, 2)
@@ -172,7 +174,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		errCh <- nil
 	}()
 
-	reapCtx, reapCancel := context.WithCancel(ctx)
+	reapCtx, reapCancel := context.WithCancel(agentCtx)
 	reapDone := make(chan struct{})
 	go func() {
 		defer close(reapDone)
@@ -194,11 +196,13 @@ func (a *Agent) Run(ctx context.Context) error {
 
 	reapCancel()
 	<-reapDone
+	cancelAgent()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = apiSrv.Shutdown(shutdownCtx)
 	_ = proxySrv.Shutdown(shutdownCtx)
+	a.tunnels.Wait()
 
 	if err := os.Remove(a.sockPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		a.logger.Warn("remove socket", "err", err)

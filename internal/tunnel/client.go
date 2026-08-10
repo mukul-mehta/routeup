@@ -2,13 +2,14 @@ package tunnel
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"strings"
 	"time"
 
@@ -62,12 +63,13 @@ import (
 // Client is the agent-side tunnel client. It dials the public server, claims
 // one route, and serves inbound request streams against a local handler.
 type Client struct {
-	serverURL string
-	token     string
-	spec      ClaimSpec
-	handler   http.Handler
-	logger    *slog.Logger
-	onGranted func(string)
+	serverURL      string
+	token          string
+	spec           ClaimSpec
+	handler        http.Handler
+	logger         *slog.Logger
+	onGranted      func(string)
+	onDisconnected func(error)
 }
 
 // ClientOptions configures a Client.
@@ -80,6 +82,9 @@ type ClientOptions struct {
 	// OnGranted, if set, is called with the resolved public host once the
 	// session is established.
 	OnGranted func(host string)
+	// OnDisconnected, if set, is called when an established session or dial
+	// attempt fails and Run is about to reconnect or return permanently.
+	OnDisconnected func(error)
 }
 
 // NewClient builds a Client.
@@ -89,12 +94,13 @@ func NewClient(opts ClientOptions) *Client {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	return &Client{
-		serverURL: opts.ServerURL,
-		token:     opts.Token,
-		spec:      opts.Spec,
-		handler:   opts.Handler,
-		logger:    logger,
-		onGranted: opts.OnGranted,
+		serverURL:      opts.ServerURL,
+		token:          opts.Token,
+		spec:           opts.Spec,
+		handler:        opts.Handler,
+		logger:         logger,
+		onGranted:      opts.OnGranted,
+		onDisconnected: opts.OnDisconnected,
 	}
 }
 
@@ -107,6 +113,9 @@ func (c *Client) Run(ctx context.Context) error {
 		err := c.connectAndServe(ctx)
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if c.onDisconnected != nil {
+			c.onDisconnected(err)
 		}
 		var perm *PermanentError
 		if errors.As(err, &perm) {
@@ -149,7 +158,11 @@ func (c *Client) handshake(ctx context.Context) (yamuxSession *yamux.Session, ct
 	header.Set(VersionHeader, Version)
 	header.Set("Authorization", "Bearer "+c.token)
 
-	wsConn, _, err := websocket.Dial(dialCtx, c.wsURL(), &websocket.DialOptions{HTTPHeader: header})
+	serverURL, err := c.wsURL()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	wsConn, _, err := websocket.Dial(dialCtx, serverURL, &websocket.DialOptions{HTTPHeader: header})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("dial tunnel: %w", err)
 	}
@@ -179,20 +192,42 @@ func (c *Client) handshake(ctx context.Context) (yamuxSession *yamux.Session, ct
 		cleanup()
 		return nil, nil, nil, fmt.Errorf("send claim: %w", err)
 	}
-	var reply HandshakeMessage
-	if err := json.NewDecoder(ctrl).Decode(&reply); err != nil {
+	reply, err := readHandshakeMessage(ctrl)
+	if err != nil {
 		cleanup()
 		return nil, nil, nil, fmt.Errorf("read claim reply: %w", err)
 	}
 	if reply.Type != msgClaimOK {
 		cleanup()
-		return nil, nil, nil, &PermanentError{Err: fmt.Errorf("claim rejected: %s", reply.Error)}
+		return nil, nil, nil, &PermanentError{Err: fmt.Errorf("claim rejected: %s", sanitizeRemoteError(reply.Error))}
+	}
+	if !validGrantedHost(reply.Granted) {
+		cleanup()
+		return nil, nil, nil, &PermanentError{Err: errors.New("server granted an invalid public host")}
 	}
 	if c.onGranted != nil {
 		c.onGranted(reply.Granted)
 	}
 	c.logger.Info("tunnel established", "host", reply.Granted)
 	return session, ctrl, cleanup, nil
+}
+
+func validGrantedHost(host string) bool {
+	if host == "" || len(host) > 253 || strings.HasPrefix(host, ".") || strings.HasSuffix(host, ".") {
+		return false
+	}
+	for _, label := range strings.Split(host, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, r := range label {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' {
+				continue
+			}
+			return false
+		}
+	}
+	return true
 }
 
 // serve turns the yamux session into an HTTP server for the session's lifetime.
@@ -234,13 +269,26 @@ func (c *Client) serve(ctx context.Context, session *yamux.Session, ctrl net.Con
 	return err
 }
 
-func (c *Client) wsURL() string {
-	u := c.serverURL
-	switch {
-	case strings.HasPrefix(u, "https://"):
-		u = "wss://" + strings.TrimPrefix(u, "https://")
-	case strings.HasPrefix(u, "http://"):
-		u = "ws://" + strings.TrimPrefix(u, "http://")
+func (c *Client) wsURL() (string, error) {
+	parsed, err := url.Parse(c.serverURL)
+	if err != nil || parsed.Host == "" {
+		return "", fmt.Errorf("invalid tunnel server URL %q", c.serverURL)
 	}
-	return strings.TrimRight(u, "/") + Path
+	switch parsed.Scheme {
+	case "https":
+		parsed.Scheme = "wss"
+	case "http":
+		loopback := strings.EqualFold(parsed.Hostname(), "localhost")
+		if address, parseErr := netip.ParseAddr(parsed.Hostname()); parseErr == nil {
+			loopback = address.IsLoopback()
+		}
+		if !loopback {
+			return "", errors.New("tunnel server must use HTTPS (HTTP is allowed only for loopback testing)")
+		}
+		parsed.Scheme = "ws"
+	default:
+		return "", fmt.Errorf("unsupported tunnel server scheme %q", parsed.Scheme)
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + Path
+	return parsed.String(), nil
 }

@@ -1,0 +1,85 @@
+package cli
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/mukul-mehta/routeup/internal/agentctl"
+	"github.com/mukul-mehta/routeup/internal/certs"
+	"github.com/mukul-mehta/routeup/internal/privbind"
+	"github.com/mukul-mehta/routeup/internal/state"
+)
+
+func installPrivBind(cmd *cobra.Command, out io.Writer, userPort int) error {
+	if !privbind.Required(userPort) {
+		_, _ = fmt.Fprintf(out, "port %d: ready\n", userPort)
+		return nil
+	}
+	_, _ = fmt.Fprintf(out, "setting up port %d (asks for your password)...\n", userPort)
+
+	parent := cmd.Context()
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, 60*time.Second)
+	defer cancel()
+
+	if err := privbind.Install(ctx, userPort); err != nil {
+		return fmt.Errorf("setting up port %d: %w", userPort, err)
+	}
+	_, _ = fmt.Fprintf(out, "port %d: ready\n", userPort)
+	return nil
+}
+
+func installCATrust(cmd *cobra.Command, out io.Writer, certPath string, useSystem bool) error {
+	if useSystem {
+		_, _ = fmt.Fprintln(out, "trusting the certificate system-wide (asks for your password)...")
+	} else {
+		_, _ = fmt.Fprintln(out, "trusting the certificate...")
+	}
+
+	parent := cmd.Context()
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, 60*time.Second)
+	defer cancel()
+
+	if err := certs.InstallTrust(ctx, certPath, certs.TrustOptions{System: useSystem}); err != nil {
+		return fmt.Errorf("trusting certificate: %w", err)
+	}
+	_, _ = fmt.Fprintln(out, "certificate: trusted")
+	return nil
+}
+
+func startLocalAgent(cmd *cobra.Command, out io.Writer) error {
+	sockPath, err := state.AgentSocketPath()
+	if err != nil {
+		return fmt.Errorf("resolve agent socket path: %w", err)
+	}
+	parent := cmd.Context()
+	if parent == nil {
+		parent = context.Background()
+	}
+	startCtx, cancel := context.WithTimeout(parent, 10*time.Second)
+	defer cancel()
+
+	client := agentctl.NewClient(sockPath, "", cmd.Root().Version)
+	res, err := client.EnsureRunning(startCtx)
+	if err != nil {
+		return fmt.Errorf("start agent: %w", err)
+	}
+	switch res {
+	case agentctl.EnsureAlreadyRunning:
+		_, _ = fmt.Fprintln(out, "agent: already running")
+	case agentctl.EnsureStarted:
+		_, _ = fmt.Fprintln(out, "agent: started")
+	case agentctl.EnsureRestarted:
+		_, _ = fmt.Fprintln(out, "agent: restarted (build changed)")
+	}
+	return nil
+}

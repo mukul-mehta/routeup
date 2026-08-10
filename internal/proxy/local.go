@@ -112,10 +112,12 @@ func serveTargets(w http.ResponseWriter, r *http.Request, targets []route.Target
 		if requestCapture != nil || responseCapture != nil {
 			c := &logs.Capture{}
 			if requestCapture != nil {
-				c.Request = requestCapture.Take()
+				captured := requestCapture.Take()
+				c.Request = &captured
 			}
 			if responseCapture != nil {
-				c.Response = responseCapture.Take()
+				captured := responseCapture.Take()
+				c.Response = &captured
 			}
 			entry.Capture = c
 		}

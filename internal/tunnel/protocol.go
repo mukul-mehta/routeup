@@ -63,14 +63,21 @@ type ClaimSpec struct {
 	Route string `json:"route"`
 }
 
+// RouteLease identifies one specific server-side hold generation. Release must
+// carry the same lease so an older session cannot release its replacement.
+type RouteLease struct {
+	Host       string
+	Generation int64
+}
+
 // RouteBroker authorizes and holds the route an agent claims, for the lifetime
 // of its tunnel session. The tunnel package owns no policy or storage: when an
 // agent connects and sends its ClaimSpec, the registry calls Hold (which the
 // server implements as authorize + persist + ensure-cert) and Release when the
 // session ends. Hold returns the resolved public host.
 type RouteBroker interface {
-	Hold(ctx context.Context, token string, spec ClaimSpec) (host string, err error)
-	Release(host string)
+	Hold(ctx context.Context, token string, spec ClaimSpec) (RouteLease, error)
+	Release(RouteLease)
 }
 
 type PermanentError struct{ Err error }

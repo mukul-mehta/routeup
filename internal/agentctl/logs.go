@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/mukul-mehta/routeup/internal/ipc"
 	"github.com/mukul-mehta/routeup/internal/logs"
@@ -49,13 +50,19 @@ func (c *Client) FollowLogs(ctx context.Context, opts logs.ListOptions, handle f
 	if resp.StatusCode != http.StatusOK {
 		return decodeErrorResponse(resp)
 	}
+	if !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
+		return fmt.Errorf("agent returned content type %q for request log stream", resp.Header.Get("Content-Type"))
+	}
 
 	reader := bufio.NewReader(resp.Body)
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				return nil
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				return fmt.Errorf("read request log stream: %w", io.ErrUnexpectedEOF)
 			}
 			return fmt.Errorf("read request log stream: %w", err)
 		}
@@ -68,7 +75,7 @@ func (c *Client) FollowLogs(ctx context.Context, opts logs.ListOptions, handle f
 			return fmt.Errorf("decode request log event: %w", err)
 		}
 		if err := handle(entry); err != nil {
-			return err
+			return fmt.Errorf("handle request log event: %w", err)
 		}
 	}
 }
@@ -80,6 +87,18 @@ func logPath(opts logs.ListOptions, follow bool) string {
 	}
 	if opts.Source != "" {
 		query.Set("source", string(opts.Source))
+	}
+	if opts.Limit > 0 {
+		query.Set("limit", fmt.Sprintf("%d", opts.Limit))
+	}
+	if !opts.Since.IsZero() {
+		query.Set("since", opts.Since.Format(time.RFC3339Nano))
+	}
+	if opts.Method != "" {
+		query.Set("method", opts.Method)
+	}
+	if opts.Status != 0 {
+		query.Set("status", fmt.Sprintf("%d", opts.Status))
 	}
 	if follow {
 		query.Set("follow", "true")

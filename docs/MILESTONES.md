@@ -499,11 +499,15 @@ Goal: make runner mode optionally own public exposure and support unchanged
 commands for explicitly tested frameworks that do not honor `PORT` or `HOST`.
 
 > Implementation note: partially complete. `expose.enabled` is implemented:
-> when set in config, bare `routeup` contacts the configured server, claims
+> `routeup serve` honors it without requiring `--expose`; bare `routeup`
+> contacts the configured server and claims
 > a public route before child launch, injects the granted URL into `ROUTEUP_URL`
 > (while `ROUTEUP_LOCAL_URL` stays local), and releases the tunnel alongside
 > the route and child group on exit. The Vite framework adapter and
 > runner-driven integration tests for the exposed lifecycle are deferred.
+> Foreground desired-state reconciliation restores the local claim and public
+> exposure after agent restarts or terminal tunnel failures; the full
+> runner-driven loopback integration test remains deferred.
 
 Build:
 
@@ -581,6 +585,7 @@ routeup logs --follow
 routeup logs --public
 routeup logs --local
 routeup logs --json
+routeup logs --since/--method/--status/--limit
 1024-entry in-memory request ring
 ```
 
@@ -602,25 +607,28 @@ inspect
 
 Goal: make webhook debugging excellent.
 
-> Implementation note: complete. `capture: true` is loaded from either config
-> source, propagated through local claims and standalone/public exposure, and
+> Implementation note: complete. Per-direction `capture.request` and
+> `capture.response` settings are loaded from either config source, propagated
+> through local claims and standalone/public exposure, and
 > applied by both the local and tunnel-side target handlers. The handler wraps
 > the request body so forwarding semantics are unchanged while retaining a
 > bounded copy of headers and body. Capture starts only after public-path and
 > target matching; blocked or unmatched requests receive metadata logs without
-> retained request data. `GET /v1/requests/{id}` serves the complete entry over
-> the agent's Unix socket, and `routeup inspect` formats it for the user. The
-> 256 KiB limit includes headers and body; oversized or incomplete bodies are
-> returned as a retained prefix with `Complete: false`.
+> retained exchange data. `GET /v1/requests/{id}` serves the complete entry over
+> the agent's Unix socket, and `routeup inspect` safely formats it for the user.
+> `--raw` exposes unescaped retained values and `--json` emits the full exchange.
+> The 256 KiB per-direction limit includes headers and body; oversized or
+> incomplete bodies are returned as a retained prefix with `Complete: false`.
 
 Build:
 
 ```txt
-opt-in capture: true config
-redact_headers config for captured headers
-request header/body capture
-256 KiB request capture limit
+opt-in capture.request and capture.response config
+capture.redact_headers config for captured headers
+request and response header/body capture
+256 KiB per-direction capture limit
 routeup inspect <request-id>
+routeup inspect --raw/--json
 ```
 
 Acceptance:
@@ -629,11 +637,11 @@ Acceptance:
 routeup inspect req_Ap7kQ3mN8vR2xLzC
 ```
 
-`capture` is disabled by default. When set to `true` in `routeup.json` or the
-`package.json` `routeup` block, it retains the original incoming request headers
-and body for that route. The retained request is unredacted, remains only in the
-agent's 1024-entry in-memory ring, and is limited to 256 KiB including headers
-and body. `routeup inspect` displays the retained request.
+Capture is disabled by default. Request and response retention are enabled
+independently in `routeup.json` or the `package.json` `routeup` block. Retained
+data remains only in the agent's 1024-entry in-memory ring and is limited to 256
+KiB per direction including headers and body. `routeup inspect` escapes retained
+bytes by default.
 
 ## Milestone Discipline
 

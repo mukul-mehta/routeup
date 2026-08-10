@@ -52,8 +52,27 @@ type Claim struct {
 	// through a tunnel by the same owner process. Response-only: the agent
 	// fills it on GET /v1/routes by joining live tunnels on OwnerPID;
 	// registration ignores it.
-	PublicHost  string   `json:"public_host,omitempty"`
-	PublicPaths []string `json:"public_paths,omitempty"`
+	PublicHost  string        `json:"public_host,omitempty"`
+	PublicPaths []string      `json:"public_paths,omitempty"`
+	PublicState ExposureState `json:"public_state,omitempty"`
+}
+
+// ExposureState describes whether a managed public tunnel is currently serving
+// or reconnecting after a transient transport failure.
+type ExposureState string
+
+const (
+	ExposureConnected    ExposureState = "connected"
+	ExposureReconnecting ExposureState = "reconnecting"
+)
+
+// ExposureStatus is the non-secret public-tunnel state returned by status.
+type ExposureStatus struct {
+	Route    string        `json:"route"`
+	Host     string        `json:"host"`
+	Paths    []string      `json:"paths,omitempty"`
+	OwnerPID int           `json:"owner_pid"`
+	State    ExposureState `json:"state"`
 }
 
 // Status is the response shape for GET /v1/status.
@@ -67,12 +86,13 @@ type Claim struct {
 // from, captured at startup; the CLI compares them (plus Version) to decide
 // whether a running agent is a stale build.
 type Status struct {
-	Version       string    `json:"version"`
-	UptimeSeconds int64     `json:"uptime_seconds"`
-	TLSAddr       string    `json:"tls_addr,omitempty"`
-	BootID        string    `json:"boot_id"`
-	ExecPath      string    `json:"exec_path,omitempty"`
-	ExecModTime   time.Time `json:"exec_mod_time"`
+	Version       string           `json:"version"`
+	UptimeSeconds int64            `json:"uptime_seconds"`
+	TLSAddr       string           `json:"tls_addr,omitempty"`
+	BootID        string           `json:"boot_id"`
+	ExecPath      string           `json:"exec_path,omitempty"`
+	ExecModTime   time.Time        `json:"exec_mod_time"`
+	Exposures     []ExposureStatus `json:"exposures,omitempty"`
 }
 
 // ConflictError means a route name is already held by a different, still-alive
@@ -123,7 +143,9 @@ type ExposeResponse struct {
 	Host string `json:"host"`
 }
 
-// UnexposeRequest tears down a public tunnel by its granted host.
+// UnexposeRequest tears down a public tunnel only when its owner still matches.
 type UnexposeRequest struct {
-	Host string `json:"host"`
+	Host     string `json:"host"`
+	Route    string `json:"route"`
+	OwnerPID int    `json:"owner_pid"`
 }

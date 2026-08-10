@@ -85,13 +85,14 @@ routeup expose api.myapp               # expose active or configured targets pub
 routeup agent status
 routeup routes
 routeup logs
+routeup config
 routeup doctor
 routeup setup
 routeup update
 routeup uninstall
 ```
 
-The split: `serve` creates a route (local by default; `--expose` adds public exposure in one go). Standalone `expose` reuses an active route's targets when available, otherwise it exposes targets from flags or config without creating a local registration. Bare `routeup` is the Phase 8 local script runner; Phase 8.5 added `expose.enabled` for config-driven runner exposure. Adapters for explicitly supported frameworks are deferred.
+The split: `serve` creates a route (local by default; `--expose` or `expose.enabled` adds public exposure in one go). Standalone `expose` reuses an active route's targets when available, otherwise it exposes targets from flags or config without creating a local registration. Bare `routeup` is the Phase 8 local script runner; Phase 8.5 added `expose.enabled` for config-driven exposure before child launch. Adapters for explicitly supported frameworks are deferred.
 
 Operator-only commands:
 
@@ -144,6 +145,10 @@ Environment-driven usage should also work:
 ```bash
 ROUTEUP_SERVER=https://edge.routeup.dev ROUTEUP_TOKEN=sk_routeup_xxx routeup expose --port 8080
 ```
+
+Remote server URLs must use HTTPS; plaintext HTTP is accepted only for loopback
+testing. A saved token is scoped to its saved server URL and is not carried to a
+flag or environment override naming a different server.
 
 The token is optional. Two flows do not need one:
 
@@ -619,6 +624,7 @@ routeup logs api.myapp --follow
 routeup logs api.myapp --public
 routeup logs api.myapp --local
 routeup logs api.myapp --json
+routeup logs api.myapp --since 10m --method POST --status 202 --limit 50
 ```
 
 Default log line:
@@ -636,26 +642,30 @@ Phase 10 adds opt-in request retention and inspection:
 
 ```json
 {
-  "capture": true,
-  "redact_headers": ["authorization", "cookie"]
+  "capture": {
+    "request": true,
+    "response": true,
+    "redact_headers": ["authorization", "cookie"]
+  }
 }
 ```
 
-Capture is disabled by default. When enabled in `routeup.json` or the
-`package.json` `routeup` block, it retains the original incoming request headers
-and body after path and target matching in the agent's existing request ring.
-Each retained request is limited to 256 KiB including headers and body. Captured
-data remains in memory only. `redact_headers` is case-insensitive: those headers
-continue to the upstream service but are omitted from retained data and listed
-as redacted by `routeup inspect`. Oversized or partially-read requests retain a
-bounded prefix and report `Complete: false`; blocked public paths and unmatched
-targets are logged without request capture.
+Capture is disabled by default. Request and response retention are enabled
+independently in `routeup.json` or the `package.json` `routeup` block after path
+and target matching. Each captured direction is limited to 256 KiB including
+headers and body, and all data remains in the agent's in-memory request ring.
+`redact_headers` is case-insensitive: those headers are forwarded normally but
+omitted from retained data and listed by `routeup inspect`. Oversized or
+partially-read messages retain a bounded prefix and report `Complete: false`;
+blocked public paths and unmatched targets are logged without capture.
 
 ```bash
 routeup inspect req_Ap7kQ3mN8vR2xLzC
 ```
 
-`routeup inspect` displays one request record and its retained request data.
+`routeup inspect` safely escapes retained values by default. `--raw` emits
+unescaped retained values, and `--json` emits the complete exchange with byte
+bodies encoded as base64.
 
 ## Project Constraints
 

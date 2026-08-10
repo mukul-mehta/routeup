@@ -35,7 +35,7 @@ func parseTargetFlags(values []string) ([]route.Target, error) {
 func printTargets(out io.Writer, targets []route.Target) {
 	_, _ = fmt.Fprintln(out, "targets:")
 	for _, target := range targets {
-		_, _ = fmt.Fprintf(out, "  %-8s http://localhost:%d\n", target.Path, target.Port)
+		_, _ = fmt.Fprintf(out, "  %-8s http://localhost:%d\n", terminalEscapeString(target.Path), target.Port)
 	}
 }
 

@@ -49,10 +49,10 @@ internal/
   agentctl/                # CLI-side agent IPC client stub
     client.go              #   Client: Status, Register, Unregister, List
     logs.go                #   Logs and FollowLogs
-    inspect.go             #   Inspect one retained request
+    inspect.go             #   Inspect one retained exchange
     lifecycle.go           #   EnsureRunning, Stop, Restart, spawnAndWait
     expose.go              #   Expose, Unexpose
-    reconcile.go           #   MaintainClaim loop (re-register on agent restart)
+    reconcile.go           #   desired claim/exposure reconciliation
     timeouts.go            #   IPC timeout constants (handshake, spawn/stop budgets)
 
   agent/                   # Local agent daemon
@@ -62,7 +62,7 @@ internal/
                            #   shutdown, logs, inspect, expose, unexpose
     expose.go              #   tunnelManager, tunnelSession, public expose wiring
     logs.go                #   request-log list and SSE follow handlers
-    inspect.go             #   retained-request inspection handler
+    inspect.go             #   retained-exchange inspection handler
 
   tunnel/                  # Tunnel protocol (shared by agent + server)
     protocol.go            #   HandshakeMessage, ClaimSpec, RouteBroker interface
@@ -112,12 +112,14 @@ internal/
     servercfg.go           #   Server config file paths
     token.go               #   `routeup token create|list|revoke`
     agent.go               #   `routeup agent status|start|stop|restart|run`
-    setup.go               #   `routeup setup` — local CA + OS trust + port bind
+    setup.go               #   `routeup setup` command + orchestration
+    setup_credentials.go   #   public-server prompt and credential persistence
+    setup_steps.go         #   OS trust, port bind, and agent-start steps
     forward.go              #   `routeup forward` — internal macOS 443 forwarder (hidden)
     doctor.go              #   `routeup doctor` — diagnostics
     routes.go              #   `routeup routes` — list active local routes (+ public)
     logs.go                #   `routeup logs` — metadata list and follow
-    inspect.go              #   `routeup inspect` — retained request output
+    inspect.go              #   `routeup inspect` — retained exchange output
     update.go              #   `routeup update` — self update
     uninstall.go           #   `routeup uninstall` — reverse setup
 
@@ -169,8 +171,11 @@ Example M7 path-proxy config:
     { "path": "/", "port": 5173 },
     { "path": "/api", "port": 8080 }
   ],
-  "capture": true,
-  "redact_headers": ["authorization", "cookie"],
+  "capture": {
+    "request": true,
+    "response": true,
+    "redact_headers": ["authorization", "cookie"]
+  },
   "expose": { "paths": ["/api/*"] }
 }
 ```
@@ -200,7 +205,7 @@ routeup
   update                    Self-update to the latest release
   uninstall                 Reverse setup (untrust CA, remove forwarder/setcap, delete state)
   logs                      Stream recent request logs
-  inspect <request-id>       Show an opted-in captured request
+  inspect <request-id>       Show an opted-in captured exchange
   agent                     Inspect/control the local agent: status | start | stop | restart
 
   # hidden — operator commands, run on the server host
@@ -234,8 +239,8 @@ ignores SIGINT cannot trigger that parent-side timer.
 The `serve` command (`serve.go`): resolves the route name and port, ensures the
 local CA exists, ensures the agent is running, registers the route claim with
 the agent, optionally calls `serveExpose` (same path as `expose`), then blocks
-on `MaintainClaim` — a 2s reconcile loop that re-registers the claim on agent
-restart.
+on `Maintain` - a 2s desired-state loop that restores the claim and exposure
+after agent restart or terminal tunnel failure.
 
 The `expose` command (`expose.go`): resolves server URL + token (flag > env >
 saved client config), resolves the route name, calls `startTunnel` which starts
@@ -330,13 +335,13 @@ In-memory `map[string]ipc.Claim`. Key methods:
 
 - `Register(c)`: inserts or replaces. If owned by a live different PID,
   returns `ipc.ConflictError`. Same PID can update in place.
-- `Unregister(name)`: idempotent delete.
+- `Unregister(name, ownerPID)`: idempotent, owner-conditional delete.
 - `List()`: sorted snapshot.
 - `LookupTargets(name)`: used by the proxy to find path-routed upstreams.
 - `Reap()`: drops claims whose PID is dead (signal-0 probe).
 
-The registry is purely in-memory because the CLI's `MaintainClaim` loop
-re-registers after any agent restart.
+The registry is purely in-memory because the CLI's `Maintain` loop re-registers
+after any agent restart.
 
 ### Proxy wiring
 
@@ -361,7 +366,7 @@ Nine endpoint forms over the Unix socket:
 - `GET /v1/routes` — list claims
 - `GET /v1/status` — agent status + boot ID
 - `GET /v1/logs` — metadata snapshot or SSE follow stream
-- `GET /v1/requests/{id}` — one retained request for inspection
+- `GET /v1/requests/{id}` — one retained exchange for inspection
 - `POST /v1/shutdown` — graceful shutdown
 - `POST /v1/expose` — start a tunnel (M5)
 - `POST /v1/unexpose` — stop a tunnel (M5)
@@ -394,17 +399,18 @@ PID file.
 `IsStale(status)`: compares Version and binary mod time to detect a rebuilt
 CLI.
 
-### MaintainClaim (`reconcile.go`)
+### Maintain (`reconcile.go`)
 
-A 2s ticker loop that re-registers the route claim if the agent's BootID
-changes or the agent becomes unreachable. Runs for the lifetime of `serve` or
-the bare runner.
+A 2s ticker loop that restores the route claim and exact exposure request if the
+agent's BootID changes, the agent becomes unreachable, or the managed exposure
+disappears. It runs for `serve`, standalone `expose`, and the bare runner.
 
 ### Expose (`expose.go`)
 
 `Expose(ctx, req)`: sends `POST /v1/expose`, bounded by the caller's ctx (with a
 generous fallback when the ctx carries no deadline; budgets live in
-`timeouts.go`). `Unexpose(ctx, host)`: sends `POST /v1/unexpose`, idempotent.
+`timeouts.go`). `Unexpose(ctx, request)`: sends an owner-conditional
+`POST /v1/unexpose`, idempotent.
 The shared `http.Client` no longer sets a blanket timeout — each call's ctx
 bounds it.
 
@@ -435,21 +441,24 @@ return metadata only: source, route, method, path/query, matched target, status,
 and duration. The store's change signal drives the agent's SSE response without
 creating an unbounded queue for each follower.
 
-When a claim or exposure has `Capture: true`, the proxy replaces the incoming
-body with `logs.MessageCapture`. It forwards the body normally while retaining
-at most 256 KiB including headers and body. Capture begins after public-path and
-target matching, and `Complete` is false for an oversized or partially-read
-request. `Store.Get` returns a deep copy so inspection cannot mutate the ring.
+When a claim or exposure enables request or response capture, the proxy wraps
+that direction with `logs.MessageCapture`. It forwards the body normally while
+retaining at most 256 KiB per direction including headers and body. Capture
+begins after public-path and target matching, and `Complete` is false for an
+oversized or partially-read message. `Store.Get` returns a deep copy so
+inspection cannot mutate the ring.
 
 `redact_headers` names are case-insensitive. The proxy forwards those headers to
-the upstream as usual, but omits them from the retained request and reports the
+the upstream as usual, but omits them from the retained exchange and reports the
 omitted names in inspect output.
 
-The API serves `GET /v1/logs` for a finite metadata snapshot or `follow=true`
-for SSE, and `GET /v1/requests/{id}` for one retained request. `routeup logs`
-and `routeup inspect` only query an already-running agent; they do not start one,
-because the ring is process-local. A request without capture returns a conflict
-from the inspect endpoint, while an evicted or unknown ID returns not found.
+The API serves `GET /v1/logs` for a filtered finite metadata snapshot or
+`follow=true` SSE stream, and `GET /v1/requests/{id}` for one retained exchange.
+`routeup logs` and `routeup inspect` only query an already-running agent; they do
+not start one because the ring is process-local. A request without capture
+returns a conflict from the inspect endpoint, while an evicted or unknown ID
+returns not found. Inspect escapes retained bytes unless `--raw` is explicit;
+`--json` preserves byte bodies through base64.
 
 ---
 

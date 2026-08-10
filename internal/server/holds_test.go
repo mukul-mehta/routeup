@@ -93,6 +93,37 @@ func TestHold_TokenGraceWindow(t *testing.T) {
 	}
 }
 
+func TestReleaseGenerationDoesNotReleaseReplacement(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+	host := "api.alice.routeup.dev"
+	first, err := s.HoldRoute(ctx, tokenReq(host, "tokA"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := s.HoldRoute(ctx, tokenReq(host, "tokA"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.HeldAt.Equal(replacement.HeldAt) {
+		t.Fatal("replacement reused hold generation")
+	}
+	if err := s.ReleaseGeneration(ctx, host, first.HeldAt.UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	current, found, err := s.GetHold(ctx, host)
+	if err != nil || !found || current.State != holdStateActive {
+		t.Fatalf("current hold = %#v, found=%v, error=%v", current, found, err)
+	}
+	if err := s.ReleaseGeneration(ctx, host, replacement.HeldAt.UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	current, found, err = s.GetHold(ctx, host)
+	if err != nil || !found || current.State != holdStateReleased {
+		t.Fatalf("released hold = %#v, found=%v, error=%v", current, found, err)
+	}
+}
+
 func TestHold_GraceExpiry(t *testing.T) {
 	ctx := context.Background()
 	s := openTestStore(t)

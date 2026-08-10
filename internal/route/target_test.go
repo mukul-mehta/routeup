@@ -1,6 +1,9 @@
 package route
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestMatchTarget_LongestPrefixWithBoundary(t *testing.T) {
 	targets := []Target{
@@ -36,5 +39,14 @@ func TestPathAllowed_PrefixWildcard(t *testing.T) {
 	}
 	if PathAllowed(patterns, "/") {
 		t.Fatal("/ should not be exposed")
+	}
+}
+
+func TestPathNormalizationRejectsControlCharacters(t *testing.T) {
+	if _, err := NormalizeTarget(Target{Path: "/api\x1b[2J", Port: 8080}); err == nil || !strings.Contains(err.Error(), "control characters") {
+		t.Fatalf("target error = %v, want control-character rejection", err)
+	}
+	if _, err := NormalizePathPatterns([]string{"/hooks\n/*"}); err == nil || !strings.Contains(err.Error(), "control characters") {
+		t.Fatalf("expose error = %v, want control-character rejection", err)
 	}
 }

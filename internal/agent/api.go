@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/mukul-mehta/routeup/internal/ipc"
@@ -61,7 +62,12 @@ func (a *Agent) handleUnregister(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "missing route name", nil)
 		return
 	}
-	if a.reg.Unregister(name) {
+	ownerPID, err := strconv.Atoi(r.URL.Query().Get("owner_pid"))
+	if err != nil || ownerPID <= 0 {
+		writeJSONError(w, http.StatusBadRequest, "valid owner_pid is required", nil)
+		return
+	}
+	if a.reg.Unregister(name, ownerPID) {
 		a.logger.Info("route unregistered", "name", name)
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -74,9 +80,11 @@ func (a *Agent) handleList(w http.ResponseWriter, r *http.Request) {
 	if a.tunnels != nil {
 		exposures := a.tunnels.publicExposures()
 		for i := range claims {
-			if exposure, ok := exposures[claims[i].OwnerPID]; ok {
+			key := exposureKey{ownerPID: claims[i].OwnerPID, route: claims[i].Name}
+			if exposure, ok := exposures[key]; ok {
 				claims[i].PublicHost = exposure.host
 				claims[i].PublicPaths = exposure.paths
+				claims[i].PublicState = exposure.state
 			}
 		}
 	}
@@ -91,6 +99,9 @@ func (a *Agent) handleStatus(w http.ResponseWriter, r *http.Request) {
 		BootID:        a.bootID,
 		ExecPath:      a.execPath,
 		ExecModTime:   a.execModTime,
+	}
+	if a.tunnels != nil {
+		status.Exposures = a.tunnels.statuses()
 	}
 	writeJSON(w, http.StatusOK, status)
 }
@@ -138,7 +149,11 @@ func (a *Agent) handleUnexpose(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid json: "+err.Error(), nil)
 		return
 	}
-	if a.tunnels.Unexpose(in.Host) {
+	if in.Host == "" || in.Route == "" || in.OwnerPID == 0 {
+		writeJSONError(w, http.StatusBadRequest, "host, route and owner_pid are required", nil)
+		return
+	}
+	if a.tunnels.Unexpose(in) {
 		a.logger.Info("tunnel unexposed via api", "host", in.Host)
 	}
 	w.WriteHeader(http.StatusNoContent)

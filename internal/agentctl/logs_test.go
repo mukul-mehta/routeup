@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -14,24 +16,38 @@ import (
 	"github.com/mukul-mehta/routeup/internal/logs"
 )
 
+func TestIsUnavailable(t *testing.T) {
+	missing := NewClient(filepath.Join(shortSocketDir(t), "missing.sock"), "", "")
+	_, err := missing.Status(context.Background())
+	if !IsUnavailable(err) {
+		t.Fatalf("missing socket error = %v, want unavailable", err)
+	}
+	if IsUnavailable(fmt.Errorf("permission: %w", os.ErrPermission)) {
+		t.Fatal("permission error reported as unavailable")
+	}
+	if IsUnavailable(context.DeadlineExceeded) {
+		t.Fatal("deadline error reported as unavailable")
+	}
+}
+
 func TestClientLogsAndFollowLogs(t *testing.T) {
-	socketPath := filepath.Join(t.TempDir(), "agent.sock")
+	socketPath := filepath.Join(shortSocketDir(t), "agent.sock")
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	entry := logs.Entry{
-		ID:     "req_one",
+		ID:     "req_1234567890abcdef",
 		Source: logs.SourcePublic,
 		Route:  "api.myapp",
-		Capture: &logs.Capture{Request: logs.CapturedMessage{
+		Capture: &logs.Capture{Request: &logs.CapturedMessage{
 			Body:     []byte("payload"),
 			Complete: true,
 		}},
 	}
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/requests/req_one" {
+		if r.URL.Path == "/v1/requests/req_1234567890abcdef" {
 			_ = json.NewEncoder(w).Encode(entry)
 			return
 		}
@@ -86,4 +102,36 @@ func TestClientLogsAndFollowLogs(t *testing.T) {
 	if !errors.Is(err, stop) {
 		t.Fatalf("FollowLogs() error = %v, want stop", err)
 	}
+}
+
+func TestFollowLogsRejectsUnexpectedEOF(t *testing.T) {
+	socketPath := filepath.Join(shortSocketDir(t), "agent.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"req_one\"}\n\n")
+	})}
+	t.Cleanup(func() {
+		_ = server.Close()
+	})
+	go func() { _ = server.Serve(listener) }()
+
+	client := NewClient(socketPath, "", "")
+	err = client.FollowLogs(context.Background(), logs.ListOptions{}, func(logs.Entry) error { return nil })
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("FollowLogs() error = %v, want unexpected EOF", err)
+	}
+}
+
+func shortSocketDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "rup-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
 }

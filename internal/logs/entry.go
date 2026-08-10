@@ -32,8 +32,8 @@ const (
 	SourcePublic Source = "public"
 )
 
-// Entry is one completed request handled by the local agent. Capture is nil
-// unless the route opted into retaining the incoming request.
+// Entry is one completed request handled by the local agent. Captured remains
+// available in metadata-only lists; Capture is present only in inspect results.
 type Entry struct {
 	ID          string        `json:"id"`
 	StartedAt   time.Time     `json:"started_at"`
@@ -45,6 +45,7 @@ type Entry struct {
 	RequestPath string        `json:"request_path"`
 	Target      route.Target  `json:"target"`
 	Status      int           `json:"status"`
+	Captured    bool          `json:"captured,omitempty"`
 	Capture     *Capture      `json:"capture,omitempty"`
 }
 

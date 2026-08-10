@@ -13,7 +13,7 @@ example directory so routeup discovers its `routeup.json` or package.json
 | [`node-runner`](node-runner/) | Runner mode: bare `routeup` starts the app, injects `PORT`/`HOST`/`ROUTEUP_*` |
 | [`node-runner-expose`](node-runner-expose/) | Runner + `expose.enabled: true`: `ROUTEUP_URL` becomes the granted public URL |
 | [`go-split`](go-split/) | Path routing: frontend at `/` and API at `/api` behind one route |
-| [`python-api`](python-api/) | Webhook debugging: `capture: true`, `redact_headers`, `expose.paths` |
+| [`python-api`](python-api/) | Webhook debugging: `capture.request`, `capture.redact_headers`, `expose.paths` |
 
 ## Prerequisites
 

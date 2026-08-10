@@ -72,6 +72,23 @@ func TestStoreAppendListAndRingEviction(t *testing.T) {
 	}
 }
 
+func TestStoreListFiltersRequestMetadata(t *testing.T) {
+	store := NewStore()
+	started := time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC)
+	for _, entry := range []Entry{
+		{ID: "req_old", Source: SourcePublic, Route: "api", Method: "GET", Status: 200, StartedAt: started},
+		{ID: "req_match", Source: SourcePublic, Route: "api", Method: "POST", Status: 202, StartedAt: started.Add(time.Minute)},
+	} {
+		if _, err := store.Append(entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries := store.List(ListOptions{Since: started.Add(30 * time.Second), Method: "post", Status: 202})
+	if len(entries) != 1 || entries[0].ID != "req_match" {
+		t.Fatalf("entries = %#v, want req_match", entries)
+	}
+}
+
 func TestStoreListAndWatch(t *testing.T) {
 	store := NewStore()
 	_, err := store.Append(Entry{ID: "req_one", Source: SourceLocal, Route: "myapp"})
@@ -107,7 +124,7 @@ func TestStoreGetReturnsCaptureCopy(t *testing.T) {
 		Source: SourceLocal,
 		Route:  "myapp",
 		Capture: &Capture{
-			Request: CapturedMessage{
+			Request: &CapturedMessage{
 				Headers:  http.Header{"X-Test": {"original"}},
 				Body:     []byte("body"),
 				Complete: true,
@@ -144,7 +161,7 @@ func TestStoreListOmitsCaptureData(t *testing.T) {
 		Source: SourcePublic,
 		Route:  "webhook",
 		Capture: &Capture{
-			Request: CapturedMessage{Body: []byte("request"), Complete: true},
+			Request: &CapturedMessage{Body: []byte("request"), Complete: true},
 		},
 	})
 	if err != nil {
@@ -157,6 +174,9 @@ func TestStoreListOmitsCaptureData(t *testing.T) {
 	}
 	if entries[0].Capture != nil {
 		t.Fatalf("list capture = %#v, want nil", entries[0].Capture)
+	}
+	if !entries[0].Captured {
+		t.Fatal("list entry does not report retained capture")
 	}
 
 	entry, ok := store.Get("req_captured")
@@ -173,7 +193,7 @@ func TestStoreRingEvictionRemovesMetadataAndCapture(t *testing.T) {
 	_, err := store.Append(Entry{
 		ID:      "req_one",
 		Source:  SourcePublic,
-		Capture: &Capture{Request: CapturedMessage{Body: []byte("request"), Complete: true}},
+		Capture: &Capture{Request: &CapturedMessage{Body: []byte("request"), Complete: true}},
 	})
 	if err != nil {
 		t.Fatalf("Append() captured entry: %v", err)
@@ -187,7 +207,7 @@ func TestStoreRingEvictionRemovesMetadataAndCapture(t *testing.T) {
 	_, err = store.Append(Entry{
 		ID:      "req_three",
 		Source:  SourcePublic,
-		Capture: &Capture{Request: CapturedMessage{Body: []byte("new request"), Complete: true}},
+		Capture: &Capture{Request: &CapturedMessage{Body: []byte("new request"), Complete: true}},
 	})
 	if err != nil {
 		t.Fatalf("Append() rollover capture: %v", err)
@@ -208,7 +228,7 @@ func TestStoreRejectsCaptureOverMessageLimit(t *testing.T) {
 		ID:     "req_too_large",
 		Source: SourceLocal,
 		Capture: &Capture{
-			Request: CapturedMessage{
+			Request: &CapturedMessage{
 				Body:     make([]byte, maxCapturedMessageBytes+1),
 				Complete: false,
 			},

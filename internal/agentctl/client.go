@@ -18,9 +18,17 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"syscall"
 
 	"github.com/mukul-mehta/routeup/internal/ipc"
 )
+
+// IsUnavailable reports whether an IPC request failed because no agent is
+// listening on the configured Unix socket.
+func IsUnavailable(err error) bool {
+	return errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED)
+}
 
 // Client is the CLI side of the agent IPC. It speaks JSON over HTTP/1.1 over
 // the per-user Unix domain socket.
@@ -111,10 +119,11 @@ func (c *Client) Register(ctx context.Context, claim ipc.Claim) (ipc.Claim, erro
 	return out, nil
 }
 
-// Unregister sends DELETE /v1/routes/{name}. It is idempotent.
-func (c *Client) Unregister(ctx context.Context, name string) error {
+// Unregister sends DELETE /v1/routes/{name} for the owning process. It is idempotent.
+func (c *Client) Unregister(ctx context.Context, name string, ownerPID int) error {
+	query := url.Values{"owner_pid": {fmt.Sprintf("%d", ownerPID)}}
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete,
-		"http://unix"+ipc.PathRoutes+"/"+url.PathEscape(name), nil)
+		"http://unix"+ipc.PathRoutes+"/"+url.PathEscape(name)+"?"+query.Encode(), nil)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}

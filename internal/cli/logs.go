@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -28,6 +29,10 @@ type logsOpts struct {
 	public bool
 	local  bool
 	json   bool
+	limit  int
+	since  string
+	method string
+	status int
 }
 
 // newLogsCmd reads the in-memory log from an already-running agent. Like
@@ -47,6 +52,20 @@ func newLogsCmd() *cobra.Command {
 			}
 
 			logOpts := logs.ListOptions{}
+			if opts.limit < 0 {
+				return errors.New("--limit cannot be negative")
+			}
+			if opts.status != 0 && (opts.status < 100 || opts.status > 599) {
+				return fmt.Errorf("--status must be between 100 and 599 (got %d)", opts.status)
+			}
+			since, err := parseLogSince(opts.since, time.Now())
+			if err != nil {
+				return err
+			}
+			logOpts.Limit = opts.limit
+			logOpts.Since = since
+			logOpts.Method = strings.ToUpper(strings.TrimSpace(opts.method))
+			logOpts.Status = opts.status
 			if len(args) == 1 {
 				logOpts.Route = args[0]
 			}
@@ -84,7 +103,29 @@ func newLogsCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&opts.public, "public", false, "show only public tunnel requests")
 	cmd.Flags().BoolVar(&opts.local, "local", false, "show only local .localhost requests")
 	cmd.Flags().BoolVar(&opts.json, "json", false, "write one JSON request record per line")
+	cmd.Flags().IntVar(&opts.limit, "limit", 0, "show at most the newest N matching requests")
+	cmd.Flags().StringVar(&opts.since, "since", "", "show requests since a duration ago or RFC3339 time")
+	cmd.Flags().StringVar(&opts.method, "method", "", "show only this HTTP method")
+	cmd.Flags().IntVar(&opts.status, "status", 0, "show only this HTTP status code")
 	return cmd
+}
+
+func parseLogSince(value string, now time.Time) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, nil
+	}
+	if duration, err := time.ParseDuration(value); err == nil {
+		if duration < 0 {
+			return time.Time{}, errors.New("--since duration cannot be negative")
+		}
+		return now.Add(-duration), nil
+	}
+	since, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid --since %q (use a duration like 10m or an RFC3339 time)", value)
+	}
+	return since, nil
 }
 
 func runLogs(cmd *cobra.Command, opts logs.ListOptions, commandOpts logsOpts) error {
@@ -100,24 +141,25 @@ func runLogs(cmd *cobra.Command, opts logs.ListOptions, commandOpts logsOpts) er
 		if ctx == nil {
 			ctx = context.Background()
 		}
-		wroteHeader := false
-		err := client.FollowLogs(ctx, opts, func(entry logs.Entry) error {
-			if !commandOpts.json && !wroteHeader {
-				if err := writeLogHeader(out); err != nil {
-					return err
-				}
-				wroteHeader = true
+		if !commandOpts.json {
+			if err := writeLogHeader(out); err != nil {
+				return err
 			}
+		}
+		err := client.FollowLogs(ctx, opts, func(entry logs.Entry) error {
 			return writeLogEntry(out, entry, commandOpts.json)
 		})
 		if errors.Is(err, context.Canceled) && ctx.Err() != nil {
 			return nil
 		}
-		if err != nil {
+		if agentctl.IsUnavailable(err) {
+			if commandOpts.json {
+				return nil
+			}
 			_, _ = fmt.Fprintln(out, "no request logs (agent not running)")
 			return nil
 		}
-		return nil
+		return err
 	}
 
 	parent := cmd.Context()
@@ -127,11 +169,20 @@ func runLogs(cmd *cobra.Command, opts logs.ListOptions, commandOpts logsOpts) er
 	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
 	defer cancel()
 	entries, err := client.Logs(ctx, opts)
-	if err != nil {
+	if agentctl.IsUnavailable(err) {
+		if commandOpts.json {
+			return nil
+		}
 		_, _ = fmt.Fprintln(out, "no request logs (agent not running)")
 		return nil
 	}
+	if err != nil {
+		return fmt.Errorf("list request logs: %w", err)
+	}
 	if len(entries) == 0 {
+		if commandOpts.json {
+			return nil
+		}
 		_, _ = fmt.Fprintln(out, "no matching request logs")
 		return nil
 	}
@@ -164,8 +215,9 @@ func writeLogEntry(out io.Writer, entry logs.Entry, jsonOutput bool) error {
 		return nil
 	}
 	_, err := fmt.Fprintf(out, "%s  %-6s  %-20s  %-7s  %-40s  %-6d  %-8s  %s\n",
-		entry.StartedAt.Local().Format("15:04:05"), entry.Source, entry.Route,
-		entry.Method, entry.RequestPath, entry.Status, formatLogDuration(entry.Duration), entry.ID)
+		entry.StartedAt.Local().Format("15:04:05"), terminalEscapeString(string(entry.Source)), terminalEscapeString(entry.Route),
+		terminalEscapeString(entry.Method), terminalEscapeString(entry.RequestPath), entry.Status, formatLogDuration(entry.Duration),
+		terminalEscapeString(entry.ID))
 	if err != nil {
 		return fmt.Errorf("write request log: %w", err)
 	}

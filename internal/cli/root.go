@@ -20,6 +20,11 @@ func Execute() error {
 var version = "0.0.0-dev"
 
 func newRootCmd() *cobra.Command {
+	const (
+		groupStart   = "start"
+		groupObserve = "observe"
+		groupManage  = "manage"
+	)
 	root := &cobra.Command{
 		Use:   "routeup",
 		Short: "Stable HTTPS routes for local services",
@@ -51,20 +56,33 @@ func newRootCmd() *cobra.Command {
 			return runRun(cmd, cwd)
 		},
 	}
+	root.AddGroup(
+		&cobra.Group{ID: groupStart, Title: "Start:"},
+		&cobra.Group{ID: groupObserve, Title: "Observe:"},
+		&cobra.Group{ID: groupManage, Title: "Manage:"},
+	)
+	root.SetHelpCommandGroupID(groupManage)
+	root.SetCompletionCommandGroupID(groupManage)
 	root.AddCommand(
-		newDoctorCmd(),
-		newRoutesCmd(),
-		newLogsCmd(),
-		newInspectCmd(),
-		newServeCmd(),
-		newAgentCmd(),
-		newSetupCmd(),
-		newForwardCmd(),
-		newUninstallCmd(),
-		newUpdateCmd(),
-		newTokenCmd(),
-		newServerCmd(),
-		newExposeCmd(),
+		commandGroup(groupStart, newServeCmd()),
+		commandGroup(groupStart, newExposeCmd()),
+		commandGroup(groupObserve, newRoutesCmd()),
+		commandGroup(groupObserve, newLogsCmd()),
+		commandGroup(groupObserve, newInspectCmd()),
+		commandGroup(groupObserve, newDoctorCmd()),
+		commandGroup(groupObserve, newConfigCmd()),
+		commandGroup(groupManage, newAgentCmd()),
+		commandGroup(groupManage, newSetupCmd()),
+		commandGroup(groupManage, newUninstallCmd()),
+		commandGroup(groupManage, newUpdateCmd()),
+		commandGroup(groupManage, newForwardCmd()),
+		commandGroup(groupManage, newTokenCmd()),
+		commandGroup(groupManage, newServerCmd()),
 	)
 	return root
+}
+
+func commandGroup(group string, cmd *cobra.Command) *cobra.Command {
+	cmd.GroupID = group
+	return cmd
 }

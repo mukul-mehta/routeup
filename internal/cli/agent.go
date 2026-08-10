@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/mukul-mehta/routeup/internal/agent"
 	"github.com/mukul-mehta/routeup/internal/agentctl"
+	"github.com/mukul-mehta/routeup/internal/ipc"
 	"github.com/mukul-mehta/routeup/internal/privbind"
 	"github.com/mukul-mehta/routeup/internal/state"
 )
@@ -89,7 +91,8 @@ func newAgentRunCmd() *cobra.Command {
 }
 
 func newAgentStatusCmd() *cobra.Command {
-	return &cobra.Command{
+	var jsonOutput bool
+	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show whether the agent is running and its build",
 		Args:  cobra.NoArgs,
@@ -103,8 +106,23 @@ func newAgentStatusCmd() *cobra.Command {
 
 			out := cmd.OutOrStdout()
 			status, err := client.Status(ctx)
-			if err != nil {
+			if agentctl.IsUnavailable(err) {
+				if jsonOutput {
+					return json.NewEncoder(out).Encode(map[string]bool{"running": false})
+				}
 				_, _ = fmt.Fprintln(out, "agent: not running")
+				return nil
+			}
+			if err != nil {
+				return fmt.Errorf("get agent status: %w", err)
+			}
+			if jsonOutput {
+				if err := json.NewEncoder(out).Encode(struct {
+					Running bool       `json:"running"`
+					Status  ipc.Status `json:"status"`
+				}{Running: true, Status: status}); err != nil {
+					return fmt.Errorf("write agent status json: %w", err)
+				}
 				return nil
 			}
 
@@ -113,7 +131,7 @@ func newAgentStatusCmd() *cobra.Command {
 			_, _ = fmt.Fprintf(out, "uptime:  %ds\n", status.UptimeSeconds)
 			_, _ = fmt.Fprintf(out, "tls:     %s\n", status.TLSAddr)
 			if status.ExecPath != "" {
-				_, _ = fmt.Fprintf(out, "binary:  %s\n", status.ExecPath)
+				_, _ = fmt.Fprintf(out, "binary:  %s\n", terminalEscapeString(status.ExecPath))
 			}
 			if stale, reason := client.IsStale(status); stale {
 				_, _ = fmt.Fprintf(out, "\nnote: %s\n", reason)
@@ -122,6 +140,8 @@ func newAgentStatusCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "write agent status as JSON")
+	return cmd
 }
 
 func newAgentStartCmd() *cobra.Command {
