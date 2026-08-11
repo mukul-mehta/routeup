@@ -132,26 +132,29 @@ routeup expose cool --port 8080 --server https://edge.routeup.dev
 
 ## Continuous deployment
 
-After this one-time bring-up, you don't run `fly deploy` by hand: every push to
-`main` deploys the server automatically (the `deploy` job in
-`.github/workflows/ci.yml`), once `test` and `lint` pass. Changes under
-`deploy/log-shipper/` deploy the log shipper through
-`.github/workflows/deploy-log-shipper.yml`. The CLI is separate — it releases
-from `v*` tags via goreleaser, on its own cadence.
+After this one-time bring-up, you don't run `fly deploy` by hand. Every push to
+`main` runs `.github/workflows/ci.yml`, including integration coverage. A
+successful CI run triggers `.github/workflows/deploy.yml`, which deploys both
+the public server and log shipper. CI also validates the example projects, while
+the CLI releases from `v*` tags through the separate release workflow.
 
-Enable it once by giving Actions a scoped deploy token:
+The combined workflow uses one organization-scoped token to deploy both Fly
+apps:
 
 ```bash
-fly tokens create deploy -a routeup-server     # prints a "FlyV1 ..." token
-gh secret set FLY_API_TOKEN                     # paste it when prompted
-# or: GitHub → Settings → Secrets and variables → Actions → new secret FLY_API_TOKEN
+fly tokens create org \
+  --org personal \
+  --expiry 2160h \
+  --name "Routeup GitHub deployments"
+
+gh secret set FLY_API_TOKEN                    # paste the full FlyV1 value
+# or add it under GitHub → Settings → Secrets and variables → Actions
 ```
 
-The job runs `flyctl deploy --remote-only -c deploy/fly.toml` (builds on Fly's
-remote builders, no Docker on the runner) and serializes deploys
-(`concurrency: fly-deploy`) because the server is a single stateful instance.
-The log-shipper workflow uses its own app-scoped `FLY_LOG_SHIPPER_API_TOKEN`,
-configured in the logging section below.
+The workflow validates both Fly configurations, deploys the server from the
+repository source, then deploys the external log-shipper image with the tracked
+Loki sink. Deployments are serialized with `concurrency: fly-deploy` because the
+server is a single stateful instance.
 
 ## Operations
 
@@ -259,16 +262,9 @@ metadata. This lets Grafana Cloud identify Routeup instead of grouping its logs
 under `unknown_service`. Both the manual command above and GitHub Actions mount
 the sink at `/etc/vector/sinks/loki.toml` before Vector starts.
 
-Create a separate app-scoped deploy token for GitHub Actions:
-
-```bash
-fly tokens create deploy -a routeup-log-shipper
-gh secret set FLY_LOG_SHIPPER_API_TOKEN
-```
-
-Paste the `FlyV1 ...` value when `gh` prompts. Future changes to the tracked
-shipper config deploy automatically on pushes to `main`. Runtime Loki and NATS
-credentials stay only in Fly secrets; they are not duplicated into GitHub.
+Future changes deploy automatically after CI succeeds on `main`. Runtime Loki
+and NATS credentials stay only in Fly secrets; GitHub receives only the
+organization-scoped deployment token.
 
 Add Loki as a Grafana datasource with the same endpoint and credentials. Fly's
 shipper labels Routeup streams with `fly_app_name="routeup-server"`, so the base

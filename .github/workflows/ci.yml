@@ -1,9 +1,10 @@
-name: ci
+name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -41,6 +42,47 @@ jobs:
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12.2
+
+  examples:
+    name: examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+
+      - name: validate examples
+        run: go test ./examples/...
+
+  dev-server-integration:
+    name: integration (Vite/Next HMR)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Vite/Next HMR integration
+        run: go test -tags integration -run TestIntegration -timeout 15m ./internal/server
 
   integration-ubuntu:
     name: integration (ubuntu, :${{ matrix.port }})
@@ -100,32 +142,3 @@ jobs:
       # limitation surfaces on its own.
       - name: integration
         run: sudo -u routeup-ci -H bash scripts/integration-linux.sh ./bin/routeup ${{ matrix.port }}
-
-  # The public server ships on every push to main. The CLI releases separately
-  # (goreleaser, on v* tags), so the server tracks main while the CLI cuts
-  # versioned releases on its own cadence.
-  deploy:
-    name: deploy (fly)
-    # Gate on the deterministic checks only. The integration cells are
-    # environment-sensitive by design (setcap on overlayfs, fail-fast:false), so
-    # gating a production deploy on them would block ships on infra flakes.
-    needs: [test, lint]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    # The server is a single stateful instance — never two deploys at once. Let
-    # an in-flight rollout finish rather than cancelling it midway.
-    concurrency:
-      group: fly-deploy
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: superfly/flyctl-actions/setup-flyctl@master
-
-      # Run from the repo root (the default cwd): the Docker build context needs
-      # go.mod and the source, while fly.toml resolves its Dockerfile relative
-      # to deploy/. --remote-only builds on Fly's builders, so no local Docker.
-      - name: flyctl deploy
-        run: flyctl deploy --remote-only -c deploy/fly.toml
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

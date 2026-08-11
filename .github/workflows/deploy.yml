@@ -1,0 +1,47 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fly-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Fly server and log shipper
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: verify deploy secrets
+        run: ': "${FLY_API_TOKEN:?Set the FLY_API_TOKEN repository secret}"'
+
+      - name: validate server configuration
+        run: flyctl config validate -c deploy/fly.toml
+
+      - name: validate log shipper configuration
+        run: flyctl config validate -c deploy/log-shipper/fly.toml
+
+      - name: deploy server
+        run: flyctl deploy --remote-only -c deploy/fly.toml
+
+      - name: deploy log shipper
+        run: >-
+          flyctl deploy --remote-only --no-public-ips
+          -c deploy/log-shipper/fly.toml
+          --file-local /etc/vector/sinks/loki.toml=deploy/log-shipper/loki.toml
