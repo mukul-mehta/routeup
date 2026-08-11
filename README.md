@@ -1,5 +1,8 @@
 # routeup
 
+[![CI](https://github.com/mukul-mehta/routeup/actions/workflows/ci.yml/badge.svg)](https://github.com/mukul-mehta/routeup/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/mukul-mehta/routeup)](https://github.com/mukul-mehta/routeup/releases/latest)
+
 `routeup` gives local services stable HTTPS route names and can expose those
 same routes publicly through a self-hosted or shared server.
 

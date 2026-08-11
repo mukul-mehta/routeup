@@ -1,5 +1,7 @@
 # Deploying the routeup server on Fly.io
 
+[![Deploy](https://github.com/mukul-mehta/routeup/actions/workflows/deploy.yml/badge.svg)](https://github.com/mukul-mehta/routeup/actions/workflows/deploy.yml)
+
 The complete one-time setup. Run every `fly` command **from the repository root**
 (the Docker build needs `go.mod` and the source).
 
