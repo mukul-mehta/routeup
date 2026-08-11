@@ -80,7 +80,7 @@ jobs:
         run: |
           go mod tidy -diff
           go mod verify
-          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
           python3 -m json.tool deploy/grafana-dashboard.json >/dev/null
           python3 -m json.tool routeup.schema.json >/dev/null
 
@@ -164,7 +164,7 @@ jobs:
 
   integration-macos:
     name: integration (macOS smoke)
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
