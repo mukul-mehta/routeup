@@ -110,6 +110,7 @@ internal/
     targets.go             #   target flag parsing and display
     serve.go               #   `routeup serve` — local + optional expose
     expose.go              #   `routeup expose` — public tunnel only
+    route_output.go        #   ready-event JSON and optional terminal QR output
     server.go              #   `routeup server` — run the public server
     servercfg.go           #   Server config file paths
     token.go               #   `routeup token create|list|revoke`
@@ -119,6 +120,7 @@ internal/
     setup_steps.go         #   OS trust, port bind, and agent-start steps
     forward.go              #   `routeup forward` — internal macOS 443 forwarder (hidden)
     doctor.go              #   `routeup doctor` — diagnostics
+    config.go              #   resolved project configuration output
     routes.go              #   `routeup routes` — list active local routes (+ public)
     logs.go                #   `routeup logs` — metadata list and follow
     inspect.go              #   `routeup inspect` — retained exchange output
@@ -203,6 +205,7 @@ routeup
   serve [name]              Serve a local app on https://<name>.localhost (optionally --expose)
   expose [name]             Expose a local port publicly through a routeup server
   routes                    List active local routes
+  config                    Show resolved project configuration
   doctor                    Diagnose setup state
   update                    Self-update to the latest release
   uninstall                 Reverse setup (untrust CA, remove forwarder/setcap, delete state)
@@ -229,9 +232,10 @@ command, chooses or resolves the root target port, registers the route, injects
 child in an owned process group. It waits for the root target before printing
 the route, mirrors the child exit status after readiness, and unregisters on
 exit. A successful exit before the target listens is a startup failure.
-Config-driven public runner exposure and supported framework command adapters
-are planned for Phase 8.5. Phase 10 request capture and inspect are implemented
-independently of that deferred runner enhancement.
+Phase 8.5 adds config-driven public runner exposure before child launch and
+keeps route, tunnel, and child cleanup under one owner. Framework-specific
+command adapters are out of scope. Phase 10 request capture and inspect compose
+with both local and exposed runner traffic.
 
 With a TTY, the child process group owns the foreground terminal, so Ctrl-C is
 delivered directly to that group. Direct cancellation of routeup forwards the

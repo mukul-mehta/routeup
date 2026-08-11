@@ -22,10 +22,27 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: validate release tag and repository
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+          : "${HOMEBREW_TAP_TOKEN:?Set the HOMEBREW_TAP_TOKEN repository secret}"
+          go mod tidy -diff
+          go mod verify
+          go test ./...
+          sh -n install.sh
+
       - uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
-          args: release --clean
+          install-only: true
+
+      - name: validate GoReleaser configuration
+        run: goreleaser check
+
+      - name: publish release
+        run: goreleaser release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

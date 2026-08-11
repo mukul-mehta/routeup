@@ -34,6 +34,8 @@ func TestConfig_Validate(t *testing.T) {
 		{name: "port above limit", cfg: Config{Port: 72000}, errSubstr: "port 72000 out of range"},
 		{name: "duplicate root port", cfg: Config{Port: 3000, Targets: []route.Target{{Path: "/", Port: 8080}}}, errSubstr: "port and targets path"},
 		{name: "invalid redacted header", cfg: Config{Capture: CaptureConfig{RedactHeaders: []string{"bad header"}}}, errSubstr: "invalid header name"},
+		{name: "invalid port env prefix", cfg: Config{PortEnvVar: "9PORT"}, errSubstr: "environment variable name"},
+		{name: "invalid port env punctuation", cfg: Config{PortEnvVar: "WEB-PORT"}, errSubstr: "environment variable name"},
 	}
 
 	for _, tc := range cases {

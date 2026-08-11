@@ -168,6 +168,10 @@ fly deploy -c deploy/fly.toml               # redeploy after editing the config 
 fly ssh console -a routeup-server           # shell on the box (token admin, /data inspection)
 ```
 
+Backup and restore procedures are documented in
+[`docs/RECOVERY.md`](../docs/RECOVERY.md). Fly volume snapshots are the v1 backup
+mechanism for both SQLite and the ACME certificate cache.
+
 Public-request info logs include method, status, duration, and response bytes.
 Route identity is available only at debug level. Logs always omit paths,
 queries, headers, bodies, tokens, cookies, and source addresses. Set
@@ -199,11 +203,12 @@ Header value: FlyV1 <read-only-token>
 ```
 
 The custom metrics are named `routeup_*` and cover active tunnels, tunnel
-lifecycle events, claim outcomes, requests by status class, in-flight requests,
-request duration, forwarding errors, and reaped holds. They contain no route,
-public-host, token, path, source-IP, or user labels. Fly retains metrics for
-roughly 15 days; longer retention requires federating or remote-writing into
-another Prometheus-compatible store.
+lifecycle events, claim outcomes, requests by status class and bounded outcome,
+in-flight requests, forwarded versus no-tunnel request duration, forwarding
+errors, and reaped holds. They contain no route, public-host, token, path,
+source-IP, or user labels. Fly retains metrics for roughly 15 days; longer
+retention requires federating or remote-writing into another
+Prometheus-compatible store.
 
 An importable dashboard is included at `deploy/grafana-dashboard.json`. In
 Grafana, open **Dashboards → New → Import**, upload that file, and select the Fly

@@ -86,7 +86,7 @@ func TestIngressLoggingUsesSafeStructuredFields(t *testing.T) {
 			t.Fatalf("log contains sensitive request data %q: %s", secret, output.String())
 		}
 	}
-	if srv.metrics.requestsByClass[4].Load() != 1 || srv.metrics.requestsInFlight.Load() != 0 {
+	if srv.metrics.requestsByClass[requestNoTunnel][4].Load() != 1 || srv.metrics.requestsInFlight.Load() != 0 {
 		t.Fatalf("request metrics not recorded")
 	}
 }

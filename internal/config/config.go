@@ -63,7 +63,8 @@ type ExposeConfig struct {
 	// Enabled opts bare `routeup` (runner mode) into public exposure before
 	// child launch. When true, the runner contacts the configured server,
 	// claims a public route, and injects the public URL into ROUTEUP_URL.
-	// Has no effect on standalone `routeup serve` or `routeup expose`.
+	// `routeup serve` also honors it; standalone `routeup expose` is already
+	// explicitly public and ignores this switch.
 	Enabled bool `json:"enabled,omitempty"`
 
 	// Paths limits which request paths are exposed publicly. Empty means all paths.
@@ -133,11 +134,22 @@ func (c Config) Validate() error {
 		return errors.New("set either script or command, not both")
 	}
 
-	if c.PortEnvVar != "" && strings.ContainsAny(c.PortEnvVar, "= \t\n") {
+	if c.PortEnvVar != "" && !validEnvVarName(c.PortEnvVar) {
 		return fmt.Errorf("port_env_var %q is not a valid environment variable name", c.PortEnvVar)
 	}
 
 	return nil
+}
+
+func validEnvVarName(name string) bool {
+	for i := 0; i < len(name); i++ {
+		b := name[i]
+		if (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || b == '_' || (i > 0 && b >= '0' && b <= '9') {
+			continue
+		}
+		return false
+	}
+	return name != ""
 }
 
 func validateRedactHeaders(headers []string) error {

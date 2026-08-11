@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/mukul-mehta/routeup/main/routeup.schema.json",
+  "title": "routeup project configuration",
+  "description": "Configuration for a local routeup service.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "format": "uri-reference",
+      "description": "JSON Schema URL used by editors."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253,
+      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$",
+      "description": "Stable route name. Reserved localhost and routeup.dev suffixes are rejected at runtime."
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535,
+      "description": "Shorthand local port for the root path."
+    },
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/target"
+      },
+      "description": "Path-routed local upstreams. Paths must be unique after trailing-slash normalization."
+    },
+    "expose": {
+      "$ref": "#/$defs/expose"
+    },
+    "capture": {
+      "$ref": "#/$defs/capture"
+    },
+    "command": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Shell command run by bare routeup. Only valid in routeup.json."
+    },
+    "port_env_var": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+      "description": "Additional environment variable that receives the assigned port."
+    }
+  },
+  "$defs": {
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "port"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^/[^?#*\\u0000-\\u001F\\u007F]*$",
+          "description": "Request path prefix routed to this port."
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "expose": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Publish the route before runner child launch; routeup serve also honors this setting."
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "anyOf": [
+              {
+                "pattern": "^/[^?#*\\u0000-\\u001F\\u007F]*$"
+              },
+              {
+                "pattern": "^/(?:[^/?#*\\u0000-\\u001F\\u007F]+/)*\\*$"
+              }
+            ]
+          },
+          "description": "Exact public paths or prefixes ending in /*. Empty means all paths."
+        }
+      }
+    },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "boolean",
+          "default": false,
+          "description": "Retain request headers and body in agent memory."
+        },
+        "response": {
+          "type": "boolean",
+          "default": false,
+          "description": "Retain response headers and body in agent memory."
+        },
+        "redact_headers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$"
+          },
+          "description": "Case-insensitive header names omitted from retained data."
+        }
+      }
+    }
+  }
+}

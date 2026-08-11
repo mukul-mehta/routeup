@@ -11,17 +11,27 @@ import (
 
 var requestDurationBuckets = [...]float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10}
 
+type requestOutcome int
+
+const (
+	requestForwarded requestOutcome = iota
+	requestNoTunnel
+	requestOutcomeCount
+)
+
+var requestOutcomeLabels = [requestOutcomeCount]string{"forwarded", "no_tunnel"}
+
 type serverMetrics struct {
 	activeTunnels       atomic.Int64
 	tunnelEstablished   atomic.Uint64
 	tunnelClosed        atomic.Uint64
 	claimsAccepted      atomic.Uint64
 	claimsRejected      atomic.Uint64
-	requestsByClass     [6]atomic.Uint64
+	requestsByClass     [requestOutcomeCount][6]atomic.Uint64
 	requestsInFlight    atomic.Int64
-	requestDuration     [len(requestDurationBuckets)]atomic.Uint64
-	requestDurationNsec atomic.Uint64
-	requestCount        atomic.Uint64
+	requestDuration     [requestOutcomeCount][len(requestDurationBuckets)]atomic.Uint64
+	requestDurationNsec [requestOutcomeCount]atomic.Uint64
+	requestCount        [requestOutcomeCount]atomic.Uint64
 	forwardErrors       atomic.Uint64
 	reapedHolds         atomic.Uint64
 }
@@ -56,17 +66,17 @@ func (m *serverMetrics) requestStarted() {
 	m.requestsInFlight.Add(1)
 }
 
-func (m *serverMetrics) requestCompleted(status int, duration time.Duration) {
+func (m *serverMetrics) requestCompleted(status int, duration time.Duration, outcome requestOutcome) {
 	m.requestsInFlight.Add(-1)
-	m.requestsByClass[statusClassIndex(status)].Add(1)
-	m.requestCount.Add(1)
+	m.requestsByClass[outcome][statusClassIndex(status)].Add(1)
+	m.requestCount[outcome].Add(1)
 	if duration > 0 {
-		m.requestDurationNsec.Add(uint64(duration))
+		m.requestDurationNsec[outcome].Add(uint64(duration))
 	}
 	seconds := duration.Seconds()
 	for i, upperBound := range requestDurationBuckets {
 		if seconds <= upperBound {
-			m.requestDuration[i].Add(1)
+			m.requestDuration[outcome][i].Add(1)
 		}
 	}
 }
@@ -108,21 +118,25 @@ func (m *serverMetrics) serveHTTP(w http.ResponseWriter, _ *http.Request) {
 
 	writeMetricHeader(&out, "routeup_http_requests_total", "Completed public ingress requests by status class.", "counter")
 	classes := [...]string{"1xx", "2xx", "3xx", "4xx", "5xx", "other"}
-	for i, class := range classes {
-		_, _ = fmt.Fprintf(&out, "routeup_http_requests_total{status_class=%s} %d\n", strconv.Quote(class), m.requestsByClass[i].Load())
+	for outcome, outcomeLabel := range requestOutcomeLabels {
+		for classIndex, class := range classes {
+			_, _ = fmt.Fprintf(&out, "routeup_http_requests_total{outcome=%s,status_class=%s} %d\n", strconv.Quote(outcomeLabel), strconv.Quote(class), m.requestsByClass[outcome][classIndex].Load())
+		}
 	}
 
 	writeMetricHeader(&out, "routeup_http_requests_in_flight", "Current public ingress requests in flight.", "gauge")
 	_, _ = fmt.Fprintf(&out, "routeup_http_requests_in_flight %d\n", m.requestsInFlight.Load())
 
 	writeMetricHeader(&out, "routeup_http_request_duration_seconds", "Public ingress request duration.", "histogram")
-	for i, upperBound := range requestDurationBuckets {
-		_, _ = fmt.Fprintf(&out, "routeup_http_request_duration_seconds_bucket{le=%s} %d\n", strconv.Quote(strconv.FormatFloat(upperBound, 'g', -1, 64)), m.requestDuration[i].Load())
+	for outcome, outcomeLabel := range requestOutcomeLabels {
+		for bucketIndex, upperBound := range requestDurationBuckets {
+			_, _ = fmt.Fprintf(&out, "routeup_http_request_duration_seconds_bucket{le=%s,outcome=%s} %d\n", strconv.Quote(strconv.FormatFloat(upperBound, 'g', -1, 64)), strconv.Quote(outcomeLabel), m.requestDuration[outcome][bucketIndex].Load())
+		}
+		count := m.requestCount[outcome].Load()
+		_, _ = fmt.Fprintf(&out, "routeup_http_request_duration_seconds_bucket{le=\"+Inf\",outcome=%s} %d\n", strconv.Quote(outcomeLabel), count)
+		_, _ = fmt.Fprintf(&out, "routeup_http_request_duration_seconds_sum{outcome=%s} %s\n", strconv.Quote(outcomeLabel), strconv.FormatFloat(float64(m.requestDurationNsec[outcome].Load())/float64(time.Second), 'g', -1, 64))
+		_, _ = fmt.Fprintf(&out, "routeup_http_request_duration_seconds_count{outcome=%s} %d\n", strconv.Quote(outcomeLabel), count)
 	}
-	count := m.requestCount.Load()
-	_, _ = fmt.Fprintf(&out, "routeup_http_request_duration_seconds_bucket{le=\"+Inf\"} %d\n", count)
-	_, _ = fmt.Fprintf(&out, "routeup_http_request_duration_seconds_sum %s\n", strconv.FormatFloat(float64(m.requestDurationNsec.Load())/float64(time.Second), 'g', -1, 64))
-	_, _ = fmt.Fprintf(&out, "routeup_http_request_duration_seconds_count %d\n", count)
 
 	writeMetricHeader(&out, "routeup_tunnel_forward_errors_total", "Public requests that failed while forwarding through a tunnel.", "counter")
 	_, _ = fmt.Fprintf(&out, "routeup_tunnel_forward_errors_total %d\n", m.forwardErrors.Load())

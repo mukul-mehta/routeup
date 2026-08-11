@@ -31,6 +31,8 @@ type exposeOpts struct {
 	random  bool
 	server  string
 	token   string
+	json    bool
+	qr      bool
 }
 
 func newExposeCmd() *cobra.Command {
@@ -62,6 +64,9 @@ func newExposeCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&opts.random, "random", false, "use a random route name")
 	cmd.Flags().StringVar(&opts.server, "server", "", "public server URL (or ROUTEUP_SERVER)")
 	cmd.Flags().StringVar(&opts.token, "token", "", "server token (or ROUTEUP_TOKEN)")
+	cmd.Flags().BoolVar(&opts.json, "json", false, "write the ready event as JSON")
+	cmd.Flags().BoolVar(&opts.qr, "qr", false, "print a QR code for the public URL")
+	cmd.MarkFlagsMutuallyExclusive("json", "qr")
 	return cmd
 }
 
@@ -103,12 +108,12 @@ func runExpose(cmd *cobra.Command, args []string, cwd string, opts exposeOpts) e
 		return err
 	}
 
-	return startTunnel(cmd, serverURL, token, routeName, normalizedName, opts.port, targetFlags, discovered.Config, exposePaths)
+	return startTunnel(cmd, serverURL, token, routeName, normalizedName, opts.port, targetFlags, discovered.Config, exposePaths, opts)
 }
 
 // startTunnel ensures the agent is running, sends the expose request, prints
 // the route info, and blocks until Ctrl-C.
-func startTunnel(cmd *cobra.Command, serverURL, token, localRouteName, publicRouteName string, portFlag int, targetFlags []route.Target, file config.Config, exposePaths []string) error {
+func startTunnel(cmd *cobra.Command, serverURL, token, localRouteName, publicRouteName string, portFlag int, targetFlags []route.Target, file config.Config, exposePaths []string, commandOpts exposeOpts) error {
 	sockPath, err := state.AgentSocketPath()
 	if err != nil {
 		return err
@@ -153,14 +158,33 @@ func startTunnel(cmd *cobra.Command, serverURL, token, localRouteName, publicRou
 	defer stopExpose()
 
 	out := cmd.OutOrStdout()
+	publicURL := "https://" + host
+	localRouteURL := ""
 	if hasLocalRoute {
-		printRouteLocal(out, localRouteName, state.TLSPortOrDefault())
+		if n, parseErr := route.Parse(localRouteName); parseErr == nil {
+			localRouteURL = localURL(n.LocalHost(), state.TLSPortOrDefault())
+		}
 	}
-	_, _ = fmt.Fprintf(out, "public: https://%s\n", host)
-	printTargets(out, targets)
-	_, _ = fmt.Fprintf(out, "expose: %s\n", formatExposePaths(exposePaths))
-	_, _ = fmt.Fprintln(out, "")
-	_, _ = fmt.Fprintln(out, "press Ctrl-C to stop")
+	if commandOpts.json {
+		if err := writeRouteReadyEvent(out, routeReadyEvent{
+			Route: localRouteName, LocalURL: localRouteURL, PublicURL: publicURL,
+			ExposurePaths: exposePaths, Targets: targets,
+		}); err != nil {
+			return err
+		}
+	} else {
+		if hasLocalRoute {
+			printRouteLocal(out, localRouteName, state.TLSPortOrDefault())
+		}
+		_, _ = fmt.Fprintf(out, "public: %s\n", publicURL)
+		printTargets(out, targets)
+		_, _ = fmt.Fprintf(out, "expose: %s\n", formatExposePaths(exposePaths))
+		if commandOpts.qr {
+			writeRouteQR(out, publicURL)
+		}
+		_, _ = fmt.Fprintln(out, "")
+		_, _ = fmt.Fprintln(out, "press Ctrl-C to stop")
+	}
 
 	client.Maintain(ctx, agentctl.DesiredState{
 		Exposure: &exposeReq, PublicHost: host,

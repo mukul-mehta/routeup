@@ -41,11 +41,12 @@ build:
 dev *args:
     @go run ./cmd/routeup {{args}}
 
-# Local equivalent of the deterministic CI checks
-ci: test-race lint
+# Fast contributor checks; excludes network-heavy and OS integration tests
+check: test-race lint test-examples
 
-# Local equivalent of the examples workflow
-ci-examples: test-examples
+# Local equivalent of the portable CI checks (Linux/Fedora jobs remain in Actions)
+ci: check test-integration
 
-# Local equivalent of the real-dev-server integration workflow
-ci-integration: test-integration
+# Safe macOS smoke test: isolated HOME, high port, no keychain/LaunchDaemon edits
+smoke-macos: build
+    bash scripts/integration-macos.sh ./bin/routeup

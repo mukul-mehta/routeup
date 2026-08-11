@@ -58,6 +58,17 @@ routeup serve api.myapp --port 8080  # https://api.myapp.localhost
 
 No config file needed for the basic case. Routes are named, stable, and trusted by the system CA.
 
+Open an active route or emit machine-readable/QR output:
+
+```bash
+routeup serve myapp --port 3000 --json
+routeup serve myapp --port 3000 --qr
+```
+
+`--json` writes one ready event after the route is usable. `--qr` prefers the
+public URL when exposure is enabled; a local `.localhost` QR only works on the
+machine running routeup.
+
 ## Runner mode
 
 If your project has a `routeup.json` or a `"routeup"` block in `package.json`,
@@ -101,6 +112,17 @@ changes. Vite and Astro need one line of config — see
 (e.g. running from a directory called `myapp` gives `https://myapp.localhost`
 automatically).
 
+For editor validation and completion, reference the committed JSON Schema from
+`routeup.json`:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/mukul-mehta/routeup/main/routeup.schema.json",
+  "name": "myapp",
+  "port": 3000
+}
+```
+
 ## Expose publicly
 
 ### On demand (standalone)
@@ -111,6 +133,8 @@ While a local route is registered, expose it from a second terminal:
 routeup expose                          # reuses the active route's target
 routeup expose myapp --port 8080        # explicit port
 routeup expose --random                 # random name
+routeup expose --qr                     # public URL plus terminal QR code
+routeup expose --json                   # ready event for scripts/editors
 ```
 
 What you get depends on your token:
@@ -297,6 +321,9 @@ Runnable examples live in [`examples/`](examples/):
 - [docs/MILESTONES.md](docs/MILESTONES.md) — implementation phases
 - [docs/ENGINEERING-STANDARDS.md](docs/ENGINEERING-STANDARDS.md) — code quality rules
 - [docs/OPEN-QUESTIONS.md](docs/OPEN-QUESTIONS.md) — unresolved design questions
+- [docs/RECOVERY.md](docs/RECOVERY.md) — Fly volume backup and server recovery
+- [docs/RELEASING.md](docs/RELEASING.md) — immutable release checklist and verification
+- [routeup.schema.json](routeup.schema.json) — editor schema for `routeup.json`
 - [AGENTS.md](AGENTS.md) — how AI agents work in this repo
 
 ## Inspirations
@@ -332,6 +359,15 @@ lifecycle. Framework-specific command adapters are out of scope.
 - [x] Phase 10 — Request capture & inspect
 
 </details>
+
+Planned post-v1 milestones:
+
+- [ ] Phase 11 — Public server rate limiting
+- [ ] Phase 12 — Public-route protection
+- [ ] Phase 13 — Request replay
+- [ ] Phase 14 — `routeup init`
+- [ ] Phase 15 — Local TUI and web dashboard
+- [ ] Phase 16 — mDNS/LAN mobile mode
 
 ## LLM Usage
 

@@ -54,14 +54,16 @@ func (s *Server) handler() http.Handler {
 func (s *Server) serveIngress(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	observed := &observedResponseWriter{ResponseWriter: w}
+	outcome := requestForwarded
 	s.metrics.requestStarted()
 	defer func() {
 		duration := time.Since(started)
 		status := observed.status()
-		s.metrics.requestCompleted(status, duration)
+		s.metrics.requestCompleted(status, duration, outcome)
 		s.logger.InfoContext(r.Context(), "public request completed",
 			"method", r.Method,
 			"status", status,
+			"outcome", requestOutcomeLabels[outcome],
 			"duration_ms", duration.Milliseconds(),
 			"response_bytes", observed.bytes,
 		)
@@ -73,6 +75,7 @@ func (s *Server) serveIngress(w http.ResponseWriter, r *http.Request) {
 	host := strings.ToLower(stripPort(r.Host))
 	h, ok := s.tunnels.Handler(host)
 	if !ok {
+		outcome = requestNoTunnel
 		http.Error(observed, "routeup: no tunnel is connected for "+host, http.StatusServiceUnavailable)
 		return
 	}

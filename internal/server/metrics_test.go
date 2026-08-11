@@ -14,7 +14,9 @@ func TestServerMetricsPrometheusOutput(t *testing.T) {
 	metrics.claimRejected()
 	metrics.TunnelEstablished()
 	metrics.requestStarted()
-	metrics.requestCompleted(http.StatusServiceUnavailable, 150*time.Millisecond)
+	metrics.requestCompleted(http.StatusServiceUnavailable, 150*time.Millisecond, requestNoTunnel)
+	metrics.requestStarted()
+	metrics.requestCompleted(http.StatusOK, 300*time.Millisecond, requestForwarded)
 	metrics.TunnelForwardError()
 	metrics.holdsReaped(3)
 	metrics.TunnelClosed()
@@ -36,12 +38,13 @@ func TestServerMetricsPrometheusOutput(t *testing.T) {
 		`routeup_tunnel_sessions_total{event="closed"} 1`,
 		`routeup_claims_total{result="accepted"} 1`,
 		`routeup_claims_total{result="rejected"} 1`,
-		`routeup_http_requests_total{status_class="5xx"} 1`,
+		`routeup_http_requests_total{outcome="no_tunnel",status_class="5xx"} 1`,
+		`routeup_http_requests_total{outcome="forwarded",status_class="2xx"} 1`,
 		"routeup_http_requests_in_flight 0",
-		`routeup_http_request_duration_seconds_bucket{le="0.25"} 1`,
-		`routeup_http_request_duration_seconds_bucket{le="+Inf"} 1`,
-		"routeup_http_request_duration_seconds_sum 0.15",
-		"routeup_http_request_duration_seconds_count 1",
+		`routeup_http_request_duration_seconds_bucket{le="0.25",outcome="no_tunnel"} 1`,
+		`routeup_http_request_duration_seconds_bucket{le="+Inf",outcome="forwarded"} 1`,
+		`routeup_http_request_duration_seconds_sum{outcome="no_tunnel"} 0.15`,
+		`routeup_http_request_duration_seconds_count{outcome="forwarded"} 1`,
 		"routeup_tunnel_forward_errors_total 1",
 		"routeup_holds_reaped_total 3",
 	} {

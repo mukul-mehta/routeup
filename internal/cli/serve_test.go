@@ -109,3 +109,69 @@ func TestServeUsesExposureConfig(t *testing.T) {
 		t.Fatal("serve did not honor expose.enabled")
 	}
 }
+
+func TestServeJSONWritesOnlyReadyEvent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeLocalCA(t)
+	cwd := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cwd, "routeup.json"), []byte(`{"name":"myapp","port":8080}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(cwd)
+
+	var statusCalls atomic.Int32
+	maintaining := make(chan struct{}, 1)
+	socketPath := startUnixHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == ipc.PathStatus:
+			_ = json.NewEncoder(w).Encode(ipc.Status{BootID: "boot"})
+			if statusCalls.Add(1) >= 2 {
+				select {
+				case maintaining <- struct{}{}:
+				default:
+				}
+			}
+		case r.Method == http.MethodPost && r.URL.Path == ipc.PathRoutes:
+			var claim ipc.Claim
+			_ = json.NewDecoder(r.Body).Decode(&claim)
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(claim)
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, ipc.PathRoutes+"/"):
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Setenv("ROUTEUP_AGENT_SOCKET", socketPath)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd := newRootCmd()
+	cmd.SetContext(ctx)
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"serve", "--json"})
+	done := make(chan error, 1)
+	go func() { done <- cmd.Execute() }()
+	select {
+	case <-maintaining:
+		cancel()
+	case <-t.Context().Done():
+		cancel()
+		t.Fatal("serve did not enter maintenance")
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	var event routeReadyEvent
+	if err := json.Unmarshal(stdout.Bytes(), &event); err != nil {
+		t.Fatalf("stdout is not pure JSON: %v\n%s", err, stdout.String())
+	}
+	if event.Event != "ready" || event.Route != "myapp" || event.LocalURL != "https://myapp.localhost" {
+		t.Fatalf("event = %#v", event)
+	}
+	if strings.Contains(stdout.String(), "press Ctrl-C") {
+		t.Fatalf("JSON output contains human text: %s", stdout.String())
+	}
+}

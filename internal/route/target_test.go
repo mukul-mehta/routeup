@@ -50,3 +50,9 @@ func TestPathNormalizationRejectsControlCharacters(t *testing.T) {
 		t.Fatalf("expose error = %v, want control-character rejection", err)
 	}
 }
+
+func TestNormalizePathPatternsRejectsInteriorWildcard(t *testing.T) {
+	if _, err := NormalizePathPatterns([]string{"/api/*/private/*"}); err == nil {
+		t.Fatal("interior wildcard accepted")
+	}
+}

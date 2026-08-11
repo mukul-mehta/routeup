@@ -205,9 +205,11 @@ logged. Operators select text or JSON output and the minimum level through
 Operator metrics are disabled by default. Setting `metrics_listen` starts a
 separate plaintext Prometheus endpoint at `/metrics`; deployments must expose it
 only to their metrics scraper, never as public ingress. Metrics use fixed,
-low-cardinality labels for claim outcome, tunnel lifecycle event, and HTTP status
-class. Route names, public hosts, tokens, paths, source addresses, and user
-identifiers are never metric labels. The CLI and local agent do not emit
+low-cardinality labels for claim outcome, tunnel lifecycle event, HTTP status
+class, and request outcome (`forwarded` or `no_tunnel`). Latency histograms are
+split by that outcome so offline-route probes do not skew forwarded-request
+percentiles. Route names, public hosts, tokens, paths, source addresses, and
+user identifiers are never metric labels. The CLI and local agent do not emit
 telemetry, and the server does not push metrics anywhere: an operator must
 explicitly enable and scrape the endpoint.
 

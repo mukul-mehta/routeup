@@ -314,8 +314,8 @@ means for standalone exposure:
 ```
 
 When enabled, runner mode obtains the public route before starting the child so
-it can inject the granted URL into `ROUTEUP_URL`. The config shape and behavior
-above are planned for Phase 8.5 and are not implemented in Phase 8.
+it can inject the granted URL into `ROUTEUP_URL`. Phase 8.5 implements this
+config shape and owns the route, tunnel, and child lifecycle together.
 
 ## Architecture Decision
 

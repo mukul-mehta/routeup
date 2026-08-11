@@ -26,7 +26,7 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
-      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - uses: superfly/flyctl-actions/setup-flyctl@v1
 
       - name: verify deploy secrets
         run: ': "${FLY_API_TOKEN:?Set the FLY_API_TOKEN repository secret}"'

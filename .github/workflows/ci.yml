@@ -65,6 +65,25 @@ jobs:
       - name: validate examples
         run: go test ./examples/...
 
+  validation:
+    name: repository configuration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: validate modules, Actions, and JSON artifacts
+        run: |
+          go mod tidy -diff
+          go mod verify
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          python3 -m json.tool deploy/grafana-dashboard.json >/dev/null
+          python3 -m json.tool routeup.schema.json >/dev/null
+
   dev-server-integration:
     name: integration (Vite/Next HMR)
     runs-on: ubuntu-latest
@@ -142,3 +161,21 @@ jobs:
       # limitation surfaces on its own.
       - name: integration
         run: sudo -u routeup-ci -H bash scripts/integration-linux.sh ./bin/routeup ${{ matrix.port }}
+
+  integration-macos:
+    name: integration (macOS smoke)
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: build
+        run: go build -buildvcs=false -o bin/routeup ./cmd/routeup
+
+      - name: smoke
+        run: bash scripts/integration-macos.sh ./bin/routeup

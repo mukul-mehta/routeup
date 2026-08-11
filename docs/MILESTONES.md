@@ -627,6 +627,120 @@ data remains only in the agent's 1024-entry in-memory ring and is limited to 256
 KiB per direction including headers and body. `routeup inspect` escapes retained
 bytes by default.
 
+## Phase 11: Public Server Rate Limiting
+
+Goal: protect hosted and anonymous ingress from abuse while preserving a simple
+self-hosted mode.
+
+Build:
+
+```txt
+configurable in-memory token-bucket limits and bursts
+claim limits by authenticated token identity
+global anonymous/public-namespace claim limits
+request limits by active public host
+bounded idle-key eviction
+429 responses with Retry-After
+low-cardinality rejection metrics
+zero values disable each limit for self-hosted operators
+```
+
+Per-source-IP fairness requires trustworthy client identity through Fly's raw
+TCP path and is not part of the first slice. Distributed persistence, billing
+quotas, and WAF behavior are out of scope.
+
+## Phase 12: Public Route Protection
+
+Goal: add optional authentication to public preview routes.
+
+Build:
+
+```txt
+per-exposure HTTP Basic Auth
+interactive/environment-based secret input, never plaintext project config
+constant-time credential verification
+401 challenge before the request reaches the local app
+protection state retained by exposure reconciliation
+no credentials in logs, status, metrics, SQLite, or agent responses
+```
+
+OAuth, SSO, accounts, teams, and path-level ACLs are out of scope.
+
+## Phase 13: Request Replay
+
+Goal: replay one captured request against its currently active local route.
+
+Build:
+
+```txt
+routeup replay <request-id>
+agent replay endpoint backed by retained capture
+preserve method, path/query, body, and safe end-to-end headers
+omit hop-by-hop and sensitive headers by default
+require complete capture and an active route
+report replay status and new request ID
+```
+
+Scheduled, bulk, edited, and public-endpoint replay are out of scope.
+
+## Phase 14: Project Initialization
+
+Goal: safely create a minimal valid project configuration.
+
+Build:
+
+```txt
+routeup init with scriptable flags and TTY prompts
+routeup.json by default; package.json block only when explicitly selected
+name, port/targets, command, and package script inputs
+existing loader validation and atomic writes
+refuse to overwrite either existing config source
+```
+
+Framework detection, command rewriting, adapters, and monorepo walk-up are out
+of scope.
+
+## Phase 15: Local Dashboard
+
+Goal: provide one interactive local observability surface.
+
+Build:
+
+```txt
+routeup dashboard opens a full-screen TUI by default
+routeup dashboard --web opens an embedded browser dashboard
+active routes, exposures, tunnel state, live logs, and inspect details
+shared agent client/model between TUI and web views
+read-only first slice; replay and mutations arrive with their owning milestones
+embedded assets with no CDN or telemetry
+```
+
+The web dashboard is loopback-only at an internal route such as
+`https://dashboard.routeup.localhost`, with strict Host/Origin checks and a
+random session token. It must never be registered as a user route or exposed
+publicly. Accounts, server administration, persistence, and hosted dashboards
+are out of scope.
+
+## Phase 16: mDNS/LAN Mobile Mode
+
+Goal: explicitly expose one active route to devices on the same LAN without the
+public server.
+
+Build:
+
+```txt
+routeup mobile <route> as a foreground opt-in session
+collision-checked <route>.local mDNS advertisement
+listener pinned to one selected private interface and high port
+exact .local leaf certificate from the existing local CA
+URL, QR code, CA fingerprint, and mobile trust instructions
+distinct lan request-log source
+advertisement and listener cleanup on exit
+```
+
+Android zero-configuration, permanent LAN exposure, internet routing, and LAN
+port 443 are out of scope.
+
 ## Milestone Discipline
 
 Do not skip from Phase 2 to TLS or tunnels. The hard parts should be isolated:
@@ -641,7 +755,7 @@ logs before request capture and inspect
 
 Process Runner sits late on purpose: local TLS, tunnels, streaming, and path
 routing already work before process orchestration is added. Phase 8 owns the
-local process lifecycle; Phase 8.5 composes it with public exposure and narrowly
-supported framework adapters.
+local process lifecycle; Phase 8.5 composes it with public exposure. Framework
+adapters remain out of scope.
 
 This keeps the project understandable and the implementation tractable, one usable slice at a time.

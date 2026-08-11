@@ -173,7 +173,7 @@ func normalizePathPattern(pattern string) (string, error) {
 	if strings.ContainsAny(pattern, "?#") {
 		return "", fmt.Errorf("expose path %q must not contain ? or #", pattern)
 	}
-	if strings.Contains(pattern, "*") && !strings.HasSuffix(pattern, "/*") {
+	if strings.Contains(pattern, "*") && (!strings.HasSuffix(pattern, "/*") || strings.Count(pattern, "*") != 1) {
 		return "", fmt.Errorf("expose path %q may only use * as a trailing /*", pattern)
 	}
 	if strings.HasSuffix(pattern, "/*") {

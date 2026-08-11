@@ -27,6 +27,8 @@ type serveOpts struct {
 	random  bool
 	server  string
 	token   string
+	json    bool
+	qr      bool
 }
 
 func newServeCmd() *cobra.Command {
@@ -68,6 +70,9 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&opts.random, "random", false, "use a random route name")
 	cmd.Flags().StringVar(&opts.server, "server", "", "with --expose, public server URL (or ROUTEUP_SERVER, or saved by setup)")
 	cmd.Flags().StringVar(&opts.token, "token", "", "with --expose, server token (or ROUTEUP_TOKEN, or saved by setup)")
+	cmd.Flags().BoolVar(&opts.json, "json", false, "write the ready event as JSON")
+	cmd.Flags().BoolVar(&opts.qr, "qr", false, "print a QR code for the route URL")
+	cmd.MarkFlagsMutuallyExclusive("json", "qr")
 
 	return cmd
 }
@@ -130,7 +135,7 @@ func runServe(cmd *cobra.Command, args []string, cwd string, opts serveOpts) err
 		return fmt.Errorf("start agent: %w", err)
 	}
 	if ensured == agentctl.EnsureRestarted {
-		_, _ = fmt.Fprintln(out, "note: restarted the local agent to pick up a new build")
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "note: restarted the local agent to pick up a new build")
 	}
 
 	claim := ipc.Claim{
@@ -174,15 +179,36 @@ func runServe(cmd *cobra.Command, args []string, cwd string, opts serveOpts) err
 		exposeReq = &request
 	}
 
-	_, _ = fmt.Fprintf(out, "route: %s\n", resolved.Route)
-	_, _ = fmt.Fprintf(out, "local: %s\n", localURL(resolved.Route.LocalHost(), tlsPort))
+	localRouteURL := localURL(resolved.Route.LocalHost(), tlsPort)
+	publicURL := ""
 	if publicHost != "" {
-		_, _ = fmt.Fprintf(out, "public: https://%s\n", publicHost)
-		_, _ = fmt.Fprintf(out, "expose: %s\n", formatExposePaths(exposePaths))
+		publicURL = "https://" + publicHost
 	}
-	printTargets(out, resolved.Targets)
-	_, _ = fmt.Fprintln(out, "")
-	_, _ = fmt.Fprintln(out, "press Ctrl-C to stop")
+	if opts.json {
+		if err := writeRouteReadyEvent(out, routeReadyEvent{
+			Route: resolved.Route.String(), LocalURL: localRouteURL, PublicURL: publicURL,
+			ExposurePaths: exposePaths, Targets: resolved.Targets,
+		}); err != nil {
+			return err
+		}
+	} else {
+		_, _ = fmt.Fprintf(out, "route: %s\n", resolved.Route)
+		_, _ = fmt.Fprintf(out, "local: %s\n", localRouteURL)
+		if publicHost != "" {
+			_, _ = fmt.Fprintf(out, "public: %s\n", publicURL)
+			_, _ = fmt.Fprintf(out, "expose: %s\n", formatExposePaths(exposePaths))
+		}
+		printTargets(out, resolved.Targets)
+		if opts.qr {
+			qrURL := localRouteURL
+			if publicURL != "" {
+				qrURL = publicURL
+			}
+			writeRouteQR(out, qrURL)
+		}
+		_, _ = fmt.Fprintln(out, "")
+		_, _ = fmt.Fprintln(out, "press Ctrl-C to stop")
+	}
 
 	client.Maintain(ctx, agentctl.DesiredState{
 		Claim: &claim, Exposure: exposeReq, PublicHost: publicHost,

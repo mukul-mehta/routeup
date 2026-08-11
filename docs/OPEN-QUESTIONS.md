@@ -13,42 +13,16 @@ This file tracks unresolved product, architecture, and engineering questions for
 ## Index
 
 ```txt
-OQ-011  mDNS for same-LAN device testing
-OQ-013  Public server rate limiting
 OQ-016  Dual-stack loopback for the agent listener
 OQ-017  Release artifact signing / provenance
+OQ-018  Alerts and notifications
 ```
 
-Resolved and removed: OQ-002, OQ-003, OQ-009, OQ-010, OQ-012, OQ-014, and
-OQ-015. Their decisions are recorded in the architecture, milestones, and
-walkthrough docs.
+Resolved and removed: OQ-002, OQ-003, OQ-009, OQ-010, OQ-011, OQ-012, OQ-013,
+OQ-014, and OQ-015. Their decisions are recorded in the architecture,
+milestones, and walkthrough docs.
 
 ---
-
-## OQ-011: mDNS for same-LAN device testing
-
-Status: deferred-to-post-v1
-Linked milestone: post-v1
-
-Mobile testing on the same LAN currently routes through the public server. mDNS (`charpai.local`) could short-circuit that for iOS/macOS clients. Android needs a third-party resolver. Revisit only if real latency complaints appear.
-
-Library options when revisited: `hashicorp/mdns` or `grandcat/zeroconf`.
-
-## OQ-013: Public server rate limiting
-
-Status: open
-Linked milestone: Phase 5
-
-Rate-limit per token, per route, per source IP?
-
-Defaults to consider:
-
-- Per token: claim creation rate.
-- Per route: request rate, per-second cap.
-- Per source IP: connection rate.
-- Public-namespace claims: per-IP rate limit on claim creation specifically. With no token to bind to, source IP is the only handle for abuse prevention. Important when the operator enables the public namespace on a hosted server.
-
-A self-hosted operator must be able to disable rate limiting entirely.
 
 ## OQ-016: Dual-stack loopback for the agent listener
 
@@ -79,3 +53,14 @@ Options:
 Why A for v1: every verify-at-the-terminal scheme (`gh`, `minisign` CLI, `cosign`) is opt-in — it imposes nothing on users but also protects no one who does not run it. The only friction-free protection is B, and its value is capped because the key would sit in CI alongside what it signs, while the first install is already HTTPS-trusted. The key-management burden is not justified at v1.
 
 Revisit when there is a concrete trigger: distro packagers or a security review want signed/provenanced releases, or the auto-update path becomes a higher-value target. At that point prefer B (minisign in `update`, offline-generated key) for friction-free user protection, optionally plus C for auditable provenance.
+
+## OQ-018: Alerts and notifications
+
+Status: open
+Linked milestone: post-v1/unassigned
+
+Which Grafana alerts and notification channels should be shipped as supported
+operator defaults? Decide trigger thresholds, minimum traffic requirements,
+no-data behavior, deduplication, secret ownership, and email/Slack/PagerDuty
+channels in a separate planning slice. Keep alerts outside the local dashboard;
+it observes the developer's agent, not hosted-server operations.
