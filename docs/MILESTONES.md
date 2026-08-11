@@ -39,7 +39,7 @@ README is short and links to the docs.
 No Go source exists yet.
 ```
 
-Do not build yet:
+Out of scope:
 
 ```txt
 go.mod
@@ -493,21 +493,18 @@ framework command adaptation (Phase 8.5)
 request inspect
 ```
 
-## Phase 8.5: Runner Exposure And Framework Adapters
+## Phase 8.5: Runner Exposure
 
-Goal: make runner mode optionally own public exposure and support unchanged
-commands for explicitly tested frameworks that do not honor `PORT` or `HOST`.
+Goal: make runner mode optionally own public exposure.
 
-> Implementation note: partially complete. `expose.enabled` is implemented:
+> Implementation note: complete. `expose.enabled` is implemented:
 > `routeup serve` honors it without requiring `--expose`; bare `routeup`
-> contacts the configured server and claims
-> a public route before child launch, injects the granted URL into `ROUTEUP_URL`
-> (while `ROUTEUP_LOCAL_URL` stays local), and releases the tunnel alongside
-> the route and child group on exit. The Vite framework adapter and
-> runner-driven integration tests for the exposed lifecycle are deferred.
+> contacts the configured server and claims a public route before child launch,
+> injects the granted URL into `ROUTEUP_URL` (while `ROUTEUP_LOCAL_URL` stays
+> local), and releases the tunnel alongside the route and child group on exit.
 > Foreground desired-state reconciliation restores the local claim and public
-> exposure after agent restarts or terminal tunnel failures; the full
-> runner-driven loopback integration test remains deferred.
+> exposure after agent restarts or terminal tunnel failures. Framework-specific
+> command adapters are intentionally out of scope.
 
 Build:
 
@@ -518,25 +515,16 @@ public route granted before child launch
 ROUTEUP_LOCAL_URL remains local
 ROUTEUP_URL contains the granted public URL when exposure is enabled
 one runner process owns local registration, public exposure, and child cleanup
-narrow adapter for an unchanged bare vite command
-documented behavior for explicit or conflicting framework flags
-runner-driven integration coverage for local and exposed lifecycles
 ```
 
-Example package config:
+Example config:
 
 ```json
 {
-  "scripts": {
-    "dev": "routeup",
-    "dev:app": "vite"
-  },
-  "routeup": {
-    "name": "myapp",
-    "script": "dev:app",
-    "expose": {
-      "enabled": true
-    }
+  "name": "myapp",
+  "command": "go run ./cmd/dev",
+  "expose": {
+    "enabled": true
   }
 }
 ```
@@ -544,24 +532,20 @@ Example package config:
 Acceptance:
 
 ```bash
-pnpm dev
+routeup
 ```
 
-An unchanged `vite` command should bind the routeup-assigned loopback address
-and port. With exposure disabled, both route URL variables remain local and no
-server is contacted. With `expose.enabled`, the runner should obtain a public
-route before child launch, inject that route into `ROUTEUP_URL`, serve both URLs,
-and release the tunnel, route, and complete child process group together on
-exit. Automated tests may use a loopback public server and must not require
-public DNS, production certificates, sudo, or a live VPS.
+With exposure disabled, both route URL variables remain local and no server is
+contacted. With `expose.enabled`, the runner obtains a public route before child
+launch, injects that route into `ROUTEUP_URL`, serves both URLs, and releases the
+tunnel, route, and complete child process group together on exit.
 
 Do not build yet:
 
 ```txt
 generic shell-command rewriting or an adapter plugin system
 package-manager lifecycle hook emulation
-untested adapters for additional frameworks
-request inspect
+framework-specific command adapters
 ```
 
 ## Phase 9: Route Logs

@@ -195,6 +195,22 @@ namespace (`try.routeup.dev`). Self-hosted operators set their own suffix and
 DNS provider, and opt into a public namespace via server config; the server code
 does not hardcode either.
 
+The server writes structured lifecycle and public-ingress completion logs using
+`log/slog`. Info-level request logs contain only method, status, duration, and
+response byte count; the public host is available only at debug level. Request
+paths, queries, headers, bodies, tokens, cookies, and source addresses are not
+logged. Operators select text or JSON output and the minimum level through
+`log_format` and `log_level`.
+
+Operator metrics are disabled by default. Setting `metrics_listen` starts a
+separate plaintext Prometheus endpoint at `/metrics`; deployments must expose it
+only to their metrics scraper, never as public ingress. Metrics use fixed,
+low-cardinality labels for claim outcome, tunnel lifecycle event, and HTTP status
+class. Route names, public hosts, tokens, paths, source addresses, and user
+identifiers are never metric labels. The CLI and local agent do not emit
+telemetry, and the server does not push metrics anywhere: an operator must
+explicitly enable and scrape the endpoint.
+
 The public server should not be a SaaS control plane in v1. It is a self-hostable ingress server.
 
 ### Tunnel Client
@@ -557,7 +573,7 @@ public exposure only and defaults to all paths.
 without requiring `--expose`. Bare `routeup` obtains the public route before
 child launch, injects the granted URL into `ROUTEUP_URL` (while
 `ROUTEUP_LOCAL_URL` stays local), and releases the tunnel alongside the route
-and child group on exit. The Vite framework adapter from Phase 8.5 is still deferred.
+and child group on exit. Framework-specific command adapters are out of scope.
 An `expose` object that only contains `paths` constrains standalone exposure and
 does not trigger runner-mode exposure on its own.
 

@@ -3,10 +3,12 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/mukul-mehta/routeup/internal/tunnel"
@@ -22,6 +24,7 @@ type Server struct {
 	authorizer *Authorizer
 	tunnels    *tunnel.TunnelRegistry
 	cm         certManager
+	metrics    *serverMetrics
 }
 
 // New validates cfg and returns a Server ready to Run. The store is opened by
@@ -33,7 +36,7 @@ func New(cfg ServerConfig, logger *slog.Logger) (*Server, error) {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
-	return &Server{cfg: cfg, logger: logger}, nil
+	return &Server{cfg: cfg, logger: logger, metrics: newServerMetrics()}, nil
 }
 
 // attach wires the store, authorizer, route broker, and tunnel registry onto
@@ -46,8 +49,9 @@ func (s *Server) attach(store *Store) {
 		authorizer:      s.authorizer,
 		store:           store,
 		ensureNamespace: s.ensureNamespaceCert,
+		metrics:         s.metrics,
 	}
-	s.tunnels = tunnel.NewTunnelRegistry(broker, s.logger)
+	s.tunnels = tunnel.NewTunnelRegistry(broker, s.logger, s.metrics)
 }
 
 // ensureNamespaceCert asks the cert manager to manage a wildcard for base. It
@@ -72,6 +76,7 @@ func (s *Server) Run(ctx context.Context) error {
 	if n, err := store.PurgeEphemeralHolds(ctx); err != nil {
 		return err
 	} else if n > 0 {
+		s.metrics.holdsReaped(n)
 		s.logger.Info("purged ephemeral holds at startup", "count", n)
 	}
 
@@ -106,8 +111,15 @@ func (s *Server) Run(ctx context.Context) error {
 		s.runCertPrewarm(reapCtx)
 	}()
 
-	errCh := make(chan error, 1)
+	serverCount := 1
+	if s.cfg.MetricsListen != "" {
+		serverCount++
+	}
+	errCh := make(chan error, serverCount)
+	var serveWG sync.WaitGroup
+	serveWG.Add(1)
 	go func() {
+		defer serveWG.Done()
 		s.logger.Info("server listening",
 			"addr", s.cfg.Listen, "domain", s.cfg.Domain,
 			"public_namespace", s.cfg.PublicNamespace, "tls_mode", s.cfg.TLSMode)
@@ -121,6 +133,27 @@ func (s *Server) Run(ctx context.Context) error {
 		}
 		errCh <- nil
 	}()
+
+	var metricsSrv *http.Server
+	if s.cfg.MetricsListen != "" {
+		metricsSrv = &http.Server{
+			Addr:              s.cfg.MetricsListen,
+			Handler:           s.metrics.handler(),
+			ReadHeaderTimeout: 5 * time.Second,
+			BaseContext:       func(_ net.Listener) context.Context { return ctx },
+		}
+		serveWG.Add(1)
+		go func() {
+			defer serveWG.Done()
+			s.logger.Info("metrics server listening", "addr", s.cfg.MetricsListen)
+			err := metricsSrv.ListenAndServe()
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				errCh <- fmt.Errorf("metrics listener: %w", err)
+				return
+			}
+			errCh <- nil
+		}()
+	}
 
 	var fatal error
 	select {
@@ -136,6 +169,10 @@ func (s *Server) Run(ctx context.Context) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutdownCtx)
+	if metricsSrv != nil {
+		_ = metricsSrv.Shutdown(shutdownCtx)
+	}
+	serveWG.Wait()
 	cancelReap()
 	<-reapDone
 	<-prewarmDone

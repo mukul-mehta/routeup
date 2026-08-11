@@ -14,14 +14,14 @@ This file tracks unresolved product, architecture, and engineering questions for
 
 ```txt
 OQ-011  mDNS for same-LAN device testing
-OQ-012  Server observability and metrics
 OQ-013  Public server rate limiting
 OQ-016  Dual-stack loopback for the agent listener
 OQ-017  Release artifact signing / provenance
 ```
 
-Resolved and removed: OQ-002, OQ-003, OQ-009, OQ-010, OQ-014, and OQ-015. Their
-decisions are recorded in the architecture, milestones, and walkthrough docs.
+Resolved and removed: OQ-002, OQ-003, OQ-009, OQ-010, OQ-012, OQ-014, and
+OQ-015. Their decisions are recorded in the architecture, milestones, and
+walkthrough docs.
 
 ---
 
@@ -33,19 +33,6 @@ Linked milestone: post-v1
 Mobile testing on the same LAN currently routes through the public server. mDNS (`charpai.local`) could short-circuit that for iOS/macOS clients. Android needs a third-party resolver. Revisit only if real latency complaints appear.
 
 Library options when revisited: `hashicorp/mdns` or `grandcat/zeroconf`.
-
-## OQ-012: Server observability and metrics
-
-Status: open
-Linked milestone: Phase 5+
-
-What does the public server expose for operational visibility?
-
-Options:
-
-- `/metrics` Prometheus endpoint with route counts, tunnel counts, request totals.
-- Structured `slog` logs with request ids only.
-- Nothing for v1; operator tails logs.
 
 ## OQ-013: Public server rate limiting
 

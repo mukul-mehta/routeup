@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/mukul-mehta/routeup/internal/tunnel"
 )
@@ -51,19 +52,35 @@ func (s *Server) handler() http.Handler {
 // header hygiene, body streaming, and its own 502 on a dead tunnel; a Host with
 // no live tunnel is a 503 here.
 func (s *Server) serveIngress(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
+	observed := &observedResponseWriter{ResponseWriter: w}
+	s.metrics.requestStarted()
+	defer func() {
+		duration := time.Since(started)
+		status := observed.status()
+		s.metrics.requestCompleted(status, duration)
+		s.logger.InfoContext(r.Context(), "public request completed",
+			"method", r.Method,
+			"status", status,
+			"duration_ms", duration.Milliseconds(),
+			"response_bytes", observed.bytes,
+		)
+		s.logger.DebugContext(r.Context(), "public request route", "host", strings.ToLower(stripPort(r.Host)))
+	}()
+
 	// DNS hostnames are case-insensitive, while tunnel registrations use the
 	// canonical lowercase form returned by the authorizer.
 	host := strings.ToLower(stripPort(r.Host))
 	h, ok := s.tunnels.Handler(host)
 	if !ok {
-		http.Error(w, "routeup: no tunnel is connected for "+host, http.StatusServiceUnavailable)
+		http.Error(observed, "routeup: no tunnel is connected for "+host, http.StatusServiceUnavailable)
 		return
 	}
 	// h is the per-session reverse proxy (newSessionProxy). ServeHTTP runs it:
 	// its http.Transport dials via session.Open() — a fresh yamux stream — and
 	// net/http writes THIS request onto that stream, then reads the response back
 	// over it. So the request hits the wire here, inside ServeHTTP.
-	h.ServeHTTP(w, r)
+	h.ServeHTTP(observed, r)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {

@@ -65,6 +65,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -129,7 +130,7 @@ func (k *fakeBroker) wasReleased(host string) bool {
 
 func TestTunnelRegistryOldReleaseDoesNotRemoveReplacement(t *testing.T) {
 	broker := newFakeBroker()
-	registry := NewTunnelRegistry(broker, nil)
+	registry := NewTunnelRegistry(broker, nil, nil)
 	host := "api.alice.routeup.dev"
 	old := &tunnelRoute{handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})}
 	replacement := &tunnelRoute{handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})}
@@ -184,7 +185,7 @@ func TestTunnel_EndToEnd(t *testing.T) {
 	defer backend.Close()
 	target, _ := url.Parse(backend.URL)
 
-	reg := NewTunnelRegistry(newFakeBroker(), nil)
+	reg := NewTunnelRegistry(newFakeBroker(), nil, nil)
 	ts := httptest.NewServer(reg.AcceptHandler())
 	defer ts.Close()
 
@@ -232,7 +233,7 @@ func TestTunnel_EndToEnd(t *testing.T) {
 }
 
 func TestTunnel_NoSession(t *testing.T) {
-	reg := NewTunnelRegistry(newFakeBroker(), nil)
+	reg := NewTunnelRegistry(newFakeBroker(), nil, nil)
 	if _, ok := reg.Handler("nobody.routeup.dev"); ok {
 		t.Errorf("expected no handler for an unconnected host")
 	}
@@ -241,7 +242,8 @@ func TestTunnel_NoSession(t *testing.T) {
 func TestTunnel_ClaimRejected(t *testing.T) {
 	broker := newFakeBroker()
 	broker.mockFailToken = "invalid_token"
-	reg := NewTunnelRegistry(broker, nil)
+	var logOutput bytes.Buffer
+	reg := NewTunnelRegistry(broker, slog.New(slog.NewJSONHandler(&logOutput, nil)), nil)
 	ts := httptest.NewServer(reg.AcceptHandler())
 	defer ts.Close()
 
@@ -259,11 +261,17 @@ func TestTunnel_ClaimRejected(t *testing.T) {
 	if !strings.Contains(err.Error(), "invalid token") {
 		t.Errorf("err = %v", err)
 	}
+	if !strings.Contains(logOutput.String(), `"msg":"tunnel claim rejected"`) || !strings.Contains(logOutput.String(), `"status":401`) {
+		t.Fatalf("claim rejection log = %s", logOutput.String())
+	}
+	if strings.Contains(logOutput.String(), broker.mockFailToken) || strings.Contains(logOutput.String(), `"route"`) {
+		t.Fatalf("claim rejection info log leaked identity: %s", logOutput.String())
+	}
 }
 
 func TestTunnel_ReleaseOnDisconnect(t *testing.T) {
 	broker := newFakeBroker()
-	reg := NewTunnelRegistry(broker, nil)
+	reg := NewTunnelRegistry(broker, nil, nil)
 	ts := httptest.NewServer(reg.AcceptHandler())
 	defer ts.Close()
 
@@ -428,7 +436,7 @@ func TestTunnel_SlowFirstByteStillCompletes(t *testing.T) {
 func startPublicTunnel(t *testing.T, backend http.Handler) (publicURL string, host string, cleanup func()) {
 	t.Helper()
 
-	reg := NewTunnelRegistry(newFakeBroker(), nil)
+	reg := NewTunnelRegistry(newFakeBroker(), nil, nil)
 	tunnelServer := httptest.NewServer(reg.AcceptHandler())
 
 	grantedCh := make(chan string, 1)

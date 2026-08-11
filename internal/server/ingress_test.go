@@ -112,6 +112,9 @@ func TestIngress_EndToEnd(t *testing.T) {
 	if host != "myapp.alice.routeup.dev" {
 		t.Fatalf("host = %q", host)
 	}
+	if srv.metrics.activeTunnels.Load() != 1 || srv.metrics.claimsAccepted.Load() != 1 {
+		t.Fatalf("tunnel metrics active/accepted = %d/%d", srv.metrics.activeTunnels.Load(), srv.metrics.claimsAccepted.Load())
+	}
 
 	// Public request: connect to the test server but send the public Host.
 	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/hello", nil)
@@ -130,6 +133,14 @@ func TestIngress_EndToEnd(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "path=/hello") {
 		t.Errorf("path not forwarded: %q", body)
+	}
+	cancel()
+	deadline := time.Now().Add(2 * time.Second)
+	for srv.metrics.activeTunnels.Load() != 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if srv.metrics.activeTunnels.Load() != 0 || srv.metrics.tunnelClosed.Load() != 1 {
+		t.Fatalf("tunnel metrics active/closed = %d/%d", srv.metrics.activeTunnels.Load(), srv.metrics.tunnelClosed.Load())
 	}
 }
 

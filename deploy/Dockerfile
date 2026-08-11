@@ -22,6 +22,6 @@ FROM alpine:3.21
 RUN apk add --no-cache ca-certificates
 COPY --from=build /routeup /usr/local/bin/routeup
 COPY deploy/routeup-server.json /etc/routeup/server.json
-EXPOSE 8443
+EXPOSE 8443 9091
 ENTRYPOINT ["/usr/local/bin/routeup"]
 CMD ["server", "--config", "/etc/routeup/server.json"]

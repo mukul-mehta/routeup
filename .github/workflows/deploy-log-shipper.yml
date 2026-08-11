@@ -1,0 +1,37 @@
+name: deploy log shipper
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - deploy/log-shipper/**
+      - .github/workflows/deploy-log-shipper.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: deploy log shipper (fly)
+    runs-on: ubuntu-latest
+    concurrency:
+      group: fly-log-shipper-deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: validate Fly configuration
+        run: flyctl config validate -c deploy/log-shipper/fly.toml
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_LOG_SHIPPER_API_TOKEN }}
+
+      - name: deploy Fly log shipper
+        run: >-
+          flyctl deploy --remote-only --no-public-ips
+          -c deploy/log-shipper/fly.toml
+          --file-local /etc/vector/sinks/loki.toml=deploy/log-shipper/loki.toml
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_LOG_SHIPPER_API_TOKEN }}

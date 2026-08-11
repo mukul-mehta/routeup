@@ -17,6 +17,7 @@ type routeBroker struct {
 	authorizer      *Authorizer
 	store           *Store
 	ensureNamespace func(ctx context.Context, base string)
+	metrics         *serverMetrics
 }
 
 // Hold authorizes spec for token, persists the hold, and ensures a cert for its
@@ -27,6 +28,7 @@ func (k *routeBroker) Hold(ctx context.Context, token string, spec tunnel.ClaimS
 		Route:       spec.Route,
 	})
 	if err != nil {
+		k.metrics.claimRejected()
 		var ae *AuthzError
 		if errors.As(err, &ae) {
 			return tunnel.RouteLease{}, &codedError{msg: ae.Reason, code: ae.Status}
@@ -36,6 +38,7 @@ func (k *routeBroker) Hold(ctx context.Context, token string, spec tunnel.ClaimS
 
 	hold, err := k.store.HoldRoute(ctx, decision.HoldRequest())
 	if err != nil {
+		k.metrics.claimRejected()
 		if errors.Is(err, ErrRouteConflict) {
 			return tunnel.RouteLease{}, &codedError{msg: "route already claimed", code: http.StatusConflict}
 		}
@@ -47,6 +50,7 @@ func (k *routeBroker) Hold(ctx context.Context, token string, spec tunnel.ClaimS
 	if k.ensureNamespace != nil {
 		k.ensureNamespace(ctx, decision.Base)
 	}
+	k.metrics.claimAccepted()
 	return tunnel.RouteLease{Host: decision.Host, Generation: hold.HeldAt.UnixNano()}, nil
 }
 

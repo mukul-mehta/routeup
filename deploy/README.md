@@ -70,6 +70,9 @@ fly logs -a routeup-server
 
 In the logs, watch for `obtaining startup wildcard certificates` followed by no
 error. If DNS-01 fails, it's almost always the token scope or the wrong zone.
+The deployment config uses `log_format: "json"`, so lifecycle, tunnel claims,
+and completed public requests are emitted as structured JSON to Fly's standard
+log stream. `fly logs` displays the same stream.
 
 ## 6. Verify staging
 
@@ -131,8 +134,10 @@ routeup expose cool --port 8080 --server https://edge.routeup.dev
 
 After this one-time bring-up, you don't run `fly deploy` by hand: every push to
 `main` deploys the server automatically (the `deploy` job in
-`.github/workflows/ci.yml`), once `test` and `lint` pass. The CLI is separate —
-it releases from `v*` tags via goreleaser, on its own cadence.
+`.github/workflows/ci.yml`), once `test` and `lint` pass. Changes under
+`deploy/log-shipper/` deploy the log shipper through
+`.github/workflows/deploy-log-shipper.yml`. The CLI is separate — it releases
+from `v*` tags via goreleaser, on its own cadence.
 
 Enable it once by giving Actions a scoped deploy token:
 
@@ -145,6 +150,8 @@ gh secret set FLY_API_TOKEN                     # paste it when prompted
 The job runs `flyctl deploy --remote-only -c deploy/fly.toml` (builds on Fly's
 remote builders, no Docker on the runner) and serializes deploys
 (`concurrency: fly-deploy`) because the server is a single stateful instance.
+The log-shipper workflow uses its own app-scoped `FLY_LOG_SHIPPER_API_TOKEN`,
+configured in the logging section below.
 
 ## Operations
 
@@ -154,6 +161,133 @@ fly scale memory 512 -a routeup-server      # more RAM (also bump GOMEMLIMIT in 
 fly scale vm shared-cpu-2x -a routeup-server# more CPU
 fly deploy -c deploy/fly.toml               # redeploy after editing the config or code
 fly ssh console -a routeup-server           # shell on the box (token admin, /data inspection)
+```
+
+Public-request info logs include method, status, duration, and response bytes.
+Route identity is available only at debug level. Logs always omit paths,
+queries, headers, bodies, tokens, cookies, and source addresses. Set
+`log_level` to `debug`, `info`, `warn`, or `error` and `log_format` to `text` or
+`json` in `deploy/routeup-server.json`.
+
+### Metrics and Grafana
+
+The deployment enables Routeup's Prometheus listener on internal port 9091.
+Fly's `[metrics]` configuration scrapes `/metrics` every 15 seconds and stores
+the samples in Fly's managed Prometheus-compatible VictoriaMetrics service.
+Port 9091 is intentionally not listed under `[[services]]`, so it is not public.
+
+Routeup does not push metrics to Grafana. Grafana queries Fly's metrics store.
+To connect an existing Grafana instance, first find the Fly organization slug
+and create a read-only token:
+
+```bash
+fly orgs list
+fly tokens create readonly
+```
+
+Add a Prometheus datasource in Grafana with:
+
+```txt
+URL: https://api.fly.io/prometheus/<org-slug>/
+HTTP header: Authorization
+Header value: FlyV1 <read-only-token>
+```
+
+The custom metrics are named `routeup_*` and cover active tunnels, tunnel
+lifecycle events, claim outcomes, requests by status class, in-flight requests,
+request duration, forwarding errors, and reaped holds. They contain no route,
+public-host, token, path, source-IP, or user labels. Fly retains metrics for
+roughly 15 days; longer retention requires federating or remote-writing into
+another Prometheus-compatible store.
+
+An importable dashboard is included at `deploy/grafana-dashboard.json`. In
+Grafana, open **Dashboards → New → Import**, upload that file, and select the Fly
+Prometheus datasource when prompted. It includes active tunnels, request rate,
+5xx percentage, latency percentiles, claim outcomes, tunnel lifecycle events,
+forwarding errors, and reaped holds.
+
+### Logs in Grafana
+
+Grafana visualizes logs but does not store them. Grafana Cloud Logs provides the
+Loki-compatible store; Fly's log shipper forwards the Fly NATS log stream into
+it. The tracked shipper configuration lives at `deploy/log-shipper/fly.toml` and
+has no services or public IPs.
+
+Create the Fly app once:
+
+```bash
+fly apps create routeup-log-shipper --org personal
+```
+
+In the Grafana Cloud portal, open the stack's **Logs → Send Logs** page. Record
+the Loki URL and numeric logs instance ID, then create an access-policy token
+with `logs:write`. Create a separate organization-scoped read-only Fly token for
+the NATS source:
+
+```bash
+fly tokens create readonly \
+  --org personal \
+  --expiry 2160h \
+  --name "Routeup log shipper"
+```
+
+Set the runtime secrets. `ACCESS_TOKEN` is the full `FlyV1 ...` value from the
+previous command; `LOKI_USERNAME` is Grafana Cloud's numeric logs instance ID:
+
+```bash
+fly secrets set -a routeup-log-shipper \
+  ORG=personal \
+  ACCESS_TOKEN='<full FlyV1 token>' \
+  LOKI_URL='<Grafana Cloud Loki URL>' \
+  LOKI_USERNAME='<Grafana Cloud logs instance ID>' \
+  LOKI_PASSWORD='<Grafana Cloud token with logs:write>'
+```
+
+The non-secret `SUBJECT='logs.routeup-server.>'` filter is committed in the Fly
+config. Validate and perform the first deployment:
+
+```bash
+fly config validate -c deploy/log-shipper/fly.toml
+fly deploy --no-public-ips \
+  -c deploy/log-shipper/fly.toml \
+  --file-local /etc/vector/sinks/loki.toml=deploy/log-shipper/loki.toml
+fly checks list -a routeup-log-shipper
+```
+
+The tracked Loki sink adds `service_name="routeup-server"` from Fly's app-name
+metadata. This lets Grafana Cloud identify Routeup instead of grouping its logs
+under `unknown_service`. Both the manual command above and GitHub Actions mount
+the sink at `/etc/vector/sinks/loki.toml` before Vector starts.
+
+Create a separate app-scoped deploy token for GitHub Actions:
+
+```bash
+fly tokens create deploy -a routeup-log-shipper
+gh secret set FLY_LOG_SHIPPER_API_TOKEN
+```
+
+Paste the `FlyV1 ...` value when `gh` prompts. Future changes to the tracked
+shipper config deploy automatically on pushes to `main`. Runtime Loki and NATS
+credentials stay only in Fly secrets; they are not duplicated into GitHub.
+
+Add Loki as a Grafana datasource with the same endpoint and credentials. Fly's
+shipper labels Routeup streams with `fly_app_name="routeup-server"`, so the base
+LogQL query is:
+
+```logql
+{fly_app_name="routeup-server"}
+```
+
+The equivalent Grafana service query is:
+
+```logql
+{service_name="routeup-server"}
+```
+
+Structured Routeup request logs can be filtered further:
+
+```logql
+{fly_app_name="routeup-server"} | json | msg="public request completed"
 ```
 
 ## What it costs

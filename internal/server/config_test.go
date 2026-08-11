@@ -19,6 +19,12 @@ func TestDefaultServerConfig(t *testing.T) {
 	if d.TLSMode != TLSModeACME {
 		t.Errorf("default TLSMode = %q, want %q", d.TLSMode, TLSModeACME)
 	}
+	if d.LogFormat != LogFormatText || d.LogLevel != "info" {
+		t.Errorf("default logging = %q/%q, want text/info", d.LogFormat, d.LogLevel)
+	}
+	if d.MetricsListen != "" {
+		t.Errorf("default MetricsListen = %q, want disabled", d.MetricsListen)
+	}
 	if d.Domain != "" {
 		t.Errorf("default Domain = %q, want empty", d.Domain)
 	}
@@ -51,7 +57,7 @@ func TestOverlay(t *testing.T) {
 func TestLoadServerConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "routeup-server.json")
-	body := `{"domain":"routeup.dev","listen":":443","public_namespace":"try","db":"/var/lib/routeup/s.db","reserved":["billing"]}`
+	body := `{"domain":"routeup.dev","listen":":443","public_namespace":"try","db":"/var/lib/routeup/s.db","reserved":["billing"],"log_format":"json","log_level":"warn","metrics_listen":":9091"}`
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -65,6 +71,9 @@ func TestLoadServerConfig(t *testing.T) {
 	}
 	if c.DBPath != "/var/lib/routeup/s.db" || len(c.Reserved) != 1 {
 		t.Errorf("unexpected config: %+v", c)
+	}
+	if c.LogFormat != LogFormatJSON || c.LogLevel != "warn" || c.MetricsListen != ":9091" {
+		t.Errorf("unexpected observability config: %+v", c)
 	}
 }
 
@@ -94,6 +103,10 @@ func TestServerConfig_Validate(t *testing.T) {
 		{name: "cert mode without key", cfg: ServerConfig{Domain: "routeup.dev", Listen: ":443", DBPath: "s.db", TLSMode: TLSModeCert, TLSCert: "c.pem"}, errSubstr: "tls mode cert"},
 		{name: "invalid tls mode", cfg: ServerConfig{Domain: "routeup.dev", Listen: ":443", DBPath: "s.db", TLSMode: "bogus"}, errSubstr: "invalid tls_mode"},
 		{name: "invalid acme ca", cfg: ServerConfig{Domain: "routeup.dev", Listen: ":443", DBPath: "s.db", ACMECA: "midway"}, errSubstr: "acme_ca"},
+		{name: "invalid log format", cfg: ServerConfig{Domain: "routeup.dev", Listen: ":443", DBPath: "s.db", LogFormat: "xml"}, errSubstr: "log_format"},
+		{name: "invalid log level", cfg: ServerConfig{Domain: "routeup.dev", Listen: ":443", DBPath: "s.db", LogLevel: "trace"}, errSubstr: "log_level"},
+		{name: "invalid metrics address", cfg: ServerConfig{Domain: "routeup.dev", Listen: ":443", DBPath: "s.db", MetricsListen: "9091"}, errSubstr: "metrics_listen"},
+		{name: "invalid metrics port", cfg: ServerConfig{Domain: "routeup.dev", Listen: ":443", DBPath: "s.db", MetricsListen: ":70000"}, errSubstr: "metrics_listen port"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

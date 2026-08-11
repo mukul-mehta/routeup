@@ -90,6 +90,8 @@ internal/
     server.go              #   Server struct, Run, attach
     background.go          #   runReap, runCertPrewarm (background loops)
     api.go                 #   HTTP mux, serveIngress, health
+    observability.go       #   response status/byte observation for safe logs
+    metrics.go             #   aggregate Prometheus metrics endpoint
     authorize.go           #   Authorizer: ClaimAttempt -> Decision
     allow.go               #   AllowPattern: "*.<suffix>" parse/matches
     host.go                #   DeriveTokenHost, DeriveNamespaceHost, validators

@@ -6,5 +6,8 @@
   "acme_email": "hello@mukul-mehta.in",
   "acme_ca": "production",
   "acme_storage": "/data/acme",
-  "reserved": ["edge", "get"]
+  "reserved": ["edge", "get"],
+  "log_format": "json",
+  "log_level": "info",
+  "metrics_listen": ":9091"
 }

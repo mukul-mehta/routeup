@@ -36,6 +36,7 @@ func (s *Server) runReap(ctx context.Context) {
 				continue
 			}
 			if n > 0 {
+				s.metrics.holdsReaped(n)
 				s.logger.Info("reaped expired holds", "count", n)
 			}
 		}

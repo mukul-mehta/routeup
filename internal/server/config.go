@@ -4,13 +4,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
+	"strconv"
 	"strings"
 )
 
 const (
 	TLSModeACME = "acme"
 	TLSModeCert = "cert"
+
+	LogFormatText = "text"
+	LogFormatJSON = "json"
 )
 
 const CloudflareTokenEnv = "CLOUDFLARE_API_TOKEN"
@@ -27,14 +32,19 @@ type ServerConfig struct {
 	ACMEStorage     string   `json:"acme_storage"`
 	TLSCert         string   `json:"tls_cert"`
 	TLSKey          string   `json:"tls_key"`
+	LogFormat       string   `json:"log_format"`
+	LogLevel        string   `json:"log_level"`
+	MetricsListen   string   `json:"metrics_listen"`
 }
 
 func DefaultServerConfig() ServerConfig {
 	return ServerConfig{
-		Listen:  ":443",
-		DBPath:  "routeup-server.db",
-		TLSMode: TLSModeACME,
-		ACMECA:  "production",
+		Listen:    ":443",
+		DBPath:    "routeup-server.db",
+		TLSMode:   TLSModeACME,
+		ACMECA:    "production",
+		LogFormat: LogFormatText,
+		LogLevel:  "info",
 	}
 }
 
@@ -86,6 +96,15 @@ func Overlay(base, over ServerConfig) ServerConfig {
 	if over.TLSKey != "" {
 		out.TLSKey = over.TLSKey
 	}
+	if over.LogFormat != "" {
+		out.LogFormat = over.LogFormat
+	}
+	if over.LogLevel != "" {
+		out.LogLevel = over.LogLevel
+	}
+	if over.MetricsListen != "" {
+		out.MetricsListen = over.MetricsListen
+	}
 	return out
 }
 
@@ -123,6 +142,24 @@ func (c ServerConfig) Validate() error {
 	}
 	if c.ACMECA != "" && c.ACMECA != "production" && c.ACMECA != "staging" {
 		return fmt.Errorf("invalid acme_ca %q (want production or staging)", c.ACMECA)
+	}
+	if c.LogFormat != "" && c.LogFormat != LogFormatText && c.LogFormat != LogFormatJSON {
+		return fmt.Errorf("invalid log_format %q (want text or json)", c.LogFormat)
+	}
+	switch c.LogLevel {
+	case "", "debug", "info", "warn", "error":
+	default:
+		return fmt.Errorf("invalid log_level %q (want debug, info, warn, or error)", c.LogLevel)
+	}
+	if c.MetricsListen != "" {
+		_, portText, err := net.SplitHostPort(c.MetricsListen)
+		if err != nil {
+			return fmt.Errorf("invalid metrics_listen %q: %w", c.MetricsListen, err)
+		}
+		port, err := strconv.Atoi(portText)
+		if err != nil || port < 1 || port > 65535 {
+			return fmt.Errorf("invalid metrics_listen port %q (must be 1-65535)", portText)
+		}
 	}
 	return nil
 }

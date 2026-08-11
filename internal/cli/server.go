@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -15,18 +17,21 @@ import (
 // newServerCmd builds the hidden `routeup server` operator command.
 func newServerCmd() *cobra.Command {
 	var (
-		configPath  string
-		domain      string
-		listen      string
-		namespace   string
-		dbPath      string
-		reserved    []string
-		tlsMode     string
-		acmeEmail   string
-		acmeCA      string
-		acmeStorage string
-		tlsCert     string
-		tlsKey      string
+		configPath    string
+		domain        string
+		listen        string
+		namespace     string
+		dbPath        string
+		reserved      []string
+		tlsMode       string
+		acmeEmail     string
+		acmeCA        string
+		acmeStorage   string
+		tlsCert       string
+		tlsKey        string
+		logFormat     string
+		logLevel      string
+		metricsListen string
 	)
 
 	cmd := &cobra.Command{
@@ -60,12 +65,21 @@ func newServerCmd() *cobra.Command {
 				ACMEStorage:     acmeStorage,
 				TLSCert:         tlsCert,
 				TLSKey:          tlsKey,
+				LogFormat:       logFormat,
+				LogLevel:        logLevel,
+				MetricsListen:   metricsListen,
 			})
 			if err != nil {
 				return err
 			}
 
-			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+			if err := cfg.Validate(); err != nil {
+				return err
+			}
+			logger, err := newServerLogger(cmd.ErrOrStderr(), cfg)
+			if err != nil {
+				return err
+			}
 			srv, err := server.New(cfg, logger)
 			if err != nil {
 				return err
@@ -89,5 +103,20 @@ func newServerCmd() *cobra.Command {
 	cmd.Flags().StringVar(&acmeStorage, "acme-storage", "", "directory to cache issued certificates")
 	cmd.Flags().StringVar(&tlsCert, "tls-cert", "", "PEM certificate (cert mode)")
 	cmd.Flags().StringVar(&tlsKey, "tls-key", "", "PEM private key (cert mode)")
+	cmd.Flags().StringVar(&logFormat, "log-format", "", "server log format: text (default) or json")
+	cmd.Flags().StringVar(&logLevel, "log-level", "", "server log level: debug, info (default), warn, or error")
+	cmd.Flags().StringVar(&metricsListen, "metrics-listen", "", "Prometheus metrics address (disabled by default; e.g. :9091)")
 	return cmd
+}
+
+func newServerLogger(w io.Writer, cfg server.ServerConfig) (*slog.Logger, error) {
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(cfg.LogLevel)); err != nil {
+		return nil, fmt.Errorf("parse log level: %w", err)
+	}
+	opts := &slog.HandlerOptions{Level: level}
+	if cfg.LogFormat == server.LogFormatJSON {
+		return slog.New(slog.NewJSONHandler(w, opts)), nil
+	}
+	return slog.New(slog.NewTextHandler(w, opts)), nil
 }

@@ -307,9 +307,9 @@ Runnable examples live in [`examples/`](examples/):
 
 ## Implementation status
 
-Phases 0–10 are complete. Phase 8.5 is partially complete: `expose.enabled` is
-implemented and the runner now owns the full public tunnel lifecycle. The Vite
-framework adapter is deferred.
+Phases 0–10 are complete. Phase 8.5 runner exposure is complete:
+`expose.enabled` is implemented and the runner owns the full public tunnel
+lifecycle. Framework-specific command adapters are out of scope.
 
 <details>
 <summary>Phase checklist</summary>
@@ -324,7 +324,7 @@ framework adapter is deferred.
 - [x] Phase 6 — Streaming, WebSockets, SSE
 - [x] Phase 7 — Path proxy
 - [x] Phase 8 — Local process runner
-- [~] Phase 8.5 — Runner exposure & framework adapters (`expose.enabled` done; Vite adapter deferred)
+- [x] Phase 8.5 — Runner exposure (`expose.enabled`; framework adapters out of scope)
 - [x] Phase 9 — Route logs
 - [x] Phase 10 — Request capture & inspect
 

@@ -1,0 +1,40 @@
+# Routeup server logs -> Grafana Cloud Loki.
+#
+# Bootstrap once from the repository root:
+#   fly apps create routeup-log-shipper --org personal
+#   fly secrets set -a routeup-log-shipper ORG=personal \
+#     ACCESS_TOKEN='<full FlyV1 token>' \
+#     LOKI_URL='<Grafana Cloud Loki URL>' \
+#     LOKI_USERNAME='<Grafana Cloud logs instance ID>' \
+#     LOKI_PASSWORD='<Grafana Cloud token with logs:write>'
+#
+# Validate: fly config validate -c deploy/log-shipper/fly.toml
+# Deploy:   fly deploy --no-public-ips -c deploy/log-shipper/fly.toml \
+#             --file-local /etc/vector/sinks/loki.toml=deploy/log-shipper/loki.toml
+
+app            = "routeup-log-shipper"
+primary_region = "sin"
+
+[build]
+  image = "flyio/log-shipper:latest"
+
+# Subscribe only to routeup-server across every region and Machine. This avoids
+# forwarding the shipper's own logs back into Loki.
+[env]
+  SUBJECT = "logs.routeup-server.>"
+
+# Vector's internal API. This is a private Machine check; no Fly service or
+# public IP is configured for the shipper.
+[checks]
+  [checks.vector]
+    port         = 8686
+    type         = "http"
+    method       = "get"
+    path         = "/health"
+    grace_period = "10s"
+    interval     = "30s"
+    timeout      = "5s"
+
+[[vm]]
+  size   = "shared-cpu-1x"
+  memory = "256mb"

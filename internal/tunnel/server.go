@@ -51,11 +51,20 @@ import (
 // carries public requests to that host's session. serveIngress dispatches to it
 // by Host.
 type TunnelRegistry struct {
-	broker RouteBroker
-	logger *slog.Logger
+	broker   RouteBroker
+	logger   *slog.Logger
+	observer RegistryObserver
 
 	mu     sync.RWMutex
 	routes map[string]*tunnelRoute // public host -> reverse proxy over its session
+}
+
+// RegistryObserver receives aggregate tunnel failures for server metrics.
+// Implementations must not attach route, token, path, or source identifiers.
+type RegistryObserver interface {
+	TunnelEstablished()
+	TunnelClosed()
+	TunnelForwardError()
 }
 
 type tunnelRoute struct {
@@ -63,14 +72,15 @@ type tunnelRoute struct {
 }
 
 // NewTunnelRegistry returns a registry backed by broker.
-func NewTunnelRegistry(broker RouteBroker, logger *slog.Logger) *TunnelRegistry {
+func NewTunnelRegistry(broker RouteBroker, logger *slog.Logger, observer RegistryObserver) *TunnelRegistry {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	return &TunnelRegistry{
-		broker: broker,
-		logger: logger,
-		routes: make(map[string]*tunnelRoute),
+		broker:   broker,
+		logger:   logger,
+		observer: observer,
+		routes:   make(map[string]*tunnelRoute),
 	}
 }
 
@@ -144,6 +154,8 @@ func (reg *TunnelRegistry) ServeConn(ctx context.Context, conn net.Conn, token s
 	// host the server granted, or a coded error (401/403/409) relayed verbatim.
 	lease, err := reg.broker.Hold(ctx, token, *msg.Claim)
 	if err != nil {
+		reg.logger.Warn("tunnel claim rejected", "status", statusCodeOf(err))
+		reg.logger.Debug("tunnel claim rejection details", "route", msg.Claim.Route, "err", err)
 		_ = writeHandshakeMessage(ctrl, HandshakeMessage{Type: msgClaimErr, Error: err.Error(), Code: statusCodeOf(err)})
 		return err
 	}
@@ -152,7 +164,7 @@ func (reg *TunnelRegistry) ServeConn(ctx context.Context, conn net.Conn, token s
 	// Make the host serviceable: store host -> a reverse proxy bound to THIS
 	// session, so serveIngress can route public requests to it. The deferred
 	// release (on return) removes the route and frees the hold (grace window).
-	registered := &tunnelRoute{handler: newSessionProxy(session, host, reg.logger)}
+	registered := &tunnelRoute{handler: newSessionProxy(session, host, reg.logger, reg.observer)}
 	reg.register(host, registered)
 	defer reg.release(lease, registered)
 
@@ -161,7 +173,12 @@ func (reg *TunnelRegistry) ServeConn(ctx context.Context, conn net.Conn, token s
 	if err := writeHandshakeMessage(ctrl, HandshakeMessage{Type: msgClaimOK, Granted: host}); err != nil {
 		return err
 	}
-	reg.logger.Info("tunnel session established", "host", host)
+	if reg.observer != nil {
+		reg.observer.TunnelEstablished()
+		defer reg.observer.TunnelClosed()
+	}
+	reg.logger.Info("tunnel session established")
+	reg.logger.Debug("tunnel session identity", "host", host, "route", msg.Claim.Route)
 
 	// --- session lifetime (until disconnect) ---
 
@@ -182,7 +199,8 @@ func (reg *TunnelRegistry) ServeConn(ctx context.Context, conn net.Conn, token s
 	// closed by the ctx-cancel goroutine above; either way ServeConn then returns
 	// and the deferred release tears the route down.
 	_, _ = io.Copy(io.Discard, ctrl)
-	reg.logger.Info("tunnel session closed", "host", host)
+	reg.logger.Info("tunnel session closed")
+	reg.logger.Debug("closed tunnel identity", "host", host)
 	return nil
 }
 
@@ -203,7 +221,7 @@ func (reg *TunnelRegistry) Handler(host string) (http.Handler, bool) {
 // stream per request (session.Open); the standard library writes the request and
 // reads the response over it. This is the server-side mirror of the agent's
 // http.Server: net/http does the HTTP wire work, yamux carries the bytes.
-func newSessionProxy(session *yamux.Session, host string, logger *slog.Logger) http.Handler {
+func newSessionProxy(session *yamux.Session, host string, logger *slog.Logger, observer RegistryObserver) http.Handler {
 	transport := &http.Transport{
 		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
 			return session.Open()
@@ -218,7 +236,11 @@ func newSessionProxy(session *yamux.Session, host string, logger *slog.Logger) h
 			pr.Out.Host = pr.In.Host // preserve the public Host end-to-end
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
-			logger.Warn("tunnel forward failed", "host", host, "err", err)
+			if observer != nil {
+				observer.TunnelForwardError()
+			}
+			logger.Warn("tunnel forward failed")
+			logger.Debug("tunnel forward failure details", "host", host, "err", err)
 			http.Error(w, "routeup: tunnel error", http.StatusBadGateway)
 		},
 	}
