@@ -29,6 +29,7 @@ type logsOpts struct {
 	public bool
 	local  bool
 	json   bool
+	plain  bool
 	limit  int
 	since  string
 	method string
@@ -103,6 +104,7 @@ func newLogsCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&opts.public, "public", false, "show only public tunnel requests")
 	cmd.Flags().BoolVar(&opts.local, "local", false, "show only local .localhost requests")
 	cmd.Flags().BoolVar(&opts.json, "json", false, "write one JSON request record per line")
+	cmd.Flags().BoolVar(&opts.plain, "plain", false, "disable the interactive viewer with --follow")
 	cmd.Flags().IntVar(&opts.limit, "limit", 0, "show at most the newest N matching requests")
 	cmd.Flags().StringVar(&opts.since, "since", "", "show requests since a duration ago or RFC3339 time")
 	cmd.Flags().StringVar(&opts.method, "method", "", "show only this HTTP method")
@@ -137,16 +139,21 @@ func runLogs(cmd *cobra.Command, opts logs.ListOptions, commandOpts logsOpts) er
 	out := cmd.OutOrStdout()
 
 	if commandOpts.follow {
+		if !commandOpts.json && !commandOpts.plain && terminalIsInteractive(cmd.InOrStdin(), out) {
+			return runLogsTUI(cmd, client, opts)
+		}
 		ctx := cmd.Context()
 		if ctx == nil {
 			ctx = context.Background()
 		}
-		if !commandOpts.json {
-			if err := writeLogHeader(out); err != nil {
-				return err
-			}
-		}
+		wroteHeader := false
 		err := client.FollowLogs(ctx, opts, func(entry logs.Entry) error {
+			if !commandOpts.json && !wroteHeader {
+				if err := writeLogHeader(out); err != nil {
+					return err
+				}
+				wroteHeader = true
+			}
 			return writeLogEntry(out, entry, commandOpts.json)
 		})
 		if errors.Is(err, context.Canceled) && ctx.Err() != nil {
@@ -200,7 +207,8 @@ func runLogs(cmd *cobra.Command, opts logs.ListOptions, commandOpts logsOpts) er
 }
 
 func writeLogHeader(out io.Writer) error {
-	_, err := fmt.Fprintln(out, "TIME      SOURCE  ROUTE                 METHOD   PATH                                      STATUS  DURATION  ID")
+	styles := newTerminalStyles(out)
+	_, err := fmt.Fprintln(out, styles.label("TIME      SOURCE  ROUTE                 METHOD   PATH                                      STATUS  DURATION  ID"))
 	if err != nil {
 		return fmt.Errorf("write request log header: %w", err)
 	}
@@ -214,10 +222,21 @@ func writeLogEntry(out io.Writer, entry logs.Entry, jsonOutput bool) error {
 		}
 		return nil
 	}
-	_, err := fmt.Fprintf(out, "%s  %-6s  %-20s  %-7s  %-40s  %-6d  %-8s  %s\n",
-		entry.StartedAt.Local().Format("15:04:05"), terminalEscapeString(string(entry.Source)), terminalEscapeString(entry.Route),
-		terminalEscapeString(entry.Method), terminalEscapeString(entry.RequestPath), entry.Status, formatLogDuration(entry.Duration),
-		terminalEscapeString(entry.ID))
+	styles := newTerminalStyles(out)
+	source := fmt.Sprintf("%-6s", terminalEscapeString(string(entry.Source)))
+	if entry.Source == logs.SourcePublic {
+		source = styles.accent(source)
+	} else {
+		source = styles.muted(source)
+	}
+	routeName := styles.label(fmt.Sprintf("%-20s", terminalEscapeString(entry.Route)))
+	method := styles.label(fmt.Sprintf("%-7s", terminalEscapeString(entry.Method)))
+	requestPath := fmt.Sprintf("%-40s", terminalEscapeString(entry.RequestPath))
+	duration := styles.muted(fmt.Sprintf("%-8s", formatLogDuration(entry.Duration)))
+	status := styles.statusCode(entry.Status) + strings.Repeat(" ", max(0, 6-len(fmt.Sprintf("%d", entry.Status))))
+	_, err := fmt.Fprintf(out, "%s  %s  %s  %s  %s  %s  %s  %s\n",
+		styles.muted(entry.StartedAt.Local().Format("15:04:05")), source, routeName,
+		method, requestPath, status, duration, styles.muted(terminalEscapeString(entry.ID)))
 	if err != nil {
 		return fmt.Errorf("write request log: %w", err)
 	}

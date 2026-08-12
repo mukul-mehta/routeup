@@ -151,6 +151,12 @@ route, source, method, path/query, matched target when one exists, status, and
 duration. They disappear when the agent restarts. The current public server has
 no separate request-log store; `routeup logs` always reads from the agent.
 
+In a TTY, `routeup logs --follow` presents the stream through a full-screen
+Bubble Tea viewer. The viewer retains at most 200 rendered rows, deduplicates
+the snapshot after reconnecting, and clears stale rows when the agent boot ID
+changes. `--plain`, redirected output, and `--json` retain line-oriented output.
+All untrusted values are escaped before Lip Gloss styling is applied.
+
 Phase 10 adds per-route opt-in request retention:
 
 ```json

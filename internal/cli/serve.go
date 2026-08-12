@@ -192,11 +192,12 @@ func runServe(cmd *cobra.Command, args []string, cwd string, opts serveOpts) err
 			return err
 		}
 	} else {
-		_, _ = fmt.Fprintf(out, "route: %s\n", resolved.Route)
-		_, _ = fmt.Fprintf(out, "local: %s\n", localRouteURL)
+		styles := newTerminalStyles(out)
+		_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("route:"), styles.accent(resolved.Route.String()))
+		_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("local:"), styles.url(localRouteURL))
 		if publicHost != "" {
-			_, _ = fmt.Fprintf(out, "public: %s\n", publicURL)
-			_, _ = fmt.Fprintf(out, "expose: %s\n", formatExposePaths(exposePaths))
+			_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("public:"), styles.url(publicURL))
+			_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("expose:"), formatExposePaths(exposePaths))
 		}
 		printTargets(out, resolved.Targets)
 		if opts.qr {
@@ -207,7 +208,7 @@ func runServe(cmd *cobra.Command, args []string, cwd string, opts serveOpts) err
 			writeRouteQR(out, qrURL)
 		}
 		_, _ = fmt.Fprintln(out, "")
-		_, _ = fmt.Fprintln(out, "press Ctrl-C to stop")
+		_, _ = fmt.Fprintln(out, styles.muted("press Ctrl-C to stop"))
 	}
 
 	client.Maintain(ctx, agentctl.DesiredState{

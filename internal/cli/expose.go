@@ -45,7 +45,7 @@ func newExposeCmd() *cobra.Command {
 			"The public host is decided by the server from your token (or its\n" +
 			"public namespace when you have no token), so you pass a route name and\n" +
 			"the server returns the full URL. The tunnel is held until you stop it",
-		Example: "routeup expose api-myapp --port 8080",
+		Example: "routeup expose api.myapp --port 8080",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if opts.random && len(args) != 0 {
@@ -173,17 +173,18 @@ func startTunnel(cmd *cobra.Command, serverURL, token, localRouteName, publicRou
 			return err
 		}
 	} else {
+		styles := newTerminalStyles(out)
 		if hasLocalRoute {
 			printRouteLocal(out, localRouteName, state.TLSPortOrDefault())
 		}
-		_, _ = fmt.Fprintf(out, "public: %s\n", publicURL)
+		_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("public:"), styles.url(publicURL))
 		printTargets(out, targets)
-		_, _ = fmt.Fprintf(out, "expose: %s\n", formatExposePaths(exposePaths))
+		_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("expose:"), formatExposePaths(exposePaths))
 		if commandOpts.qr {
 			writeRouteQR(out, publicURL)
 		}
 		_, _ = fmt.Fprintln(out, "")
-		_, _ = fmt.Fprintln(out, "press Ctrl-C to stop")
+		_, _ = fmt.Fprintln(out, styles.muted("press Ctrl-C to stop"))
 	}
 
 	client.Maintain(ctx, agentctl.DesiredState{
@@ -252,8 +253,9 @@ func printRouteLocal(out io.Writer, routeName string, tlsPort int) {
 	if err != nil {
 		return
 	}
-	_, _ = fmt.Fprintf(out, "route: %s\n", n)
-	_, _ = fmt.Fprintf(out, "local: %s\n", localURL(n.LocalHost(), tlsPort))
+	styles := newTerminalStyles(out)
+	_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("route:"), styles.accent(n.String()))
+	_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("local:"), styles.url(localURL(n.LocalHost(), tlsPort)))
 }
 
 func resolveExposeRoute(positional string, file config.Config, random bool, cwd string) (route.Name, error) {

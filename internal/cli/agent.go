@@ -126,16 +126,30 @@ func newAgentStatusCmd() *cobra.Command {
 				return nil
 			}
 
-			_, _ = fmt.Fprintln(out, "agent:   running")
-			_, _ = fmt.Fprintf(out, "version: %s\n", status.Version)
-			_, _ = fmt.Fprintf(out, "uptime:  %ds\n", status.UptimeSeconds)
-			_, _ = fmt.Fprintf(out, "tls:     %s\n", status.TLSAddr)
+			styles := newTerminalStyles(out)
+			_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("agent:  "), styles.success("running"))
+			_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("version:"), status.Version)
+			_, _ = fmt.Fprintf(out, "%s %ds\n", styles.label("uptime: "), status.UptimeSeconds)
+			_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("tls:    "), status.TLSAddr)
 			if status.ExecPath != "" {
-				_, _ = fmt.Fprintf(out, "binary:  %s\n", terminalEscapeString(status.ExecPath))
+				_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("binary: "), terminalEscapeString(status.ExecPath))
+			}
+			if len(status.Exposures) != 0 {
+				_, _ = fmt.Fprintln(out, "")
+				_, _ = fmt.Fprintln(out, styles.label("public exposures:"))
+				for _, exposure := range status.Exposures {
+					stateText := fmt.Sprintf("%-12s", exposure.State)
+					state := styles.success(stateText)
+					if exposure.State == ipc.ExposureReconnecting {
+						state = styles.warning(stateText)
+					}
+					_, _ = fmt.Fprintf(out, "  %s %s  %s  %s  pid %d\n", state, styles.accent(terminalEscapeString(exposure.Route)),
+						styles.url("https://"+terminalEscapeString(exposure.Host)), terminalEscapeString(formatExposePaths(exposure.Paths)), exposure.OwnerPID)
+				}
 			}
 			if stale, reason := client.IsStale(status); stale {
-				_, _ = fmt.Fprintf(out, "\nnote: %s\n", reason)
-				_, _ = fmt.Fprintln(out, "      run `routeup agent restart` to reload.")
+				_, _ = fmt.Fprintf(out, "\n%s %s\n", styles.warning("note:"), reason)
+				_, _ = fmt.Fprintln(out, styles.muted("      run `routeup agent restart` to reload."))
 			}
 			return nil
 		},

@@ -3,7 +3,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"os"
 
 	"github.com/mukul-mehta/routeup/internal/cli"
@@ -18,6 +17,6 @@ func main() {
 	if errors.As(err, &exit) {
 		os.Exit(exit.Code)
 	}
-	fmt.Fprintln(os.Stderr, err)
+	cli.PrintError(os.Stderr, err)
 	os.Exit(1)
 }

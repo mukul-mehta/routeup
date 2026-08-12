@@ -147,14 +147,14 @@ without a token:  https://<label>.try.routeup.dev               # session-only
 Set your server and token:
 
 ```bash
-export ROUTEUP_SERVER=https://routeup.dev
+export ROUTEUP_SERVER=https://edge.routeup.dev
 export ROUTEUP_TOKEN=sk_routeup_...
 ```
 
 Or save them permanently:
 
 ```bash
-routeup setup --server https://routeup.dev
+routeup setup --server https://edge.routeup.dev
 routeup setup --server none             # clear the saved server and token
 ```
 
@@ -180,7 +180,7 @@ route without `--expose`. Bare runner mode also claims the public route
 ```
 
 ```bash
-ROUTEUP_SERVER=https://routeup.dev ROUTEUP_TOKEN=sk_routeup_... pnpm dev
+ROUTEUP_SERVER=https://edge.routeup.dev ROUTEUP_TOKEN=sk_routeup_... pnpm dev
 ```
 
 routeup prints both URLs once the app is ready:
@@ -223,7 +223,8 @@ go through the public tunnel.
 
 ```bash
 routeup logs myapp                   # recent traffic
-routeup logs myapp --follow          # live stream
+routeup logs myapp --follow          # interactive live viewer in a terminal
+routeup logs myapp --follow --plain  # streaming lines instead of the viewer
 routeup logs myapp --public --json   # public traffic as JSON
 routeup logs myapp --since 10m --method POST --status 202 --limit 50
 ```
@@ -253,6 +254,10 @@ and is unsafe for direct terminal output; `--json` emits byte-exact bodies as
 base64. Captured data lives in agent memory only (256 KiB per captured request
 or response, 1024-entry ring). It resets when the agent restarts. Capture is off
 by default.
+
+Interactive terminal output uses color and emphasis while redirected output
+stays plain. Set `NO_COLOR=1` to disable styling. JSON and NDJSON output never
+contains terminal formatting.
 
 ## Other commands
 

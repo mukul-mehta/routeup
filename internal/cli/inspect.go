@@ -9,6 +9,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -80,6 +81,9 @@ func runInspect(cmd *cobra.Command, id string, opts inspectOpts) error {
 	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
 	defer cancel()
 	entry, err := client.Inspect(ctx, id)
+	if agentctl.IsUnavailable(err) {
+		return errors.New("agent not running; retained requests are unavailable")
+	}
 	if err != nil {
 		return err
 	}
@@ -97,10 +101,13 @@ func writeInspectEntry(out io.Writer, entry logs.Entry, raw bool) error {
 		return fmt.Errorf("request %s was not captured", terminalEscapeString(entry.ID))
 	}
 
-	if _, err := fmt.Fprintf(out, "Request %s\n\nMetadata\n--------\nSource: %s\nRoute: %s\nTarget: %s:%d\nStatus: %d\nDuration: %s\nMethod: %s\nPath: %s\nHost: %s\n",
-		terminalEscapeString(entry.ID), terminalEscapeString(string(entry.Source)), terminalEscapeString(entry.Route),
-		terminalEscapeString(entry.Target.Path), entry.Target.Port, entry.Status, formatLogDuration(entry.Duration),
-		terminalEscapeString(entry.Method), terminalEscapeString(entry.RequestPath), terminalEscapeString(entry.Host)); err != nil {
+	styles := newTerminalStyles(out)
+	if _, err := fmt.Fprintf(out, "Request %s\n\n%s\n--------\n%s %s\n%s %s\n%s %s:%d\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n",
+		styles.accent(terminalEscapeString(entry.ID)), styles.label("Metadata"), styles.label("Source:"), terminalEscapeString(string(entry.Source)),
+		styles.label("Route:"), terminalEscapeString(entry.Route), styles.label("Target:"), terminalEscapeString(entry.Target.Path), entry.Target.Port,
+		styles.label("Status:"), styles.statusCode(entry.Status), styles.label("Duration:"), formatLogDuration(entry.Duration),
+		styles.label("Method:"), terminalEscapeString(entry.Method), styles.label("Path:"), terminalEscapeString(entry.RequestPath),
+		styles.label("Host:"), terminalEscapeString(entry.Host)); err != nil {
 		return fmt.Errorf("write metadata: %w", err)
 	}
 
@@ -111,7 +118,8 @@ func writeInspectEntry(out io.Writer, entry logs.Entry, raw bool) error {
 }
 
 func writeCapturedMessage(out io.Writer, label string, msg *logs.CapturedMessage, raw bool) error {
-	if _, err := fmt.Fprintf(out, "\n%s\n%s\n", label, strings.Repeat("-", len(label))); err != nil {
+	styles := newTerminalStyles(out)
+	if _, err := fmt.Fprintf(out, "\n%s\n%s\n", styles.label(label), strings.Repeat("-", len(label))); err != nil {
 		return fmt.Errorf("write %s label: %w", label, err)
 	}
 	if msg == nil {

@@ -97,27 +97,28 @@ func resolveConfigView(cwd string) (configView, error) {
 }
 
 func writeConfigView(out io.Writer, view configView) error {
-	if _, err := fmt.Fprintf(out, "source: %s\n", terminalEscapeString(view.Source)); err != nil {
+	styles := newTerminalStyles(out)
+	if _, err := fmt.Fprintf(out, "%s %s\n", styles.label("source:"), terminalEscapeString(view.Source)); err != nil {
 		return err
 	}
 	if view.Path != "" {
-		_, _ = fmt.Fprintf(out, "path: %s\n", terminalEscapeString(view.Path))
+		_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("path:"), terminalEscapeString(view.Path))
 	}
-	_, _ = fmt.Fprintf(out, "route: %s\n", terminalEscapeString(view.Route))
+	_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("route:"), styles.accent(terminalEscapeString(view.Route)))
 	if len(view.Targets) == 0 {
-		_, _ = fmt.Fprintln(out, "targets: not configured")
+		_, _ = fmt.Fprintf(out, "%s not configured\n", styles.label("targets:"))
 	} else {
-		_, _ = fmt.Fprintln(out, "targets:")
+		_, _ = fmt.Fprintln(out, styles.label("targets:"))
 		for _, target := range view.Targets {
 			_, _ = fmt.Fprintf(out, "  %-8s http://localhost:%d\n", terminalEscapeString(target.Path), target.Port)
 		}
 	}
-	_, _ = fmt.Fprintf(out, "command: %s\n", map[bool]string{true: "configured", false: "not configured"}[view.CommandConfigured])
+	_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("command:"), map[bool]string{true: "configured", false: "not configured"}[view.CommandConfigured])
 	if view.PortEnvVar != "" {
-		_, _ = fmt.Fprintf(out, "port env: PORT,%s\n", terminalEscapeString(view.PortEnvVar))
+		_, _ = fmt.Fprintf(out, "%s PORT,%s\n", styles.label("port env:"), terminalEscapeString(view.PortEnvVar))
 	}
-	_, _ = fmt.Fprintf(out, "exposure enabled: %t\n", view.ExposureEnabled)
-	_, _ = fmt.Fprintf(out, "expose paths: %s\n", terminalEscapeString(formatExposePaths(view.ExposurePaths)))
+	_, _ = fmt.Fprintf(out, "%s %t\n", styles.label("exposure enabled:"), view.ExposureEnabled)
+	_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("expose paths:"), terminalEscapeString(formatExposePaths(view.ExposurePaths)))
 	capture := "disabled"
 	switch {
 	case view.CaptureRequest && view.CaptureResponse:
@@ -127,19 +128,19 @@ func writeConfigView(out io.Writer, view configView) error {
 	case view.CaptureResponse:
 		capture = "response"
 	}
-	_, _ = fmt.Fprintf(out, "capture: %s\n", capture)
+	_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("capture:"), capture)
 	if len(view.RedactHeaders) != 0 {
 		redacted := make([]string, len(view.RedactHeaders))
 		for i, header := range view.RedactHeaders {
 			redacted[i] = terminalEscapeString(header)
 		}
-		_, _ = fmt.Fprintf(out, "redact headers: %s\n", strings.Join(redacted, ","))
+		_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("redact headers:"), strings.Join(redacted, ","))
 	}
 	if view.Server == "" {
-		_, _ = fmt.Fprintln(out, "server: not configured")
+		_, _ = fmt.Fprintf(out, "%s not configured\n", styles.label("server:"))
 	} else {
-		_, _ = fmt.Fprintf(out, "server: %s\n", terminalEscapeString(view.Server))
+		_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("server:"), styles.url(terminalEscapeString(view.Server)))
 	}
-	_, err := fmt.Fprintf(out, "token: %s\n", map[bool]string{true: "configured", false: "not configured"}[view.TokenConfigured])
+	_, err := fmt.Fprintf(out, "%s %s\n", styles.label("token:"), map[bool]string{true: "configured", false: "not configured"}[view.TokenConfigured])
 	return err
 }

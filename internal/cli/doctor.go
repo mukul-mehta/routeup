@@ -77,11 +77,21 @@ func runDoctor(cmd *cobra.Command, jsonOutput bool) error {
 	}
 	checkIDs := []string{"ca", "trust", "bind", "agent"}
 	jsonChecks := make([]jsonCheck, 0, len(checks))
+	styles := newTerminalStyles(out)
 	for i, c := range checks {
 		if jsonOutput {
 			jsonChecks = append(jsonChecks, jsonCheck{ID: checkIDs[i], Level: strings.Trim(c.level.label(), "[]"), Message: c.msg})
 		} else {
-			_, _ = fmt.Fprintf(out, "  %-6s %s\n", c.level.label(), c.msg)
+			label := fmt.Sprintf("%-6s", c.level.label())
+			switch c.level {
+			case checkOK:
+				label = styles.success(label)
+			case checkWarn:
+				label = styles.warning(label)
+			case checkFail:
+				label = styles.failure(label)
+			}
+			_, _ = fmt.Fprintf(out, "  %s %s\n", label, c.msg)
 		}
 		if c.level == checkFail {
 			anyFail = true

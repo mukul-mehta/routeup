@@ -167,7 +167,8 @@ func runRun(cmd *cobra.Command, cwd string) error {
 		WorkDir:    cwd,
 	})
 
-	_, _ = fmt.Fprintf(out, "running: %s\n", command)
+	styles := newTerminalStyles(out)
+	_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("running:"), command)
 	_, _ = fmt.Fprintln(out, "")
 
 	runner := process.Runner{Command: command, Dir: cwd, Env: childEnv}
@@ -199,10 +200,10 @@ func runRun(cmd *cobra.Command, cwd string) error {
 		return runnerResultError(result, appPort, true)
 	}
 
-	_, _ = fmt.Fprintf(out, "route: %s\n", routeName)
-	_, _ = fmt.Fprintf(out, "local: %s\n", local)
+	_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("route:"), styles.accent(routeName.String()))
+	_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("local:"), styles.url(local))
 	if publicURL != "" {
-		_, _ = fmt.Fprintf(out, "public: %s\n", publicURL)
+		_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("public:"), styles.url(publicURL))
 	}
 	printTargets(out, targets)
 	_, _ = fmt.Fprintln(out, "")

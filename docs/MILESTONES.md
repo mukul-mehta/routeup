@@ -556,7 +556,10 @@ Goal: make local and public traffic visible.
 > for local and public completed request metadata. `routeup logs [route]` reads
 > the JSON agent API, and `--follow` consumes its SSE stream. The proxy records
 > the matched target, status, and duration without buffering request or response
-> bodies; request capture and inspect are implemented in Phase 10 below.
+> bodies; request capture and inspect are implemented in Phase 10 below. In an
+> interactive terminal, `--follow` uses a Bubble Tea live viewer; `--plain`,
+> redirected output, and `--json` preserve line-oriented streaming. The shared
+> Lip Gloss theme is also used by existing human-readable status commands.
 
 Build:
 
@@ -710,6 +713,7 @@ Build:
 routeup dashboard opens a full-screen TUI by default
 routeup dashboard --web opens an embedded browser dashboard
 active routes, exposures, tunnel state, live logs, and inspect details
+reuse the shared terminal theme and live-log model
 shared agent client/model between TUI and web views
 read-only first slice; replay and mutations arrive with their owning milestones
 embedded assets with no CDN or telemetry

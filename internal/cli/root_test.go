@@ -81,6 +81,22 @@ func TestLogs_NoAgentMessage(t *testing.T) {
 	}
 }
 
+func TestLogsFollowPlainDoesNotPrintHeaderWithoutAgent(t *testing.T) {
+	dir, err := os.MkdirTemp("", "rup-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	t.Setenv("ROUTEUP_AGENT_SOCKET", filepath.Join(dir, "missing.sock"))
+	stdout, _, err := runRoot(t, "logs", "--follow", "--plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stdout, "TIME") || !strings.Contains(stdout, "agent not running") {
+		t.Fatalf("output = %q", stdout)
+	}
+}
+
 func TestLogsRejectsConflictingSourceFlags(t *testing.T) {
 	_, _, err := runRoot(t, "logs", "--public", "--local")
 	if err == nil || !strings.Contains(err.Error(), "cannot be used together") {
@@ -220,5 +236,41 @@ func TestInspectRejectsUnsafeRequestID(t *testing.T) {
 	_, _, err := runRoot(t, "inspect", "req_bad\x1b[2J")
 	if err == nil || strings.Contains(err.Error(), "\x1b") {
 		t.Fatalf("error = %q, want safe invalid-id error", err)
+	}
+}
+
+func TestInspectReportsUnavailableAgentClearly(t *testing.T) {
+	dir, err := os.MkdirTemp("", "rup-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	t.Setenv("ROUTEUP_AGENT_SOCKET", filepath.Join(dir, "missing.sock"))
+	_, _, err = runRoot(t, "inspect", "req_1234567890abcdef")
+	if err == nil || err.Error() != "agent not running; retained requests are unavailable" {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestAgentStatusShowsStandaloneExposures(t *testing.T) {
+	status := ipc.Status{BootID: "boot", Exposures: []ipc.ExposureStatus{{
+		Route: "myapp", Host: "myapp.try.routeup.dev", Paths: []string{"/api/*"}, OwnerPID: 42, State: ipc.ExposureConnected,
+	}}}
+	socketPath := startUnixHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != ipc.PathStatus {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(status)
+	}))
+	t.Setenv("ROUTEUP_AGENT_SOCKET", socketPath)
+	stdout, _, err := runRoot(t, "agent", "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"public exposures:", "connected", "myapp", "https://myapp.try.routeup.dev", "/api/*", "pid 42"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("status output %q missing %q", stdout, want)
+		}
 	}
 }

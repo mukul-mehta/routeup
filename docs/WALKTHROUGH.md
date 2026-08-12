@@ -123,7 +123,9 @@ internal/
     config.go              #   resolved project configuration output
     routes.go              #   `routeup routes` — list active local routes (+ public)
     logs.go                #   `routeup logs` — metadata list and follow
+    logs_tui.go            #   Bubble Tea live request viewer and reconnect loop
     inspect.go              #   `routeup inspect` — retained exchange output
+    terminal.go             #   safe escaping, TTY detection, and Lip Gloss theme
     update.go              #   `routeup update` — self update
     uninstall.go           #   `routeup uninstall` — reverse setup
 

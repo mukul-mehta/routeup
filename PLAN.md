@@ -621,6 +621,7 @@ routeup logs
 routeup logs myapp
 routeup logs api.myapp
 routeup logs api.myapp --follow
+routeup logs api.myapp --follow --plain
 routeup logs api.myapp --public
 routeup logs api.myapp --local
 routeup logs api.myapp --json
@@ -633,6 +634,12 @@ Default log line:
 12:41:03 public api.myapp POST /api/webhooks/github 200 38ms req_Ap7kQ3mN8vR2xLzC
 12:41:07 local  myapp     GET  /settings             200 12ms req_B9vL5rTs1mX8qK2d
 ```
+
+In an interactive terminal, `--follow` opens a Bubble Tea live viewer with a
+bounded 200-row display, scrolling, reconnect handling, and responsive columns.
+`--plain`, redirected output, and `--json` keep the streaming line protocol.
+Human terminal output uses Lip Gloss styling and honors `NO_COLOR`; machine
+output never contains ANSI formatting.
 
 Request IDs are compact opaque values in `req_<16-char-random>` form. The log
 line already carries the route, method, and path, so IDs stay short enough to
