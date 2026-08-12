@@ -707,15 +707,27 @@ of scope.
 
 Goal: provide one interactive local observability surface.
 
+> First TUI slice complete. `routeup dashboard` is a read-only Bubble Tea view
+> of active routes, all managed public exposures, tunnel state, live requests,
+> and safely rendered opted-in captures. It reuses the existing agent APIs and
+> terminal theme, remains open while the agent is offline, and never starts or
+> mutates the agent. The browser dashboard is deferred until after the initial
+> release; no `--web` flag or loopback HTTP surface exists yet.
+
 Build:
 
 ```txt
 routeup dashboard opens a full-screen TUI by default
-routeup dashboard --web opens an embedded browser dashboard
 active routes, exposures, tunnel state, live logs, and inspect details
 reuse the shared terminal theme and live-log model
-shared agent client/model between TUI and web views
 read-only first slice; replay and mutations arrive with their owning milestones
+```
+
+Later web slice:
+
+```txt
+routeup dashboard --web opens an embedded browser dashboard
+shared agent client/model between TUI and web views
 embedded assets with no CDN or telemetry
 ```
 

@@ -97,11 +97,14 @@ func runInspect(cmd *cobra.Command, id string, opts inspectOpts) error {
 }
 
 func writeInspectEntry(out io.Writer, entry logs.Entry, raw bool) error {
+	return writeInspectEntryStyled(out, entry, raw, newTerminalStyles(out))
+}
+
+func writeInspectEntryStyled(out io.Writer, entry logs.Entry, raw bool, styles terminalStyles) error {
 	if entry.Capture == nil {
 		return fmt.Errorf("request %s was not captured", terminalEscapeString(entry.ID))
 	}
 
-	styles := newTerminalStyles(out)
 	if _, err := fmt.Fprintf(out, "Request %s\n\n%s\n--------\n%s %s\n%s %s\n%s %s:%d\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n",
 		styles.accent(terminalEscapeString(entry.ID)), styles.label("Metadata"), styles.label("Source:"), terminalEscapeString(string(entry.Source)),
 		styles.label("Route:"), terminalEscapeString(entry.Route), styles.label("Target:"), terminalEscapeString(entry.Target.Path), entry.Target.Port,
@@ -111,14 +114,13 @@ func writeInspectEntry(out io.Writer, entry logs.Entry, raw bool) error {
 		return fmt.Errorf("write metadata: %w", err)
 	}
 
-	if err := writeCapturedMessage(out, "Request", entry.Capture.Request, raw); err != nil {
+	if err := writeCapturedMessageStyled(out, "Request", entry.Capture.Request, raw, styles); err != nil {
 		return err
 	}
-	return writeCapturedMessage(out, "Response", entry.Capture.Response, raw)
+	return writeCapturedMessageStyled(out, "Response", entry.Capture.Response, raw, styles)
 }
 
-func writeCapturedMessage(out io.Writer, label string, msg *logs.CapturedMessage, raw bool) error {
-	styles := newTerminalStyles(out)
+func writeCapturedMessageStyled(out io.Writer, label string, msg *logs.CapturedMessage, raw bool, styles terminalStyles) error {
 	if _, err := fmt.Fprintf(out, "\n%s\n%s\n", styles.label(label), strings.Repeat("-", len(label))); err != nil {
 		return fmt.Errorf("write %s label: %w", label, err)
 	}

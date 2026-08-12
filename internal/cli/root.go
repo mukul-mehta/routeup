@@ -66,6 +66,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(
 		commandGroup(groupStart, newServeCmd()),
 		commandGroup(groupStart, newExposeCmd()),
+		commandGroup(groupObserve, newDashboardCmd()),
 		commandGroup(groupObserve, newRoutesCmd()),
 		commandGroup(groupObserve, newLogsCmd()),
 		commandGroup(groupObserve, newInspectCmd()),

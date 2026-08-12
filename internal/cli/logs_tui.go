@@ -80,8 +80,12 @@ func waitForFollowLogEvent(events <-chan tea.Msg) tea.Cmd {
 func (m followLogsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
+		if msg.Width > 0 {
+			m.width = msg.Width
+		}
+		if msg.Height > 0 {
+			m.height = msg.Height
+		}
 		m.scroll = min(m.scroll, m.maxScroll())
 		return m, nil
 	case tea.KeyMsg:
@@ -126,9 +130,9 @@ func (m followLogsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m *followLogsModel) add(entry logs.Entry) {
+func (m *followLogsModel) add(entry logs.Entry) bool {
 	if _, exists := m.seen[entry.ID]; exists {
-		return
+		return false
 	}
 	wasScrolled := m.scroll > 0
 	if len(m.entries) == followLogLimit {
@@ -140,6 +144,7 @@ func (m *followLogsModel) add(entry logs.Entry) {
 	if wasScrolled {
 		m.scroll = min(m.scroll+1, m.maxScroll())
 	}
+	return true
 }
 
 func (m followLogsModel) maxScroll() int {

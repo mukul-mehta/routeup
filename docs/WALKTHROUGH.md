@@ -105,6 +105,10 @@ internal/
 
   cli/                     # Cobra command tree
     root.go                #   Root command, subcommand registry
+    dashboard.go           #   read-only dashboard command and agent polling
+    dashboard_tui.go       #   Bubble Tea dashboard state and interaction
+    dashboard_render.go    #   responsive full-screen dashboard rendering
+    dashboard_view.go      #   responsive route and exposure rows
     run.go                 #   bare `routeup` local process runner
     run_process.go         #   startup readiness and child result handling
     targets.go             #   target flag parsing and display
@@ -208,6 +212,7 @@ routeup
   expose [name]             Expose a local port publicly through a routeup server
   routes                    List active local routes
   config                    Show resolved project configuration
+  dashboard                 Observe routes, exposures, live logs, and captures
   doctor                    Diagnose setup state
   update                    Self-update to the latest release
   uninstall                 Reverse setup (untrust CA, remove forwarder/setcap, delete state)

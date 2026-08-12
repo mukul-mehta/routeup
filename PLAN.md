@@ -83,6 +83,7 @@ routeup serve api.myapp --port 9080
 routeup serve api.myapp --port 9080 --expose   # also expose publicly
 routeup expose api.myapp               # expose active or configured targets publicly
 routeup agent status
+routeup dashboard
 routeup routes
 routeup logs
 routeup config

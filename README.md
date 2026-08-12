@@ -262,6 +262,7 @@ contains terminal formatting.
 ## Other commands
 
 ```bash
+routeup dashboard   # interactive routes, exposures, live logs, and inspect
 routeup routes      # list active local routes (PUBLIC annotation when exposed)
 routeup doctor      # check CA, OS trust, port 443, and agent health
 routeup config      # show the discovered file and resolved non-secret settings
@@ -271,6 +272,11 @@ routeup uninstall   # remove the CA, port-443 helper, and ~/.routeup
 
 `routes`, `doctor`, `agent status`, `config`, and `inspect` support `--json`.
 `logs --json` remains NDJSON and writes no human messages to stdout.
+
+`routeup dashboard` is read-only and requires an interactive terminal. Use Tab
+to move between routes, exposures, and requests; `j`/`k` to navigate; Enter to
+inspect an opted-in capture; Esc to return; and `q` to quit. It observes an
+existing agent without starting one.
 
 ## Shell completions
 

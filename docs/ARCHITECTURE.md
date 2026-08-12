@@ -61,6 +61,7 @@ routeup serve --port 8080
 routeup serve --port 8080 --expose
 routeup expose <name>
 routeup agent status
+routeup dashboard
 routeup routes
 routeup logs
 routeup config
@@ -80,6 +81,11 @@ start the local agent if needed
 start the tunnel client for expose
 print clear status and errors
 ```
+
+`routeup dashboard` is a read-only Bubble Tea view over the existing status,
+route-list, log-follow, and inspect APIs. It never starts the agent. Routes and
+public exposures are separate collections so standalone exposure sessions stay
+visible even when their owner PID differs from a local route owner.
 
 ### Local Agent
 
