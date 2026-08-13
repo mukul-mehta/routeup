@@ -105,8 +105,8 @@ func writeInspectEntryStyled(out io.Writer, entry logs.Entry, raw bool, styles t
 		return fmt.Errorf("request %s was not captured", terminalEscapeString(entry.ID))
 	}
 
-	if _, err := fmt.Fprintf(out, "Request %s\n\n%s\n--------\n%s %s\n%s %s\n%s %s:%d\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n",
-		styles.accent(terminalEscapeString(entry.ID)), styles.label("Metadata"), styles.label("Source:"), terminalEscapeString(string(entry.Source)),
+	if _, err := fmt.Fprintf(out, "%s %s\n\n%s\n--------\n%s %s\n%s %s\n%s %s:%d\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n",
+		styles.label("Request"), styles.accent(terminalEscapeString(entry.ID)), styles.label("Metadata"), styles.label("Source:"), terminalEscapeString(string(entry.Source)),
 		styles.label("Route:"), terminalEscapeString(entry.Route), styles.label("Target:"), terminalEscapeString(entry.Target.Path), entry.Target.Port,
 		styles.label("Status:"), styles.statusCode(entry.Status), styles.label("Duration:"), formatLogDuration(entry.Duration),
 		styles.label("Method:"), terminalEscapeString(entry.Method), styles.label("Path:"), terminalEscapeString(entry.RequestPath),
@@ -130,7 +130,13 @@ func writeCapturedMessageStyled(out io.Writer, label string, msg *logs.CapturedM
 		}
 		return nil
 	}
-	if _, err := fmt.Fprintf(out, "Capture: %s\nBody bytes: %d\n", captureStatus(msg.Complete), len(msg.Body)); err != nil {
+	status := captureStatus(msg.Complete)
+	if msg.Complete {
+		status = styles.success(status)
+	} else {
+		status = styles.warning(status)
+	}
+	if _, err := fmt.Fprintf(out, "%s %s\n%s %d\n", styles.label("Capture:"), status, styles.label("Body bytes:"), len(msg.Body)); err != nil {
 		return fmt.Errorf("write %s capture status: %w", label, err)
 	}
 	if len(msg.RedactedHeaders) > 0 {
@@ -138,7 +144,7 @@ func writeCapturedMessageStyled(out io.Writer, label string, msg *logs.CapturedM
 		for i, name := range msg.RedactedHeaders {
 			redacted[i] = terminalEscapeString(name)
 		}
-		if _, err := fmt.Fprintf(out, "Redacted: %s\n", strings.Join(redacted, ", ")); err != nil {
+		if _, err := fmt.Fprintf(out, "%s %s\n", styles.label("Redacted:"), styles.warning(strings.Join(redacted, ", "))); err != nil {
 			return fmt.Errorf("write %s redacted headers: %w", label, err)
 		}
 	}
@@ -153,7 +159,7 @@ func writeCapturedMessageStyled(out io.Writer, label string, msg *logs.CapturedM
 	} else if err := writeSafeHeaders(out, msg.Headers); err != nil {
 		return fmt.Errorf("write %s headers: %w", label, err)
 	}
-	if _, err := fmt.Fprintln(out, "\nBody\n----"); err != nil {
+	if _, err := fmt.Fprintf(out, "\n%s\n----\n", styles.label("Body")); err != nil {
 		return fmt.Errorf("write %s body label: %w", label, err)
 	}
 	if len(msg.Body) == 0 {

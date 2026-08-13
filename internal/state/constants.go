@@ -13,6 +13,7 @@ const (
 )
 
 const (
+	StateDirEnv    = "ROUTEUP_STATE_DIR"
 	AgentSocketEnv = "ROUTEUP_AGENT_SOCKET"
 	XDGRuntimeEnv  = "XDG_RUNTIME_DIR"
 )

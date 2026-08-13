@@ -12,7 +12,13 @@ import (
 
 	"github.com/mukul-mehta/routeup/internal/ipc"
 	"github.com/mukul-mehta/routeup/internal/logs"
+	"github.com/mukul-mehta/routeup/internal/state"
 )
+
+func TestMain(m *testing.M) {
+	_ = os.Unsetenv(state.StateDirEnv)
+	os.Exit(m.Run())
+}
 
 func startUnixHTTPServer(t *testing.T, handler http.Handler) string {
 	t.Helper()
@@ -81,7 +87,7 @@ func TestLogs_NoAgentMessage(t *testing.T) {
 	}
 }
 
-func TestLogsFollowPlainDoesNotPrintHeaderWithoutAgent(t *testing.T) {
+func TestLogsFollowDoesNotPrintHeaderWithoutAgent(t *testing.T) {
 	dir, err := os.MkdirTemp("", "rup-")
 	if err != nil {
 		t.Fatal(err)
@@ -94,6 +100,15 @@ func TestLogsFollowPlainDoesNotPrintHeaderWithoutAgent(t *testing.T) {
 	}
 	if strings.Contains(stdout, "TIME") || !strings.Contains(stdout, "agent not running") {
 		t.Fatalf("output = %q", stdout)
+	}
+}
+
+func TestLogsPlainValidation(t *testing.T) {
+	if _, _, err := runRoot(t, "logs", "--plain"); err == nil || !strings.Contains(err.Error(), "requires --follow") {
+		t.Fatalf("plain error = %v", err)
+	}
+	if _, _, err := runRoot(t, "logs", "--follow", "--plain", "--json"); err == nil || !strings.Contains(err.Error(), "cannot be used together") {
+		t.Fatalf("plain/json error = %v", err)
 	}
 }
 

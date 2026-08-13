@@ -51,6 +51,12 @@ func newLogsCmd() *cobra.Command {
 			if opts.public && opts.local {
 				return errors.New("--public and --local cannot be used together")
 			}
+			if opts.plain && opts.json {
+				return errors.New("--plain and --json cannot be used together")
+			}
+			if opts.plain && !opts.follow {
+				return errors.New("--plain requires --follow")
+			}
 
 			logOpts := logs.ListOptions{}
 			if opts.limit < 0 {
@@ -104,7 +110,7 @@ func newLogsCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&opts.public, "public", false, "show only public tunnel requests")
 	cmd.Flags().BoolVar(&opts.local, "local", false, "show only local .localhost requests")
 	cmd.Flags().BoolVar(&opts.json, "json", false, "write one JSON request record per line")
-	cmd.Flags().BoolVar(&opts.plain, "plain", false, "disable the interactive viewer with --follow")
+	cmd.Flags().BoolVar(&opts.plain, "plain", false, "with --follow, stream lines instead of opening the interactive viewer")
 	cmd.Flags().IntVar(&opts.limit, "limit", 0, "show at most the newest N matching requests")
 	cmd.Flags().StringVar(&opts.since, "since", "", "show requests since a duration ago or RFC3339 time")
 	cmd.Flags().StringVar(&opts.method, "method", "", "show only this HTTP method")
@@ -163,7 +169,7 @@ func runLogs(cmd *cobra.Command, opts logs.ListOptions, commandOpts logsOpts) er
 			if commandOpts.json {
 				return nil
 			}
-			_, _ = fmt.Fprintln(out, "no request logs (agent not running)")
+			_, _ = fmt.Fprintln(out, newTerminalStyles(out).muted("no request logs (agent not running)"))
 			return nil
 		}
 		return err
@@ -180,7 +186,7 @@ func runLogs(cmd *cobra.Command, opts logs.ListOptions, commandOpts logsOpts) er
 		if commandOpts.json {
 			return nil
 		}
-		_, _ = fmt.Fprintln(out, "no request logs (agent not running)")
+		_, _ = fmt.Fprintln(out, newTerminalStyles(out).muted("no request logs (agent not running)"))
 		return nil
 	}
 	if err != nil {
@@ -190,7 +196,7 @@ func runLogs(cmd *cobra.Command, opts logs.ListOptions, commandOpts logsOpts) er
 		if commandOpts.json {
 			return nil
 		}
-		_, _ = fmt.Fprintln(out, "no matching request logs")
+		_, _ = fmt.Fprintln(out, newTerminalStyles(out).muted("no matching request logs"))
 		return nil
 	}
 	if !commandOpts.json {

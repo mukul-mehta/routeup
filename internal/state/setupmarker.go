@@ -14,18 +14,21 @@ import (
 type SetupMarker struct {
 	Version int    `json:"version"`
 	TLSPort int    `json:"tls_port"`
-	BinPath string `json:"bin_path,omitempty"` // binary the port-bind machinery was wired to
+	BinPath string `json:"bin_path,omitempty"` // CLI binary that installed the platform setup
 }
 
-const SetupMarkerName = "setup.json"
+const (
+	SetupMarkerName     = "setup.json"
+	CurrentSetupVersion = 1
+)
 
-// SetupMarkerPath returns ~/.routeup/setup.json.
+// SetupMarkerPath returns setup.json in the active state directory.
 func SetupMarkerPath() (string, error) {
-	home, err := os.UserHomeDir()
+	dir, err := Dir()
 	if err != nil {
-		return "", fmt.Errorf("locate home dir: %w", err)
+		return "", err
 	}
-	return filepath.Join(home, StateDirName, SetupMarkerName), nil
+	return filepath.Join(dir, SetupMarkerName), nil
 }
 
 // ReadSetupMarker returns wrapped os.ErrNotExist when no marker exists.

@@ -4,14 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/mukul-mehta/routeup/internal/agentctl"
 	"github.com/mukul-mehta/routeup/internal/ipc"
+	"github.com/mukul-mehta/routeup/internal/route"
 	"github.com/mukul-mehta/routeup/internal/state"
 )
 
@@ -60,41 +62,67 @@ func newRoutesCmd() *cobra.Command {
 				return nil
 			}
 
-			var table strings.Builder
-			tw := tabwriter.NewWriter(&table, 0, 0, 2, ' ', 0)
-			_, _ = fmt.Fprintln(tw, "NAME\tTARGETS\tPUBLIC\tPATHS\tPID\tAGE\tCWD")
-			now := time.Now()
-			for _, c := range claims {
-				public, paths := "-", "-"
-				if c.PublicHost != "" {
-					public, paths = "https://"+c.PublicHost, formatExposePaths(c.PublicPaths)
-					if c.PublicState == ipc.ExposureReconnecting {
-						public += " (reconnecting)"
-					}
-				}
-				_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
-					terminalEscapeString(c.Name), terminalEscapeString(formatTargets(c.Targets)),
-					terminalEscapeString(public), terminalEscapeString(paths), c.OwnerPID,
-					humanDuration(now.Sub(c.RegisteredAt)), terminalEscapeString(c.OwnerCWD))
-			}
-			if err := tw.Flush(); err != nil {
-				return err
-			}
-			styles := newTerminalStyles(out)
-			lines := strings.Split(strings.TrimSuffix(table.String(), "\n"), "\n")
-			for i, line := range lines {
-				if i == 0 {
-					line = styles.label(line)
-				} else if strings.Contains(line, "(reconnecting)") {
-					line = styles.warning(line)
-				}
-				_, _ = fmt.Fprintln(out, line)
-			}
-			return nil
+			return writeRouteBlocks(out, claims, state.TLSPortOrDefault(), time.Now())
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "write active routes as JSON")
 	return cmd
+}
+
+func writeRouteBlocks(out io.Writer, claims []ipc.Claim, tlsPort int, now time.Time) error {
+	styles := newTerminalStyles(out)
+	_, _ = fmt.Fprintf(out, "%s  %s\n", styles.accent("routes"), styles.muted(fmt.Sprintf("%d active", len(claims))))
+	for _, claim := range claims {
+		_, _ = fmt.Fprintln(out)
+		_, _ = fmt.Fprintln(out, styles.accent(terminalEscapeString(claim.Name)))
+
+		local := "-"
+		if name, err := route.Parse(claim.Name); err == nil {
+			local = localURL(name.LocalHost(), tlsPort)
+		}
+		_, _ = fmt.Fprintf(out, "  %s %s\n", styles.label("local   "), styles.url(local))
+
+		for index, target := range claim.Targets {
+			label := "        "
+			if index == 0 {
+				label = styles.label("targets ")
+			}
+			_, _ = fmt.Fprintf(out, "  %s %s -> %s\n", label, styles.accent(terminalEscapeString(target.Path)), styles.muted(fmt.Sprintf("localhost:%d", target.Port)))
+		}
+
+		public := styles.muted("-")
+		if claim.PublicHost != "" {
+			public = "https://" + terminalEscapeString(claim.PublicHost)
+			if claim.PublicState == ipc.ExposureReconnecting {
+				public = styles.warning(public + " (reconnecting)")
+			} else {
+				public = styles.url(public)
+			}
+		}
+		_, _ = fmt.Fprintf(out, "  %s %s\n", styles.label("public  "), public)
+		if claim.PublicHost != "" {
+			_, _ = fmt.Fprintf(out, "  %s %s\n", styles.label("paths   "), terminalEscapeString(formatExposePaths(claim.PublicPaths)))
+		}
+		process := fmt.Sprintf("pid %d | %s", claim.OwnerPID, humanDuration(now.Sub(claim.RegisteredAt)))
+		_, _ = fmt.Fprintf(out, "  %s %s\n", styles.label("process "), styles.muted(process))
+		_, _ = fmt.Fprintf(out, "  %s %s\n", styles.label("cwd     "), styles.muted(terminalEscapeString(shortenHome(claim.OwnerCWD))))
+	}
+	return nil
+}
+
+func shortenHome(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
+	}
+	if path == home {
+		return "~"
+	}
+	prefix := home + string(os.PathSeparator)
+	if strings.HasPrefix(path, prefix) {
+		return "~/" + strings.TrimPrefix(path, prefix)
+	}
+	return path
 }
 
 func humanDuration(d time.Duration) string {

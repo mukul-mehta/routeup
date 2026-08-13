@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -142,19 +143,6 @@ func runRun(cmd *cobra.Command, cwd string) error {
 		exposeReq = &request
 	}
 
-	maintainCtx, cancelMaintain := context.WithCancel(ctx)
-	maintainDone := make(chan struct{})
-	go func() {
-		defer close(maintainDone)
-		client.Maintain(maintainCtx, agentctl.DesiredState{
-			Claim: &claim, Exposure: exposeReq, PublicHost: strings.TrimPrefix(publicURL, "https://"),
-		}, errOut)
-	}()
-	defer func() {
-		cancelMaintain()
-		<-maintainDone
-	}()
-
 	caCertPath, _ := state.CACertPath()
 	local := localURL(routeName.LocalHost(), tlsPort)
 	childEnv := process.InjectEnv(os.Environ(), process.EnvInputs{
@@ -167,9 +155,20 @@ func runRun(cmd *cobra.Command, cwd string) error {
 		WorkDir:    cwd,
 	})
 
-	styles := newTerminalStyles(out)
-	_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("running:"), command)
-	_, _ = fmt.Fprintln(out, "")
+	writeRunnerPreamble(out, command, routeName, local, publicURL, targets, appPort)
+
+	maintainCtx, cancelMaintain := context.WithCancel(ctx)
+	maintainDone := make(chan struct{})
+	go func() {
+		defer close(maintainDone)
+		client.Maintain(maintainCtx, agentctl.DesiredState{
+			Claim: &claim, Exposure: exposeReq, PublicHost: strings.TrimPrefix(publicURL, "https://"),
+		}, errOut)
+	}()
+	defer func() {
+		cancelMaintain()
+		<-maintainDone
+	}()
 
 	runner := process.Runner{Command: command, Dir: cwd, Env: childEnv}
 	childCtx, cancelChild := context.WithCancel(ctx)
@@ -200,17 +199,33 @@ func runRun(cmd *cobra.Command, cwd string) error {
 		return runnerResultError(result, appPort, true)
 	}
 
-	_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("route:"), styles.accent(routeName.String()))
-	_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("local:"), styles.url(local))
-	if publicURL != "" {
-		_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("public:"), styles.url(publicURL))
-	}
-	printTargets(out, targets)
-	_, _ = fmt.Fprintln(out, "")
+	styles := newTerminalStyles(out)
+	_, _ = fmt.Fprintf(out, "\n%s %s\n\n", styles.success("ready:"), styles.url(local))
 
 	result = <-resultCh
 	cancelChild()
 	return runnerResultError(result, appPort, false)
+}
+
+func writeRunnerPreamble(out io.Writer, command string, routeName route.Name, local, publicURL string, targets []route.Target, appPort int) {
+	styles := newTerminalStyles(out)
+	_, _ = fmt.Fprintln(out, styles.accent("routeup"))
+	_, _ = fmt.Fprintf(out, "  %s %s\n", styles.label("command"), terminalEscapeString(command))
+	_, _ = fmt.Fprintf(out, "  %s   %s\n", styles.label("route"), styles.accent(routeName.String()))
+	_, _ = fmt.Fprintf(out, "  %s   %s\n", styles.label("local"), styles.url(local))
+	if publicURL != "" {
+		_, _ = fmt.Fprintf(out, "  %s  %s\n", styles.label("public"), styles.url(publicURL))
+	}
+	for index, target := range targets {
+		label := ""
+		if index == 0 {
+			label = styles.label("target")
+		} else {
+			label = "      "
+		}
+		_, _ = fmt.Fprintf(out, "  %s  %s -> %s\n", label, styles.accent(terminalEscapeString(target.Path)), styles.muted(fmt.Sprintf("localhost:%d", target.Port)))
+	}
+	_, _ = fmt.Fprintf(out, "  %s  %s\n\n", styles.label("status"), styles.warning(fmt.Sprintf("waiting for localhost:%d", appPort)))
 }
 
 func runnerRoute(file config.Config, cwd string) (route.Name, error) {

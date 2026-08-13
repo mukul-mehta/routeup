@@ -74,8 +74,8 @@ Acceptance:
 ```bash
 just test
 just lint
-just dev help
-just dev doctor
+go run ./cmd/routeup help
+go run ./cmd/routeup doctor
 ```
 
 CI must be green on push and PR.
@@ -224,16 +224,27 @@ Windows support
 
 Goal: make routeup installable and removable cleanly, and survive binary upgrades.
 
-Background: `routeup setup` installs a macOS LaunchDaemon (the port-443 forwarder) and, on Linux, a `setcap` capability on the binary. Both reference the binary by path/inode, so a package upgrade can break them. Distribution also needs a clean teardown story since `brew uninstall` knows nothing about the LaunchDaemon, the trusted CA, or `~/.routeup`.
+Background: `routeup setup` installs a root-owned macOS helper plus LaunchDaemon
+for port forwarding and, on Linux, a `setcap` capability on the binary. Linux
+capabilities are inode-bound and disappear on replacement. Distribution also
+needs a clean teardown story since `brew uninstall` knows nothing about the
+LaunchDaemon, the trusted CA, or `~/.routeup`.
+
+> Implementation note: setup markers use the initial version 1 format; no
+> migration code exists. `doctor` rejects missing or malformed state, and macOS
+> validates the installed helper's binary, IPv4 and IPv6 listeners, and upstream
+> target. `ROUTEUP_STATE_DIR` and the `install-devel` Just recipe provide a
+> separate high-port profile with its own independently trusted development CA.
 
 Build:
 
 ```txt
-stable LaunchDaemon binary path (Homebrew opt/bin symlink, survives upgrades)
+root-owned LaunchDaemon helper copy under /Library/PrivilegedHelperTools
 setup marker records the configured binary path
 routeup uninstall (stop agent, remove forwarder/setcap, untrust CA, delete state)
 routeup update (delegate to Homebrew or replace a direct-install binary)
 doctor port-binding check (missing forwarder on macOS, lost setcap on Linux)
+update refreshes the root-owned macOS helper or Linux capability
 Homebrew cask (binary + caveat to run `routeup setup`)
 ```
 
@@ -241,12 +252,17 @@ Acceptance:
 
 ```bash
 routeup setup
-brew upgrade routeup        # forwarder still works (plist points at the stable symlink)
+brew upgrade routeup        # forwarder keeps serving; doctor requests refresh
 routeup doctor              # flags a lost setcap on Linux after upgrade
 routeup uninstall           # removes forwarder, untrusts CA, deletes ~/.routeup
 ```
 
-The forwarder on macOS is unaffected by upgrades because the plist points at the stable Homebrew symlink. On Linux the capability is on the inode, so an upgrade drops it; `doctor` detects this via `getcap` and `routeup setup` reapplies.
+The forwarder on macOS executes a root-owned helper copy, not a user-writable
+Homebrew or development binary. `routeup update` refreshes that copy; after a
+manual package-manager upgrade, `doctor` detects a binary mismatch and asks for
+`routeup setup`. On Linux the capability is on the inode, so an upgrade drops
+it; the updater reapplies it and `doctor` detects any remaining mismatch via
+`getcap`.
 
 Do not build yet:
 
@@ -557,9 +573,10 @@ Goal: make local and public traffic visible.
 > the JSON agent API, and `--follow` consumes its SSE stream. The proxy records
 > the matched target, status, and duration without buffering request or response
 > bodies; request capture and inspect are implemented in Phase 10 below. In an
-> interactive terminal, `--follow` uses a Bubble Tea live viewer; `--plain`,
-> redirected output, and `--json` preserve line-oriented streaming. The shared
-> Lip Gloss theme is also used by existing human-readable status commands.
+> interactive terminal, `--follow` uses a Bubble Tea live viewer; redirected
+> output and `--plain` preserve line-oriented streaming, while `--json` emits
+> NDJSON. The shared Lip Gloss theme is also used by existing human-readable
+> status commands.
 
 Build:
 
@@ -736,6 +753,39 @@ The web dashboard is loopback-only at an internal route such as
 random session token. It must never be registered as a user route or exposed
 publicly. Accounts, server administration, persistence, and hosted dashboards
 are out of scope.
+
+## Phase 15.5: Dashboard Tabs And JSON Inspection
+
+Goal: turn the read-only dashboard into a focused multi-view debugging surface.
+
+Build:
+
+```txt
+visible tab bar: Overview, Routes, Requests, Config
+Tab and Shift-Tab cycle tabs; keys 1-4 jump directly
+preserve selection and scroll position independently per tab
+Overview shows agent health plus route, exposure, and request counts
+Routes shows local URLs, targets, public exposure, paths, and tunnel state
+Requests keeps the live bounded list, filtering, and captured-request drilldown
+Config shows resolved non-secret project settings and their source
+request and response details remain separate
+valid application/json bodies are pretty-printed with syntax colors
+invalid or non-JSON bodies fall back to terminal-safe escaped text
+responsive layouts retain controls and selected request IDs on narrow terminals
+```
+
+Acceptance:
+
+```txt
+keyboard-only navigation reaches every tab and row
+live requests continue updating while another tab is selected
+JSON formatting never changes retained bytes or emits terminal controls
+large JSON and text bodies remain fully reachable through scrolling
+offline and agent-restart states remain clear without leaving the dashboard
+```
+
+Web UI, replay, route mutation, config editing, persistence, and server
+administration remain out of scope for this slice.
 
 ## Phase 16: mDNS/LAN Mobile Mode
 

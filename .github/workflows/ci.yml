@@ -163,7 +163,7 @@ jobs:
         run: sudo -u routeup-ci -H bash scripts/integration-linux.sh ./bin/routeup ${{ matrix.port }}
 
   integration-macos:
-    name: integration (macOS smoke)
+    name: integration (macOS)
     runs-on: macos-26
     timeout-minutes: 10
     steps:
@@ -177,5 +177,5 @@ jobs:
       - name: build
         run: go build -buildvcs=false -o bin/routeup ./cmd/routeup
 
-      - name: smoke
+      - name: integration
         run: bash scripts/integration-macos.sh ./bin/routeup

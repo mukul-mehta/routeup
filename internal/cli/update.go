@@ -7,7 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -45,6 +45,7 @@ func newUpdateCmd() *cobra.Command {
 
 func runUpdate(cmd *cobra.Command, checkOnly bool) error {
 	out := cmd.OutOrStdout()
+	styles := newTerminalStyles(out)
 	current := cmd.Root().Version
 
 	parent := cmd.Context()
@@ -59,11 +60,11 @@ func runUpdate(cmd *cobra.Command, checkOnly bool) error {
 		return fmt.Errorf("checking for updates: %w", err)
 	}
 
-	_, _ = fmt.Fprintf(out, "current: %s\n", current)
-	_, _ = fmt.Fprintf(out, "latest:  %s\n", latest)
+	_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("current:"), terminalEscapeString(current))
+	_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("latest: "), styles.accent(terminalEscapeString(latest)))
 
-	if current == "0.0.0-dev" {
-		_, _ = fmt.Fprintln(out, "\nthis is a dev build (built from source); not updating.")
+	if current == "0.0.0-dev" || strings.HasPrefix(current, "0.0.0-devel+") {
+		_, _ = fmt.Fprintln(out, "\n"+styles.muted("this is a development build; not updating."))
 		return nil
 	}
 
@@ -72,11 +73,11 @@ func runUpdate(cmd *cobra.Command, checkOnly bool) error {
 		return fmt.Errorf("comparing versions: %w", err)
 	}
 	if !newer {
-		_, _ = fmt.Fprintln(out, "\nalready up to date.")
+		_, _ = fmt.Fprintln(out, "\n"+styles.success("already up to date."))
 		return nil
 	}
 	if checkOnly {
-		_, _ = fmt.Fprintf(out, "\na newer version is available: %s — run `routeup update` to install.\n", latest)
+		_, _ = fmt.Fprintf(out, "\n%s %s\n", styles.warning("newer version available:"), styles.accent(latest+" - run `routeup update` to install"))
 		return nil
 	}
 
@@ -90,30 +91,31 @@ func runUpdate(cmd *cobra.Command, checkOnly bool) error {
 	}
 
 	if update.DetectChannel(resolved) == update.ChannelHomebrew {
-		_, _ = fmt.Fprintln(out, "\ninstalled via Homebrew — upgrading with brew...")
-		return brewUpgrade(ctx, out)
+		_, _ = fmt.Fprintln(out, "\n"+styles.warning("installed via Homebrew - upgrading with brew..."))
+		if err := brewUpgrade(ctx, out); err != nil {
+			return err
+		}
+		reapplyBind(cmd, out, exe)
+		return nil
 	}
 
-	_, _ = fmt.Fprintf(out, "\nupdating %s ...\n", resolved)
+	_, _ = fmt.Fprintf(out, "\n%s %s\n", styles.warning("updating"), styles.muted(terminalEscapeString(resolved)))
 	if err := update.Apply(ctx, updateRepo, latest, resolved); err != nil {
 		return fmt.Errorf("applying update: %w", err)
 	}
-	_, _ = fmt.Fprintf(out, "updated to %s\n", latest)
+	_, _ = fmt.Fprintln(out, styles.success("updated to "+terminalEscapeString(latest)))
 	reapplyBind(cmd, out, resolved)
 	return nil
 }
 
-// reapplyBind re-grants cap_net_bind_service after the binary swap on Linux
-// (the capability is on the old inode). No-op on macOS and for high ports.
+// reapplyBind refreshes platform-specific privileged-port setup after an update.
 func reapplyBind(cmd *cobra.Command, out io.Writer, binaryPath string) {
-	if runtime.GOOS != "linux" {
-		return
-	}
+	styles := newTerminalStyles(out)
 	port := state.TLSPortOrDefault()
 	if !privbind.Required(port) {
 		return
 	}
-	_, _ = fmt.Fprintln(out, "re-granting port 443 (setcap; asks for your password)...")
+	_, _ = fmt.Fprintln(out, styles.warning(fmt.Sprintf("refreshing privileged port %d setup (asks for your password)...", port)))
 
 	parent := cmd.Context()
 	if parent == nil {
@@ -123,11 +125,11 @@ func reapplyBind(cmd *cobra.Command, out io.Writer, binaryPath string) {
 	defer cancel()
 
 	if err := privbind.ReapplyBind(ctx, port, binaryPath); err != nil {
-		_, _ = fmt.Fprintf(out, "warning: couldn't reapply setcap: %v\n", err)
-		_, _ = fmt.Fprintln(out, "  rerun `routeup setup` to restore port 443")
+		_, _ = fmt.Fprintln(out, styles.warning(fmt.Sprintf("warning: couldn't refresh privileged port setup: %v", err)))
+		_, _ = fmt.Fprintln(out, styles.muted(fmt.Sprintf("  rerun `routeup setup` to restore port %d", port)))
 		return
 	}
-	_, _ = fmt.Fprintf(out, "port %d: ready\n", port)
+	_, _ = fmt.Fprintln(out, styles.success(fmt.Sprintf("port %d: ready", port)))
 }
 
 // brewUpgrade runs `brew upgrade <formula>`, or prints the command if brew
@@ -135,7 +137,8 @@ func reapplyBind(cmd *cobra.Command, out io.Writer, binaryPath string) {
 func brewUpgrade(ctx context.Context, out io.Writer) error {
 	brew, err := exec.LookPath("brew")
 	if err != nil {
-		_, _ = fmt.Fprintf(out, "brew not found; run: brew upgrade %s\n", brewFormula)
+		styles := newTerminalStyles(out)
+		_, _ = fmt.Fprintf(out, "%s %s\n", styles.warning("brew not found; run:"), styles.accent("brew upgrade "+brewFormula))
 		return nil
 	}
 	c := exec.CommandContext(ctx, brew, "upgrade", brewFormula)

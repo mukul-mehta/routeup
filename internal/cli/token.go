@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -79,15 +80,16 @@ func newTokenCreateCmd() *cobra.Command {
 		}
 
 		out := cmd.OutOrStdout()
-		_, _ = fmt.Fprintln(out, "token created")
-		_, _ = fmt.Fprintf(out, "  id:      %s\n", id)
-		_, _ = fmt.Fprintf(out, "  name:    %s\n", args[0])
+		styles := newTerminalStyles(out)
+		_, _ = fmt.Fprintln(out, styles.success("token created"))
+		_, _ = fmt.Fprintf(out, "  %s %s\n", styles.label("id:    "), styles.muted(terminalEscapeString(id)))
+		_, _ = fmt.Fprintf(out, "  %s %s\n", styles.label("name:  "), terminalEscapeString(args[0]))
 		for _, p := range patterns {
-			_, _ = fmt.Fprintf(out, "  allow:   %s\n", p)
+			_, _ = fmt.Fprintf(out, "  %s %s\n", styles.label("allow: "), terminalEscapeString(p.String()))
 		}
-		_, _ = fmt.Fprintf(out, "  secret:  %s\n", secret)
+		_, _ = fmt.Fprintf(out, "  %s %s\n", styles.label("secret:"), styles.accent(terminalEscapeString(secret)))
 		_, _ = fmt.Fprintln(out, "")
-		_, _ = fmt.Fprintln(out, "store this secret now — it is shown once and cannot be recovered.")
+		_, _ = fmt.Fprintln(out, styles.warning("store this secret now - it is shown once and cannot be recovered."))
 		return nil
 	}
 	return cmd
@@ -113,12 +115,14 @@ func newTokenListCmd() *cobra.Command {
 		}
 
 		out := cmd.OutOrStdout()
+		styles := newTerminalStyles(out)
 		if len(tokens) == 0 {
-			_, _ = fmt.Fprintln(out, "no tokens")
+			_, _ = fmt.Fprintln(out, styles.muted("no tokens"))
 			return nil
 		}
 
-		tw := tabwriter.NewWriter(out, 0, 2, 2, ' ', 0)
+		var table strings.Builder
+		tw := tabwriter.NewWriter(&table, 0, 2, 2, ' ', 0)
 		_, _ = fmt.Fprintln(tw, "ID\tNAME\tSTATUS\tCREATED\tALLOW")
 		for _, tok := range tokens {
 			status := "active"
@@ -130,7 +134,20 @@ func newTokenListCmd() *cobra.Command {
 				tok.CreatedAt.Format(time.RFC3339),
 				patternList(tok.Patterns))
 		}
-		_ = tw.Flush()
+		if err := tw.Flush(); err != nil {
+			return err
+		}
+		for index, line := range strings.Split(strings.TrimSuffix(table.String(), "\n"), "\n") {
+			switch {
+			case index == 0:
+				line = styles.label(line)
+			case strings.Contains(line, "revoked"):
+				line = styles.warning(line)
+			default:
+				line = styles.success(line)
+			}
+			_, _ = fmt.Fprintln(out, line)
+		}
 		return nil
 	}
 	return cmd
@@ -155,10 +172,11 @@ func newTokenRevokeCmd() *cobra.Command {
 			return err
 		}
 		out := cmd.OutOrStdout()
+		styles := newTerminalStyles(out)
 		if revoked {
-			_, _ = fmt.Fprintf(out, "token %s revoked\n", args[0])
+			_, _ = fmt.Fprintln(out, styles.success("token "+terminalEscapeString(args[0])+" revoked"))
 		} else {
-			_, _ = fmt.Fprintf(out, "no active token with id %q\n", args[0])
+			_, _ = fmt.Fprintln(out, styles.warning(fmt.Sprintf("no active token with id %q", terminalEscapeString(args[0]))))
 		}
 		return nil
 	}

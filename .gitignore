@@ -3,6 +3,8 @@
 /dist/
 /routeup
 /routeup.exe
+/.routeup-dev/
+/.routeup-devel/
 
 # Test and coverage artifacts
 *.test

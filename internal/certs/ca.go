@@ -21,8 +21,12 @@ import (
 
 const (
 	caValidity     = 10 * 365 * 24 * time.Hour
-	caCommonName   = "routeup local CA"
 	caOrganization = "routeup"
+)
+
+// These defaults are overridden only for the isolated routeup-devel build.
+var (
+	caCommonName = "routeup local CA"
 )
 
 // CA is the per-machine local root certificate authority.
@@ -106,7 +110,7 @@ func Create(certPath, keyPath string) (*CA, error) {
 		SubjectKeyId:   skid[:],
 		AuthorityKeyId: skid[:],
 		Subject: pkix.Name{
-			CommonName:         "routeup local CA",
+			CommonName:         caCommonName,
 			Organization:       []string{caOrganization},
 			OrganizationalUnit: []string{host},
 		},
@@ -214,6 +218,9 @@ func Inspect(certPath, keyPath string) (CAState, *CA, error) {
 	if time.Now().After(ca.Cert.NotAfter) {
 		return CABroken, ca, fmt.Errorf("CA at %s expired on %s: %w",
 			certPath, ca.Cert.NotAfter.Format(time.RFC3339), ErrCAExpired)
+	}
+	if ca.Cert.Subject.CommonName != caCommonName {
+		return CABroken, ca, fmt.Errorf("local CA common name %q does not match expected %q", ca.Cert.Subject.CommonName, caCommonName)
 	}
 	return CAPresent, ca, nil
 }

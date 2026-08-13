@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -170,11 +171,14 @@ func checkTrust(ca *certs.CA, certPath string) checkResult {
 // configured port and binary from the setup marker.
 func checkBind() checkResult {
 	port := state.TLSPortOrDefault()
-	binPath := ""
-	if m, err := state.ReadSetupMarker(); err == nil && m != nil {
-		binPath = m.BinPath
+	marker, err := state.ReadSetupMarker()
+	if errors.Is(err, os.ErrNotExist) {
+		return checkResult{checkFail, "setup state is missing — run `routeup setup`"}
 	}
-	h, msg := privbind.Check(port, binPath)
+	if err != nil {
+		return checkResult{checkFail, fmt.Sprintf("setup state is unreadable: %v — run `routeup setup`", err)}
+	}
+	h, msg := privbind.Check(port, marker.BinPath)
 	switch h {
 	case privbind.HealthOK:
 		return checkResult{checkOK, msg}

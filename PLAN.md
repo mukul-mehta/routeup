@@ -244,6 +244,12 @@ The older `port` field remains shorthand for `{ "path": "/", "port": <port> }`.
 
 There is no separate "project" concept; the `name` field on the config is the project name used for bare-name resolution. Shared server and token settings live in `~/.routeup/client.json`, written by `routeup setup`, not in the per-service file.
 
+For isolated development and integration tests, `ROUTEUP_STATE_DIR` relocates
+the complete per-user state root (socket, PID, log, CA, setup marker, and client
+configuration) without changing `HOME`. It does not affect project config
+discovery. `ROUTEUP_AGENT_SOCKET` remains a socket-only override with higher
+precedence.
+
 ## Exposure Model
 
 `routeup expose` means make the route public.
@@ -638,9 +644,10 @@ Default log line:
 
 In an interactive terminal, `--follow` opens a Bubble Tea live viewer with a
 bounded 200-row display, scrolling, reconnect handling, and responsive columns.
-`--plain`, redirected output, and `--json` keep the streaming line protocol.
-Human terminal output uses Lip Gloss styling and honors `NO_COLOR`; machine
-output never contains ANSI formatting.
+`--plain` forces append-only lines in a terminal, redirected output selects that
+format automatically, and `--json` writes NDJSON. Human terminal output uses
+Lip Gloss styling and honors `NO_COLOR`; machine output never contains ANSI
+formatting.
 
 Request IDs are compact opaque values in `req_<16-char-random>` form. The log
 line already carries the route, method, and path, so IDs stay short enough to

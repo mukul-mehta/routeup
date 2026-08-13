@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mukul-mehta/routeup/internal/ipc"
 	"github.com/mukul-mehta/routeup/internal/route"
@@ -72,5 +73,35 @@ func TestRoutes_PropagatesAgentErrors(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "agent not running") {
 		t.Fatalf("agent error misreported as unavailable: %q", out.String())
+	}
+}
+
+func TestWriteRouteBlocks(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	now := time.Date(2026, time.August, 13, 12, 0, 0, 0, time.UTC)
+	claim := ipc.Claim{
+		Name:         "integration-runner",
+		Targets:      []route.Target{{Path: "/", Port: 61809}},
+		OwnerPID:     80292,
+		OwnerCWD:     filepath.Join(home, "Work", "Zepl"),
+		RegisteredAt: now.Add(-32 * time.Second),
+	}
+	var out bytes.Buffer
+	if err := writeRouteBlocks(&out, []ipc.Claim{claim}, 47444, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"routes  1 active",
+		"integration-runner",
+		"local    https://integration-runner.localhost:47444",
+		"targets  / -> localhost:61809",
+		"public   -",
+		"process  pid 80292 | 32s",
+		"cwd      ~/Work/Zepl",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output missing %q:\n%s", want, out.String())
+		}
 	}
 }

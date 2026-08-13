@@ -70,13 +70,18 @@ func verifyTrust(certPath string) (bool, error) {
 func uninstallTrust(ctx context.Context, certPath string) error {
 	if certPath != "" {
 		removeTrustSetting(ctx, certPath, false)
-		removeTrustSetting(ctx, certPath, true)
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		login := filepath.Join(home, "Library", "Keychains", "login.keychain-db")
 		deleteCertsByName(ctx, caCommonName, login, false)
 	}
-	deleteCertsByName(ctx, caCommonName, "/Library/Keychains/System.keychain", true)
+	systemKeychain := "/Library/Keychains/System.keychain"
+	if len(certHashes(ctx, caCommonName, systemKeychain)) > 0 {
+		if certPath != "" {
+			removeTrustSetting(ctx, certPath, true)
+		}
+		deleteCertsByName(ctx, caCommonName, systemKeychain, true)
+	}
 	return nil
 }
 

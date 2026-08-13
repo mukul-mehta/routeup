@@ -18,6 +18,7 @@ import (
 // without a real forwarder/setcap.
 func runSetupCmd(t *testing.T) (string, error) {
 	t.Helper()
+	t.Setenv(state.StateDirEnv, "")
 	cmd := newSetupCmd()
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
@@ -53,6 +54,13 @@ func TestSetup_CreatesCAOnFirstRun(t *testing.T) {
 
 	if !strings.Contains(out, "certificate authority: created") {
 		t.Errorf("output missing 'certificate authority: created':\n%s", out)
+	}
+	marker, err := state.ReadSetupMarker()
+	if err != nil {
+		t.Fatalf("ReadSetupMarker: %v", err)
+	}
+	if marker.Version != state.CurrentSetupVersion {
+		t.Errorf("setup marker version = %d, want %d", marker.Version, state.CurrentSetupVersion)
 	}
 }
 

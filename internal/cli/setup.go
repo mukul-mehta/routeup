@@ -106,6 +106,7 @@ func runSetup(cmd *cobra.Command, opts runSetupOpts) error {
 	}
 
 	out := cmd.OutOrStdout()
+	styles := newTerminalStyles(out)
 
 	if err := promptServerCreds(cmd, out, &opts); err != nil {
 		return err
@@ -122,10 +123,10 @@ func runSetup(cmd *cobra.Command, opts runSetupOpts) error {
 	needCreate := false
 	switch caState {
 	case certs.CAPresent:
-		_, _ = fmt.Fprintln(out, "certificate authority: already set up")
+		_, _ = fmt.Fprintln(out, styles.success("certificate authority: already set up"))
 
 	case certs.CAPartial, certs.CABroken:
-		_, _ = fmt.Fprintln(out, "certificate authority: recreating (the previous one was incomplete)")
+		_, _ = fmt.Fprintln(out, styles.warning("certificate authority: recreating (the previous one was incomplete)"))
 		needCreate = true
 
 	case certs.CAAbsent:
@@ -139,16 +140,16 @@ func runSetup(cmd *cobra.Command, opts runSetupOpts) error {
 		if _, err := certs.Create(certPath, keyPath); err != nil {
 			return fmt.Errorf("creating local CA: %w", err)
 		}
-		_, _ = fmt.Fprintf(out, "certificate authority: created (%s)\n", terminalEscapeString(certPath))
+		_, _ = fmt.Fprintf(out, "%s %s\n", styles.success("certificate authority: created"), styles.muted("("+terminalEscapeString(certPath)+")"))
 	}
 
 	if opts.trust {
 		useSystem := opts.useSystem || (opts.bind && privbind.Required(opts.tlsPort))
-		if err := installCATrust(cmd, out, certPath, useSystem); err != nil {
+		if err := ensureCATrust(cmd, out, certPath, useSystem); err != nil {
 			return err
 		}
 	} else {
-		_, _ = fmt.Fprintln(out, "certificate: not trusted (--no-trust)")
+		_, _ = fmt.Fprintln(out, styles.muted("certificate: trust unchanged (--no-trust)"))
 	}
 
 	if opts.bind {
@@ -156,10 +157,10 @@ func runSetup(cmd *cobra.Command, opts runSetupOpts) error {
 			return err
 		}
 	} else {
-		_, _ = fmt.Fprintln(out, "port setup: skipped (--no-bind)")
+		_, _ = fmt.Fprintln(out, styles.muted("port setup: skipped (--no-bind)"))
 	}
 
-	marker := &state.SetupMarker{Version: 1, TLSPort: opts.tlsPort}
+	marker := &state.SetupMarker{Version: state.CurrentSetupVersion, TLSPort: opts.tlsPort}
 	if opts.bind && privbind.Required(opts.tlsPort) {
 		if bp, err := privbind.BinaryPath(); err == nil {
 			marker.BinPath = bp
@@ -174,7 +175,7 @@ func runSetup(cmd *cobra.Command, opts runSetupOpts) error {
 	}
 
 	if !opts.startAgent {
-		_, _ = fmt.Fprintln(out, "agent: not started (--no-start)")
+		_, _ = fmt.Fprintln(out, styles.muted("agent: not started (--no-start)"))
 		return nil
 	}
 

@@ -6,6 +6,7 @@ import (
 )
 
 func TestClientConfig_RoundTrip(t *testing.T) {
+	t.Setenv(StateDirEnv, "")
 	t.Setenv("HOME", t.TempDir())
 
 	// missing file -> zero config, no error
@@ -42,6 +43,7 @@ func TestClientConfig_RoundTrip(t *testing.T) {
 }
 
 func TestClientConfigPath(t *testing.T) {
+	t.Setenv(StateDirEnv, "")
 	t.Setenv("HOME", "/home/example")
 	path, err := ClientConfigPath()
 	if err != nil {

@@ -9,9 +9,10 @@ import (
 )
 
 func TestSetupMarker_Roundtrip(t *testing.T) {
+	t.Setenv(StateDirEnv, "")
 	t.Setenv("HOME", t.TempDir())
 
-	in := &SetupMarker{Version: 1, TLSPort: 443, BinPath: "/opt/homebrew/bin/routeup"}
+	in := &SetupMarker{Version: CurrentSetupVersion, TLSPort: 443, BinPath: "/opt/homebrew/bin/routeup"}
 	if err := WriteSetupMarker(in); err != nil {
 		t.Fatalf("WriteSetupMarker: %v", err)
 	}
@@ -25,6 +26,7 @@ func TestSetupMarker_Roundtrip(t *testing.T) {
 }
 
 func TestSetupMarker_MissingReturnsErrNotExist(t *testing.T) {
+	t.Setenv(StateDirEnv, "")
 	t.Setenv("HOME", t.TempDir())
 
 	_, err := ReadSetupMarker()
@@ -34,6 +36,7 @@ func TestSetupMarker_MissingReturnsErrNotExist(t *testing.T) {
 }
 
 func TestTLSPortOrDefault_NoMarker(t *testing.T) {
+	t.Setenv(StateDirEnv, "")
 	t.Setenv("HOME", t.TempDir())
 
 	if got, want := TLSPortOrDefault(), ipc.DefaultUserPort; got != want {
@@ -42,9 +45,10 @@ func TestTLSPortOrDefault_NoMarker(t *testing.T) {
 }
 
 func TestTLSPortOrDefault_WithMarker(t *testing.T) {
+	t.Setenv(StateDirEnv, "")
 	t.Setenv("HOME", t.TempDir())
 
-	if err := WriteSetupMarker(&SetupMarker{Version: 1, TLSPort: 9999}); err != nil {
+	if err := WriteSetupMarker(&SetupMarker{Version: CurrentSetupVersion, TLSPort: 9999}); err != nil {
 		t.Fatalf("WriteSetupMarker: %v", err)
 	}
 	if got, want := TLSPortOrDefault(), 9999; got != want {

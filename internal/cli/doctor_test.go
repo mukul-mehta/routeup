@@ -7,10 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mukul-mehta/routeup/internal/state"
 )
 
 func runDoctorCmd(t *testing.T) (string, error) {
 	t.Helper()
+	t.Setenv(state.StateDirEnv, "")
 	cmd := newDoctorCmd()
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
@@ -20,8 +23,27 @@ func runDoctorCmd(t *testing.T) (string, error) {
 	return buf.String(), err
 }
 
+func TestCheckBindRejectsMalformedSetupMarker(t *testing.T) {
+	isolateRouteupState(t)
+	path, err := state.SetupMarkerPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := state.EnsureParentDir(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := checkBind()
+	if result.level != checkFail || !strings.Contains(result.msg, "setup state is unreadable") {
+		t.Fatalf("checkBind() = %#v", result)
+	}
+}
+
 func isolateRouteupState(t *testing.T) {
 	t.Helper()
+	t.Setenv(state.StateDirEnv, "")
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_RUNTIME_DIR", "")
 	dir, err := os.MkdirTemp("", "rup-")

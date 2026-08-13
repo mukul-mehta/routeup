@@ -160,8 +160,9 @@ no separate request-log store; `routeup logs` always reads from the agent.
 In a TTY, `routeup logs --follow` presents the stream through a full-screen
 Bubble Tea viewer. The viewer retains at most 200 rendered rows, deduplicates
 the snapshot after reconnecting, and clears stale rows when the agent boot ID
-changes. `--plain`, redirected output, and `--json` retain line-oriented output.
-All untrusted values are escaped before Lip Gloss styling is applied.
+changes. `--plain` forces line-oriented streaming in a terminal, redirected
+output selects it automatically, and `--json` writes NDJSON. All untrusted
+values are escaped before Lip Gloss styling is applied.
 
 Phase 10 adds per-route opt-in request retention:
 
@@ -722,6 +723,23 @@ bounded log store
 ```
 
 State files containing secrets must use restrictive file permissions.
+
+`ROUTEUP_STATE_DIR` replaces the complete per-user state root for isolated
+development profiles without changing `HOME`. This includes the agent socket,
+PID, log, CA, setup marker, and client credentials. `ROUTEUP_AGENT_SOCKET`
+remains the highest-precedence socket-only override; Linux uses
+`$XDG_RUNTIME_DIR/routeup/agent.sock` only when neither override is set.
+The `routeup-devel` build embeds its `.routeup-devel` state path at build time so it
+works directly from `PATH`; `ROUTEUP_STATE_DIR` can still override that default.
+
+The setup marker uses the initial version 1 format. `doctor` rejects missing or
+malformed markers, and macOS additionally validates that the installed
+LaunchDaemon references the root-owned helper copy and forwards both
+`127.0.0.1` and `::1` to the agent. The helper lives under
+`/Library/PrivilegedHelperTools`; setup validates its root ownership, rejects
+group- or world-writable copies, and verifies that its bytes match the stable
+CLI binary recorded by setup. `routeup update` refreshes platform-specific
+privileged binding after replacing a binary.
 
 ## Conflict Resolution
 

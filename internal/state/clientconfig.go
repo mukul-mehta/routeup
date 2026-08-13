@@ -20,11 +20,11 @@ type ClientConfig struct {
 
 // ClientConfigPath returns the path of the client config file.
 func ClientConfigPath() (string, error) {
-	home, err := os.UserHomeDir()
+	dir, err := Dir()
 	if err != nil {
-		return "", fmt.Errorf("locate home dir: %w", err)
+		return "", err
 	}
-	return filepath.Join(home, StateDirName, ClientConfigName), nil
+	return filepath.Join(dir, ClientConfigName), nil
 }
 
 // ReadClientConfig loads the client config. A missing file is not an error: it

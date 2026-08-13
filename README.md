@@ -224,7 +224,7 @@ go through the public tunnel.
 ```bash
 routeup logs myapp                   # recent traffic
 routeup logs myapp --follow          # interactive live viewer in a terminal
-routeup logs myapp --follow --plain  # streaming lines instead of the viewer
+routeup logs myapp --follow --plain  # append-only lines in a terminal
 routeup logs myapp --public --json   # public traffic as JSON
 routeup logs myapp --since 10m --method POST --status 202 --limit 50
 ```
@@ -331,6 +331,7 @@ Runnable examples live in [`examples/`](examples/):
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — system design, request flows, IPC, conflict resolution
 - [docs/MILESTONES.md](docs/MILESTONES.md) — implementation phases
 - [docs/ENGINEERING-STANDARDS.md](docs/ENGINEERING-STANDARDS.md) — code quality rules
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — source, isolated, and privileged development workflows
 - [docs/OPEN-QUESTIONS.md](docs/OPEN-QUESTIONS.md) — unresolved design questions
 - [docs/RECOVERY.md](docs/RECOVERY.md) — Fly volume backup and server recovery
 - [docs/RELEASING.md](docs/RELEASING.md) — immutable release checklist and verification

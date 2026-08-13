@@ -15,11 +15,12 @@ import (
 )
 
 func installPrivBind(cmd *cobra.Command, out io.Writer, userPort int) error {
+	styles := newTerminalStyles(out)
 	if !privbind.Required(userPort) {
-		_, _ = fmt.Fprintf(out, "port %d: ready\n", userPort)
+		_, _ = fmt.Fprintln(out, styles.success(fmt.Sprintf("port %d: ready", userPort)))
 		return nil
 	}
-	_, _ = fmt.Fprintf(out, "setting up port %d (asks for your password)...\n", userPort)
+	_, _ = fmt.Fprintln(out, styles.warning(fmt.Sprintf("setting up port %d (asks for your password)...", userPort)))
 
 	parent := cmd.Context()
 	if parent == nil {
@@ -31,15 +32,16 @@ func installPrivBind(cmd *cobra.Command, out io.Writer, userPort int) error {
 	if err := privbind.Install(ctx, userPort); err != nil {
 		return fmt.Errorf("setting up port %d: %w", userPort, err)
 	}
-	_, _ = fmt.Fprintf(out, "port %d: ready\n", userPort)
+	_, _ = fmt.Fprintln(out, styles.success(fmt.Sprintf("port %d: ready", userPort)))
 	return nil
 }
 
 func installCATrust(cmd *cobra.Command, out io.Writer, certPath string, useSystem bool) error {
+	styles := newTerminalStyles(out)
 	if useSystem {
-		_, _ = fmt.Fprintln(out, "trusting the certificate system-wide (asks for your password)...")
+		_, _ = fmt.Fprintln(out, styles.warning("trusting the certificate system-wide (asks for your password)..."))
 	} else {
-		_, _ = fmt.Fprintln(out, "trusting the certificate...")
+		_, _ = fmt.Fprintln(out, styles.warning("trusting the certificate..."))
 	}
 
 	parent := cmd.Context()
@@ -52,11 +54,21 @@ func installCATrust(cmd *cobra.Command, out io.Writer, certPath string, useSyste
 	if err := certs.InstallTrust(ctx, certPath, certs.TrustOptions{System: useSystem}); err != nil {
 		return fmt.Errorf("trusting certificate: %w", err)
 	}
-	_, _ = fmt.Fprintln(out, "certificate: trusted")
+	_, _ = fmt.Fprintln(out, styles.success("certificate: trusted"))
 	return nil
 }
 
+func ensureCATrust(cmd *cobra.Command, out io.Writer, certPath string, useSystem bool) error {
+	trusted, err := certs.VerifyTrust(certPath)
+	if err == nil && trusted {
+		_, _ = fmt.Fprintln(out, newTerminalStyles(out).success("certificate: already trusted"))
+		return nil
+	}
+	return installCATrust(cmd, out, certPath, useSystem)
+}
+
 func startLocalAgent(cmd *cobra.Command, out io.Writer) error {
+	styles := newTerminalStyles(out)
 	sockPath, err := state.AgentSocketPath()
 	if err != nil {
 		return fmt.Errorf("resolve agent socket path: %w", err)
@@ -75,11 +87,11 @@ func startLocalAgent(cmd *cobra.Command, out io.Writer) error {
 	}
 	switch res {
 	case agentctl.EnsureAlreadyRunning:
-		_, _ = fmt.Fprintln(out, "agent: already running")
+		_, _ = fmt.Fprintln(out, styles.success("agent: already running"))
 	case agentctl.EnsureStarted:
-		_, _ = fmt.Fprintln(out, "agent: started")
+		_, _ = fmt.Fprintln(out, styles.success("agent: started"))
 	case agentctl.EnsureRestarted:
-		_, _ = fmt.Fprintln(out, "agent: restarted (build changed)")
+		_, _ = fmt.Fprintln(out, styles.success("agent: restarted (build changed)"))
 	}
 	return nil
 }

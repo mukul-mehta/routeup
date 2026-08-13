@@ -72,7 +72,7 @@ func (p serverCredPrompter) collect(cc state.ClientConfig, serverFromFlag, token
 
 	tok, err := p.secret(fmt.Sprintf("Token for %s (blank to keep current)", opts.server))
 	if err != nil {
-		_, _ = fmt.Fprintf(p.out, "  (skipping token: %v)\n", err)
+		_, _ = fmt.Fprintln(p.out, newTerminalStyles(p.out).warning(fmt.Sprintf("  (skipping token: %v)", err)))
 		return nil
 	}
 	if tok != "" {
@@ -84,10 +84,11 @@ func (p serverCredPrompter) collect(cc state.ClientConfig, serverFromFlag, token
 }
 
 func (p serverCredPrompter) line(label, def string) string {
+	styles := newTerminalStyles(p.out)
 	if def != "" {
-		_, _ = fmt.Fprintf(p.out, "%s [%s]: ", label, def)
+		_, _ = fmt.Fprintf(p.out, "%s %s: ", styles.label(label), styles.muted("["+def+"]"))
 	} else {
-		_, _ = fmt.Fprintf(p.out, "%s: ", label)
+		_, _ = fmt.Fprintf(p.out, "%s: ", styles.label(label))
 	}
 	line, _ := p.in.ReadString('\n')
 	if line = strings.TrimSpace(line); line != "" {
@@ -97,7 +98,7 @@ func (p serverCredPrompter) line(label, def string) string {
 }
 
 func (p serverCredPrompter) secret(label string) (string, error) {
-	_, _ = fmt.Fprintf(p.out, "%s: ", label)
+	_, _ = fmt.Fprintf(p.out, "%s: ", newTerminalStyles(p.out).label(label))
 	s, err := p.readSecret()
 	return strings.TrimSpace(s), err
 }
@@ -105,11 +106,12 @@ func (p serverCredPrompter) secret(label string) (string, error) {
 // saveClientCreds merges credentials without ever carrying a token to a
 // different server or allowing a token to exist without a server identity.
 func saveClientCreds(out io.Writer, server, token string, clear bool) error {
+	styles := newTerminalStyles(out)
 	if clear {
 		if err := state.WriteClientConfig(state.ClientConfig{}); err != nil {
 			return fmt.Errorf("clear server/token: %w", err)
 		}
-		_, _ = fmt.Fprintln(out, "server/token: cleared")
+		_, _ = fmt.Fprintln(out, styles.success("server/token: cleared"))
 		return nil
 	}
 	if server == "" && token == "" {
@@ -136,10 +138,10 @@ func saveClientCreds(out io.Writer, server, token string, clear bool) error {
 		return fmt.Errorf("save server/token: %w", err)
 	}
 	if server != "" {
-		_, _ = fmt.Fprintf(out, "server: saved (%s)\n", server)
+		_, _ = fmt.Fprintf(out, "%s %s\n", styles.success("server: saved"), styles.muted("("+terminalEscapeString(server)+")"))
 	}
 	if token != "" {
-		_, _ = fmt.Fprintln(out, "token: saved")
+		_, _ = fmt.Fprintln(out, styles.success("token: saved"))
 	}
 	return nil
 }

@@ -58,10 +58,9 @@ func AgentBindPort(userPort int) int {
 	return agentBindPort(userPort)
 }
 
-// BinaryPath returns a stable path to the current binary for embedding in a
-// LaunchDaemon plist or the setup marker. Symlinks are NOT resolved: on
-// Homebrew the stable symlink (/opt/homebrew/bin/routeup) survives upgrades
-// while the versioned Cellar path does not.
+// BinaryPath returns a stable path to the current CLI binary for the setup
+// marker. Symlinks are NOT resolved, so a Homebrew bin symlink survives
+// upgrades while a versioned Cellar path does not.
 func BinaryPath() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {

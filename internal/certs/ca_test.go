@@ -163,6 +163,34 @@ func TestCreate_HasNonZeroSerial(t *testing.T) {
 	}
 }
 
+func TestCreateUsesConfiguredCommonName(t *testing.T) {
+	previous := caCommonName
+	caCommonName = "routeup devel local CA"
+	t.Cleanup(func() { caCommonName = previous })
+	certPath, keyPath := caPaths(t)
+	ca, err := Create(certPath, keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ca.Cert.Subject.CommonName != caCommonName {
+		t.Fatalf("common name = %q, want %q", ca.Cert.Subject.CommonName, caCommonName)
+	}
+}
+
+func TestInspectRejectsAnotherProfileCA(t *testing.T) {
+	certPath, keyPath := caPaths(t)
+	if _, err := Create(certPath, keyPath); err != nil {
+		t.Fatal(err)
+	}
+	previous := caCommonName
+	caCommonName = "routeup devel local CA"
+	t.Cleanup(func() { caCommonName = previous })
+	state, _, err := Inspect(certPath, keyPath)
+	if state != CABroken || err == nil || !strings.Contains(err.Error(), "does not match expected") {
+		t.Fatalf("Inspect() = %v, %v", state, err)
+	}
+}
+
 func TestVerifyTrust_FreshCAIsUntrusted(t *testing.T) {
 	certPath, keyPath := caPaths(t)
 	if _, err := Create(certPath, keyPath); err != nil {

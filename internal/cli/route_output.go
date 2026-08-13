@@ -28,6 +28,6 @@ func writeRouteReadyEvent(out io.Writer, event routeReadyEvent) error {
 }
 
 func writeRouteQR(out io.Writer, url string) {
-	_, _ = fmt.Fprintf(out, "\n%s\n", url)
+	_, _ = fmt.Fprintf(out, "\n%s\n", newTerminalStyles(out).url(url))
 	qrterminal.GenerateHalfBlock(url, qrterminal.L, out)
 }

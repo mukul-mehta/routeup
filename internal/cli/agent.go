@@ -110,7 +110,7 @@ func newAgentStatusCmd() *cobra.Command {
 				if jsonOutput {
 					return json.NewEncoder(out).Encode(map[string]bool{"running": false})
 				}
-				_, _ = fmt.Fprintln(out, "agent: not running")
+				_, _ = fmt.Fprintln(out, newTerminalStyles(out).muted("agent: not running"))
 				return nil
 			}
 			if err != nil {
@@ -177,13 +177,14 @@ func newAgentStartCmd() *cobra.Command {
 			}
 
 			out := cmd.OutOrStdout()
+			styles := newTerminalStyles(out)
 			switch res {
 			case agentctl.EnsureAlreadyRunning:
-				_, _ = fmt.Fprintln(out, "agent already running")
+				_, _ = fmt.Fprintln(out, styles.success("agent already running"))
 			case agentctl.EnsureStarted:
-				_, _ = fmt.Fprintln(out, "agent started")
+				_, _ = fmt.Fprintln(out, styles.success("agent started"))
 			case agentctl.EnsureRestarted:
-				_, _ = fmt.Fprintln(out, "agent restarted (build changed)")
+				_, _ = fmt.Fprintln(out, styles.success("agent restarted (build changed)"))
 			}
 			return nil
 		},
@@ -209,9 +210,9 @@ func newAgentStopCmd() *cobra.Command {
 				return err
 			}
 			if stopped {
-				_, _ = fmt.Fprintln(out, "agent stopped")
+				_, _ = fmt.Fprintln(out, newTerminalStyles(out).success("agent stopped"))
 			} else {
-				_, _ = fmt.Fprintln(out, "agent not running")
+				_, _ = fmt.Fprintln(out, newTerminalStyles(out).muted("agent not running"))
 			}
 			return nil
 		},
@@ -234,7 +235,8 @@ func newAgentRestartCmd() *cobra.Command {
 			if err := client.Restart(ctx); err != nil {
 				return err
 			}
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "agent restarted")
+			out := cmd.OutOrStdout()
+			_, _ = fmt.Fprintln(out, newTerminalStyles(out).success("agent restarted"))
 			return nil
 		},
 	}

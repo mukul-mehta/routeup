@@ -14,6 +14,9 @@ import (
 	"strings"
 )
 
+// trustFileName is overridden for the isolated routeup-devel build.
+var trustFileName = "routeup-ca.crt"
+
 // installTrust copies the CA into the distro anchor dir and runs the
 // distro's refresh tool (both via sudo).
 func installTrust(ctx context.Context, certPath string, _ TrustOptions) error {
@@ -21,7 +24,7 @@ func installTrust(ctx context.Context, certPath string, _ TrustOptions) error {
 	if err != nil {
 		return err
 	}
-	dst := filepath.Join(plan.anchorDir, "routeup-ca.crt")
+	dst := filepath.Join(plan.anchorDir, trustFileName)
 
 	if err := runSudo(ctx, "cp", certPath, dst); err != nil {
 		return fmt.Errorf("copy ca to %s: %w", dst, err)
@@ -39,7 +42,7 @@ func uninstallTrust(ctx context.Context, _ string) error {
 	if err != nil {
 		return err
 	}
-	dst := filepath.Join(plan.anchorDir, "routeup-ca.crt")
+	dst := filepath.Join(plan.anchorDir, trustFileName)
 	if err := runSudo(ctx, "rm", "-f", dst); err != nil {
 		return fmt.Errorf("remove %s: %w", dst, err)
 	}

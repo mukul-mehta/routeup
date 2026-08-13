@@ -514,8 +514,12 @@ Resolves filesystem paths under `~/.routeup/`:
 | `CAKeyPath()` | `ca.key` | Local CA private key |
 | `ReadClientConfig()` | `client.json` | Saved server URL + token |
 
-On Linux, `AgentSocketPath` prefers `$XDG_RUNTIME_DIR/routeup/agent.sock`.
-All paths can be overridden by `ROUTEUP_AGENT_SOCKET`.
+`ROUTEUP_STATE_DIR` replaces the complete state root, including CA and client
+configuration, without changing `HOME`. `ROUTEUP_AGENT_SOCKET` overrides only
+the socket and takes precedence over the state root. On Linux,
+`AgentSocketPath` prefers `$XDG_RUNTIME_DIR/routeup/agent.sock` only when neither
+override is set. Development builds can embed a default state root through
+linker flags; the environment variable remains higher precedence.
 
 ---
 

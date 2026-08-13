@@ -10,6 +10,7 @@ BIN=$(realpath "${1:-./bin/routeup}")
 TLS_PORT="${2:-443}"
 SCRIPT_DIR=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
 export ROUTEUP_RUNNER_FIXTURE="$SCRIPT_DIR/integration-runner.py"
+unset ROUTEUP_STATE_DIR
 
 WORK=$(mktemp -d)
 export HOME="$WORK/home"

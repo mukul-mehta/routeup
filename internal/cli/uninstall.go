@@ -3,10 +3,13 @@ package cli
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -43,9 +46,10 @@ func newUninstallCmd() *cobra.Command {
 
 func runUninstall(cmd *cobra.Command, yes bool) error {
 	out := cmd.OutOrStdout()
+	styles := newTerminalStyles(out)
 
 	if !yes && !confirm(cmd, out) {
-		_, _ = fmt.Fprintln(out, "cancelled.")
+		_, _ = fmt.Fprintln(out, styles.muted("cancelled."))
 		return nil
 	}
 
@@ -56,37 +60,136 @@ func runUninstall(cmd *cobra.Command, yes bool) error {
 	ctx, cancel := context.WithTimeout(parent, 90*time.Second)
 	defer cancel()
 
+	isolatedDir := ""
+	if state.IsDirOverridden() {
+		var err error
+		isolatedDir, err = safeIsolatedStateDir()
+		if err != nil {
+			return err
+		}
+	}
+
 	stopAgent(cmd, out)
+	if isolatedDir != "" {
+		certPath := filepath.Join(isolatedDir, state.CACertName)
+		if _, err := os.Stat(certPath); err == nil {
+			if err := certs.UninstallTrust(ctx, certPath); err != nil {
+				return fmt.Errorf("remove isolated CA from trust store: %w", err)
+			}
+			_, _ = fmt.Fprintln(out, styles.success("isolated certificate: removed from trust store"))
+		}
+		retained, err := removeIsolatedState(isolatedDir)
+		if err != nil {
+			return err
+		}
+		if retained {
+			_, _ = fmt.Fprintf(out, "%s %s\n", styles.success("isolated state files: deleted"), styles.muted("(kept non-routeup files in "+terminalEscapeString(isolatedDir)+")"))
+		} else {
+			_, _ = fmt.Fprintf(out, "%s %s\n", styles.success("isolated state: deleted"), styles.muted(terminalEscapeString(isolatedDir)))
+		}
+		return nil
+	}
 
 	if err := privbind.Uninstall(ctx); err != nil {
-		_, _ = fmt.Fprintf(out, "port helper: couldn't remove (%v)\n", err)
+		_, _ = fmt.Fprintln(out, styles.warning(fmt.Sprintf("port helper: couldn't remove (%v)", err)))
 	} else {
-		_, _ = fmt.Fprintln(out, "port helper: removed")
+		_, _ = fmt.Fprintln(out, styles.success("port helper: removed"))
 	}
 
 	if certPath, err := state.CACertPath(); err == nil {
 		if err := certs.UninstallTrust(ctx, certPath); err != nil {
-			_, _ = fmt.Fprintf(out, "certificate: couldn't remove from trust store (%v)\n", err)
+			_, _ = fmt.Fprintln(out, styles.warning(fmt.Sprintf("certificate: couldn't remove from trust store (%v)", err)))
 		} else {
-			_, _ = fmt.Fprintln(out, "certificate: removed from trust store")
+			_, _ = fmt.Fprintln(out, styles.success("certificate: removed from trust store"))
 		}
 	}
 
 	if dir, err := state.Dir(); err == nil {
 		if err := os.RemoveAll(dir); err != nil {
-			_, _ = fmt.Fprintf(out, "state: couldn't delete %s (%v)\n", dir, err)
+			_, _ = fmt.Fprintln(out, styles.warning(fmt.Sprintf("state: couldn't delete %s (%v)", terminalEscapeString(dir), err)))
 		} else {
-			_, _ = fmt.Fprintf(out, "state: deleted %s\n", dir)
+			_, _ = fmt.Fprintf(out, "%s %s\n", styles.success("state: deleted"), styles.muted(terminalEscapeString(dir)))
 		}
 	}
 
 	_, _ = fmt.Fprintln(out, "")
-	_, _ = fmt.Fprintln(out, "done. you can now remove the routeup binary (e.g. `brew uninstall routeup`).")
+	_, _ = fmt.Fprintln(out, styles.success("done. you can now remove the routeup binary (e.g. `brew uninstall routeup`)."))
 	return nil
+}
+
+func safeIsolatedStateDir() (string, error) {
+	dir, err := state.Dir()
+	if err != nil {
+		return "", err
+	}
+	protected := make([]string, 0, 2)
+	if home, homeErr := os.UserHomeDir(); homeErr == nil {
+		protected = append(protected, home)
+	}
+	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+		protected = append(protected, cwd)
+	}
+	for _, path := range protected {
+		contains, relErr := pathContains(dir, path)
+		if relErr != nil {
+			return "", fmt.Errorf("compare isolated state path: %w", relErr)
+		}
+		if contains {
+			return "", fmt.Errorf("refusing to remove unsafe isolated state directory %s", dir)
+		}
+	}
+	markerPath := filepath.Join(dir, state.SetupMarkerName)
+	info, err := os.Lstat(markerPath)
+	if err != nil {
+		return "", fmt.Errorf("refusing to remove unrecognized isolated state directory %s: %w", dir, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("refusing to remove unrecognized isolated state directory %s", dir)
+	}
+	if _, err := state.ReadSetupMarker(); err != nil {
+		return "", fmt.Errorf("refusing to remove isolated state with unreadable setup marker: %w", err)
+	}
+	return dir, nil
+}
+
+func pathContains(parent, child string) (bool, error) {
+	relative, err := filepath.Rel(parent, child)
+	if err != nil {
+		return false, err
+	}
+	return relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(os.PathSeparator))), nil
+}
+
+func removeIsolatedState(dir string) (bool, error) {
+	owned := []string{
+		state.AgentSocketName,
+		state.AgentLogName,
+		state.AgentPIDName,
+		state.CACertName,
+		state.CAKeyName,
+		state.ClientConfigName,
+		state.SetupMarkerName,
+	}
+	for _, name := range owned {
+		if err := os.RemoveAll(filepath.Join(dir, name)); err != nil {
+			return false, fmt.Errorf("delete isolated state file %s: %w", name, err)
+		}
+	}
+	if err := os.Remove(dir); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		if errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EEXIST) {
+			return true, nil
+		}
+		return false, fmt.Errorf("remove isolated state directory %s: %w", dir, err)
+	}
+	return false, nil
 }
 
 // stopAgent shuts the agent down if it's running. Best-effort.
 func stopAgent(cmd *cobra.Command, out io.Writer) {
+	styles := newTerminalStyles(out)
 	sockPath, err := state.AgentSocketPath()
 	if err != nil {
 		return
@@ -102,17 +205,23 @@ func stopAgent(cmd *cobra.Command, out io.Writer) {
 	stopped, err := client.Stop(ctx)
 	switch {
 	case err != nil:
-		_, _ = fmt.Fprintf(out, "agent: couldn't stop (%v)\n", err)
+		_, _ = fmt.Fprintln(out, styles.warning(fmt.Sprintf("agent: couldn't stop (%v)", err)))
 	case stopped:
-		_, _ = fmt.Fprintln(out, "agent: stopped")
+		_, _ = fmt.Fprintln(out, styles.success("agent: stopped"))
 	default:
-		_, _ = fmt.Fprintln(out, "agent: not running")
+		_, _ = fmt.Fprintln(out, styles.muted("agent: not running"))
 	}
 }
 
 // confirm prompts on out and reads a yes/no answer from the command's input.
 func confirm(cmd *cobra.Command, out io.Writer) bool {
-	_, _ = fmt.Fprint(out, "This removes routeup's certificate, the port 443 helper, and ~/.routeup. Continue? [y/N] ")
+	styles := newTerminalStyles(out)
+	if state.IsDirOverridden() {
+		dir, _ := state.Dir()
+		_, _ = fmt.Fprintf(out, "%s %s ", styles.warning("This removes isolated routeup state at "+terminalEscapeString(dir)+". Continue?"), styles.label("[y/N]"))
+	} else {
+		_, _ = fmt.Fprintf(out, "%s %s ", styles.warning("This removes routeup's certificate, the port 443 helper, and ~/.routeup. Continue?"), styles.label("[y/N]"))
+	}
 	line, _ := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')
 	switch strings.ToLower(strings.TrimSpace(line)) {
 	case "y", "yes":

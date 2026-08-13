@@ -36,11 +36,15 @@ ROUTEUP_SERVER=... ROUTEUP_TOKEN=... PATH="$(cd ../.. && pwd):$PATH" pnpm dev
 routeup prints something like:
 
 ```txt
-running: node server.mjs
+routeup
+  command node server.mjs
+  route   node-runner-expose
+  local   https://node-runner-expose.localhost
+  public  https://node-runner-expose.mukul.routeup.dev
+  target  / -> localhost:<assigned-port>
+  status  waiting for localhost:<assigned-port>
 
-route: node-runner-expose
-local: https://node-runner-expose.localhost
-public: https://node-runner-expose.mukul.routeup.dev
+ready: https://node-runner-expose.localhost
 ```
 
 Inspect the injected environment:
