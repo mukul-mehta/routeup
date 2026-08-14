@@ -236,19 +236,24 @@ if [ "$APP_PGID" != "$APP_PID" ] || [ "$DESCENDANT_PGID" != "$APP_PID" ]; then
 	exit 1
 fi
 
-ROUTES=$("$BIN" routes)
-RUNNER_ROW=$(route_row "runnerci" "$ROUTES")
-read -r ROW_NAME ROW_TARGETS ROW_PUBLIC ROW_PATHS ROW_PID ROW_AGE ROW_CWD <<<"$RUNNER_ROW"
-if [ "$ROW_NAME" != "runnerci" ] || [ "$ROW_TARGETS" != "/:$APP_PORT" ] || \
-	[ "$ROW_PUBLIC" != "-" ] || [ "$ROW_PATHS" != "-" ] || \
-	[ "$ROW_PID" != "$RUNNER_PID" ] || [ "$ROW_CWD" != "$RUNNER_DIR" ]; then
-	printf '%s\n' "unexpected runner route row: $RUNNER_ROW" >&2
-	exit 1
-fi
-if ! [[ "$ROW_AGE" =~ ^[0-9]+[smh]$ ]]; then
-	printf '%s\n' "unexpected route age: $ROW_AGE" >&2
-	exit 1
-fi
+"$BIN" routes --json >"$WORK/runner-routes.json"
+python3 - "$WORK/runner-routes.json" "$RUNNER_PID" "$RUNNER_DIR" "$APP_PORT" <<'PY'
+import json, pathlib, sys
+
+routes = json.loads(pathlib.Path(sys.argv[1]).read_text())
+pid = int(sys.argv[2])
+runner_dir = str(pathlib.Path(sys.argv[3]).resolve())
+port = int(sys.argv[4])
+runner = next(route for route in routes if route["name"] == "runnerci")
+if runner["targets"] != [{"path": "/", "port": port}]:
+    raise AssertionError(f"runner targets = {runner['targets']!r}")
+if runner["owner_pid"] != pid:
+    raise AssertionError(f"runner owner pid = {runner['owner_pid']}, want {pid}")
+if str(pathlib.Path(runner["owner_cwd"]).resolve()) != runner_dir:
+    raise AssertionError(f"runner cwd = {runner['owner_cwd']!r}, want {runner_dir!r}")
+if "public_host" in runner:
+    raise AssertionError(f"runner unexpectedly public: {runner!r}")
+PY
 
 printf '%s\n' "== stop runner and verify cleanup =="
 kill -TERM "$RUNNER_PID"
