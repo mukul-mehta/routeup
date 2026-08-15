@@ -128,7 +128,7 @@ HTTP_PID=$!
 SERVE_PID=$!
 
 probe() {
-	curl --fail --silent --show-error --connect-timeout 1 --max-time 1 \
+	curl --fail --silent --show-error --connect-timeout 5 --max-time 5 \
 		--cacert "$HOME/.routeup/ca.crt" \
 		--noproxy '*' \
 		--resolve "macsmoke.localhost:$TLS_PORT:127.0.0.1" \
@@ -142,7 +142,7 @@ wait_for_https() {
 	local watched_pid="${4:-}"
 	local attempt
 	for ((attempt = 0; attempt < 60; attempt++)); do
-		if curl --fail --silent --show-error --connect-timeout 1 --max-time 1 \
+		if curl --fail --silent --show-error --connect-timeout 5 --max-time 5 \
 			--cacert "$HOME/.routeup/ca.crt" --noproxy '*' \
 			--resolve "$host:$TLS_PORT:127.0.0.1" \
 			"https://$host:$TLS_PORT$path" >"$output" 2>/dev/null; then
@@ -208,6 +208,37 @@ cat >"$WORK/runner/routeup.json" <<'JSON'
 JSON
 
 EXPECTED_RUNNER_URL="https://runnerci.localhost:$TLS_PORT"
+
+# Pre-warm: run the fixture once directly from bash before the routeup runner
+# starts its 15-second startup clock. On macOS, the first execution of a Python
+# script may trigger an OS-level security scan (XProtect/Gatekeeper) that adds
+# several seconds of latency; running it here ensures that check completes
+# before the Go timer begins.
+_WARMUP_PORT=$(free_port)
+mkdir -p "$WORK/fixture-warmup"
+(
+	cd "$WORK/fixture-warmup"
+	HOST=127.0.0.1 PORT="$_WARMUP_PORT" \
+		ROUTEUP_LOCAL_URL="$EXPECTED_RUNNER_URL" \
+		ROUTEUP_URL="$EXPECTED_RUNNER_URL" \
+		exec python3 "$ROUTEUP_RUNNER_FIXTURE"
+) >"$WORK/fixture-warmup.log" 2>&1 &
+_WARMUP_PID=$!
+_warmup_bound=false
+for ((attempt = 0; attempt < 50; attempt++)); do
+	if nc -z 127.0.0.1 "$_WARMUP_PORT" 2>/dev/null; then
+		_warmup_bound=true
+		break
+	fi
+	sleep 0.1
+done
+kill -KILL "$_WARMUP_PID" 2>/dev/null || true
+wait "$_WARMUP_PID" 2>/dev/null || true
+if [[ "$_warmup_bound" != true ]]; then
+	printf '%s\n' "runner fixture pre-warm failed — python3 or fixture may be broken" >&2
+	cat "$WORK/fixture-warmup.log" >&2
+	exit 1
+fi
 
 printf '%s\n' "== bare routeup runner =="
 (

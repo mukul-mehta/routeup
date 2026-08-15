@@ -13,6 +13,8 @@ package proxy
 
 import (
 	"bufio"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -22,17 +24,43 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/mukul-mehta/routeup/internal/logs"
 	"github.com/mukul-mehta/routeup/internal/route"
 )
 
-// localTargetHost is the host the proxy dials for upstreams. Using "localhost"
-// rather than "127.0.0.1" lets Go try both IPv4 and IPv6 loopback: dev servers
-// often bind to localhost and may end up on ::1 only, which a hardcoded
-// 127.0.0.1 would never reach.
-const localTargetHost = "localhost"
+// loopbackTransport is the RoundTripper used by the local reverse proxy. Its
+// dialer tries 127.0.0.1 first and falls back to [::1] only when IPv4 returns
+// ECONNREFUSED (or is unavailable). Sequential probing avoids a macOS quirk
+// where TCP connections to [::1] may stall instead of failing immediately when
+// nothing is listening (observed on macOS 26). The [::1] fallback uses a 300ms
+// sub-deadline so a hung connect fails fast rather than consuming the caller's
+// full timeout, while still supporting dev servers that bind exclusively to the
+// IPv6 loopback (e.g. Node.js 17+).
+var loopbackTransport http.RoundTripper = &http.Transport{
+	DialContext: func(ctx context.Context, _, addr string) (net.Conn, error) {
+		_, port, _ := net.SplitHostPort(addr)
+		conn, err := (&net.Dialer{KeepAlive: 30 * time.Second}).DialContext(ctx, "tcp4", net.JoinHostPort("127.0.0.1", port))
+		if err == nil {
+			return conn, nil
+		}
+		if ctx.Err() != nil {
+			return nil, err
+		}
+		if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.EADDRNOTAVAIL) || errors.Is(err, syscall.EAFNOSUPPORT) {
+			ctx6, cancel6 := context.WithTimeout(ctx, 300*time.Millisecond)
+			defer cancel6()
+			return (&net.Dialer{KeepAlive: 30 * time.Second}).DialContext(ctx6, "tcp6", net.JoinHostPort("::1", port))
+		}
+		return nil, err
+	},
+	MaxIdleConns:          100,
+	IdleConnTimeout:       90 * time.Second,
+	TLSHandshakeTimeout:   10 * time.Second,
+	ExpectContinueTimeout: 1 * time.Second,
+}
 
 // TargetLookup is the minimal behavior the proxy needs from the registry.
 //
@@ -146,12 +174,12 @@ func serveTargets(w http.ResponseWriter, r *http.Request, targets []route.Target
 		r.Body = requestCapture
 	}
 
-	// See localTargetHost for why this is a hostname, not a literal IP.
 	targetURL := &url.URL{
 		Scheme: "http",
-		Host:   net.JoinHostPort(localTargetHost, strconv.Itoa(target.Port)),
+		Host:   net.JoinHostPort("127.0.0.1", strconv.Itoa(target.Port)),
 	}
 	rp := &httputil.ReverseProxy{
+		Transport: loopbackTransport,
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(targetURL)
 			pr.Out.Host = pr.In.Host
