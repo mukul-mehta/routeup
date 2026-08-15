@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-const runnerStartupTimeout = 60 * time.Second
+const runnerStartupTimeout = 120 * time.Second
 
 type runnerResult struct {
 	code int

@@ -17,7 +17,7 @@ import (
 	"golang.org/x/term"
 )
 
-const defaultKillGrace = 5 * time.Second
+const defaultKillGrace = 10 * time.Second
 
 // Runner runs a single child command through the system shell.
 type Runner struct {
