@@ -117,6 +117,28 @@ func printError(out io.Writer, err error, styles terminalStyles) {
 	}
 }
 
+// terminalEscapeBody makes body content safe for terminal display while
+// preserving newlines and valid Unicode so callers can split and pretty-print.
+// Control characters (including ESC) are still escaped; only \n and \t pass through.
+func terminalEscapeBody(body []byte) string {
+	var out strings.Builder
+	for _, r := range string(body) {
+		switch {
+		case r == '\\':
+			out.WriteString(`\\`)
+		case r == '\n':
+			out.WriteByte('\n')
+		case r == '\t':
+			out.WriteByte('\t')
+		case r < 0x20 || r == 0x7f:
+			_, _ = fmt.Fprintf(&out, `\x%02x`, r)
+		default:
+			out.WriteRune(r)
+		}
+	}
+	return out.String()
+}
+
 // terminalEscapeBytes returns an unambiguous printable-ASCII representation of
 // untrusted bytes so captured traffic cannot emit terminal control sequences.
 func terminalEscapeBytes(value []byte) string {

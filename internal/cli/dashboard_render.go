@@ -16,56 +16,58 @@ func (m dashboardModel) View() string {
 		return m.detailView()
 	}
 	width := max(1, m.width)
-	lines := make([]string, 0, max(1, m.height))
-	add := func(line string) {
-		lines = append(lines, clipTerminalLine(line, width))
-	}
+	connection := m.connectionBadge()
+	header := joinAcross(m.styles.accent("routeup dashboard"), connection, width)
 
-	connection := m.styles.muted(m.logs.state)
-	switch m.logs.state {
-	case "connected":
-		connection = m.styles.success(m.logs.state)
-	case "waiting", "reconnecting":
-		connection = m.styles.warning(m.logs.state)
-	case "error":
-		connection = m.styles.failure(m.logs.state)
-	}
-	add(joinAcross(m.styles.accent("routeup dashboard"), connection, width))
-	add(m.dashboardSummary())
 	if m.height > 0 && m.height < 7 {
-		footer := m.dashboardFooter()
-		compact := []string{clipTerminalLine(joinAcross(m.styles.accent("routeup dashboard"), connection, width), width)}
-		if m.height >= 3 {
-			compact = append(compact, clipTerminalLine(m.dashboardSummary(), width))
-		}
-		if m.height >= 2 {
-			compact = append(compact, clipTerminalLine(footer, width))
-		}
-		return strings.Join(compact[:min(m.height, len(compact))], "\n")
-	}
-	add("")
-
-	if m.height >= 22 {
-		routeLimit, exposureLimit := m.dashboardSectionLimits()
-		m.appendRouteLines(&lines, width, routeLimit)
-		lines = append(lines, "")
-		m.appendExposureLines(&lines, width, exposureLimit)
-		lines = append(lines, "")
+		return m.compactView(header, width)
 	}
 
-	addTo := func(line string) { lines = append(lines, clipTerminalLine(line, width)) }
-	requestTitle := fmt.Sprintf("REQUESTS (%d)", len(m.logs.entries))
-	if m.focus == dashboardFocusRequests {
-		requestTitle = m.styles.accent("> " + requestTitle)
+	footer := clipTerminalLine(m.dashboardFooter(), width)
+	routeLimit, exposureLimit := m.dashboardSectionLimits()
+
+	lines := []string{
+		header,
+		clipTerminalLine(m.dashboardSummary(), width),
+		"",
+	}
+
+	// Routes section
+	rStart := min(m.routeOffset, max(0, len(m.routes)-routeLimit))
+	rEnd := min(len(m.routes), rStart+routeLimit)
+	lines = append(lines, m.dashboardSectionTitle("ROUTES", rStart, rEnd, len(m.routes), m.focus == dashboardFocusRoutes))
+	lines = append(lines, clipTerminalLine(formatDashboardRoute(ipc.Claim{Name: "NAME"}, width, m.styles, m.tlsPort, true), width))
+	if len(m.routes) == 0 {
+		lines = append(lines, clipTerminalLine("  "+m.styles.muted("No active local routes"), width))
 	} else {
-		requestTitle = m.styles.label(requestTitle)
+		for _, claim := range m.routes[rStart:rEnd] {
+			lines = append(lines, clipTerminalLine(formatDashboardRoute(claim, width, m.styles, m.tlsPort, false), width))
+		}
 	}
-	addTo(requestTitle)
-	requestWidth := max(1, width-2)
-	addTo("  " + formatFollowLogHeader(requestWidth, m.styles))
-	available := max(0, m.height-len(lines)-2)
+
+	lines = append(lines, "")
+
+	// Exposures section
+	eStart := min(m.exposureOffset, max(0, len(m.exposures)-exposureLimit))
+	eEnd := min(len(m.exposures), eStart+exposureLimit)
+	lines = append(lines, m.dashboardSectionTitle("PUBLIC EXPOSURES", eStart, eEnd, len(m.exposures), m.focus == dashboardFocusExposures))
+	lines = append(lines, clipTerminalLine(formatDashboardExposure(ipc.ExposureStatus{State: "STATE", Route: "ROUTE", Host: "PUBLIC URL"}, width, m.styles, true), width))
+	if len(m.exposures) == 0 {
+		lines = append(lines, clipTerminalLine("  "+m.styles.muted("No active public exposures"), width))
+	} else {
+		for _, exposure := range m.exposures[eStart:eEnd] {
+			lines = append(lines, clipTerminalLine(formatDashboardExposure(exposure, width, m.styles, false), width))
+		}
+	}
+
+	lines = append(lines, "")
+
+	// Requests section — fills remaining height above footer
+	lines = append(lines, m.dashboardSectionTitle("REQUESTS", 0, len(m.logs.entries), len(m.logs.entries), m.focus == dashboardFocusRequests))
+	lines = append(lines, clipTerminalLine("  "+formatFollowLogHeader(max(1, width-2), m.styles), width))
+	available := max(0, m.height-len(lines)-2) // reserve blank + footer
 	if len(m.logs.entries) == 0 && available > 0 {
-		addTo("  " + m.styles.muted("Waiting for requests..."))
+		lines = append(lines, clipTerminalLine("  "+m.styles.muted("Waiting for requests..."), width))
 	} else if available > 0 {
 		start, end := dashboardWindow(len(m.logs.entries), m.cursor, available)
 		for index := start; index < end; index++ {
@@ -73,16 +75,69 @@ func (m dashboardModel) View() string {
 			if index == m.cursor {
 				marker = m.styles.accent("> ")
 			}
-			addTo(marker + formatFollowLogEntry(m.logs.entries[index], requestWidth, m.styles))
+			lines = append(lines, clipTerminalLine(marker+formatFollowLogEntry(m.logs.entries[index], max(1, width-2), m.styles), width))
 		}
 	}
 
 	lines = append(lines, "")
-	addTo(m.dashboardFooter())
+	lines = append(lines, footer)
+	// Ensure footer is always the last visible line.
+	if m.height > 0 && len(lines) > m.height {
+		lines = append(lines[:m.height-1], footer)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m dashboardModel) connectionBadge() string {
+	switch m.logs.state {
+	case "connected":
+		return m.styles.success(m.logs.state)
+	case "waiting", "reconnecting":
+		return m.styles.warning(m.logs.state)
+	case "error":
+		return m.styles.failure(m.logs.state)
+	default:
+		return m.styles.muted(m.logs.state)
+	}
+}
+
+func (m dashboardModel) compactView(header string, width int) string {
+	lines := []string{clipTerminalLine(header, width)}
+	if m.height >= 3 {
+		lines = append(lines, clipTerminalLine(m.dashboardSummary(), width))
+	}
+	if m.height >= 2 {
+		lines = append(lines, clipTerminalLine(m.dashboardFooter(), width))
+	}
 	if m.height > 0 && len(lines) > m.height {
 		lines = lines[:m.height]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// sectionTitle renders a section header with a ─ fill line to the terminal edge.
+// Focused sections use the accent style and a > marker; others use the label style.
+func (m dashboardModel) sectionTitle(label string, focused bool) string {
+	var prefix string
+	if focused {
+		prefix = m.styles.accent("> " + label + " ")
+	} else {
+		prefix = m.styles.label("  " + label + " ")
+	}
+	prefixWidth := ansi.StringWidth(prefix)
+	width := max(1, m.width)
+	if prefixWidth >= width {
+		return clipTerminalLine(prefix, width)
+	}
+	return prefix + m.styles.muted(strings.Repeat("─", width-prefixWidth))
+}
+
+func (m dashboardModel) dashboardSectionTitle(label string, start, end, total int, focused bool) string {
+	count := fmt.Sprintf("%d", total)
+	if total > 0 && (start > 0 || end < total) {
+		count = fmt.Sprintf("%d-%d of %d", start+1, end, total)
+	}
+	return m.sectionTitle(fmt.Sprintf("%s (%s)", label, count), focused)
 }
 
 func (m dashboardModel) dashboardFooter() string {
@@ -92,15 +147,7 @@ func (m dashboardModel) dashboardFooter() string {
 	if m.inspectingID != "" {
 		return m.styles.muted("loading request " + terminalEscapeString(m.inspectingID) + "...")
 	}
-	if m.height < 22 {
-		return m.styles.muted("j/k select  enter inspect  g/G first/last  q quit")
-	}
-	return m.styles.muted("tab section  j/k navigate  enter inspect  g/G first/last  q quit")
-}
-
-func (m dashboardModel) dashboardSectionLimits() (int, int) {
-	extra := max(0, m.height-24) / 4
-	return 3 + extra, 2 + extra
+	return m.styles.muted("tab focus  j/k navigate  enter inspect  g/G first/last  q quit")
 }
 
 func (m dashboardModel) dashboardSummary() string {
@@ -112,7 +159,7 @@ func (m dashboardModel) dashboardSummary() string {
 	if m.online {
 		parts = append(parts, fmt.Sprintf("agent %s up %s", terminalEscapeString(m.status.Version), humanDuration(time.Duration(m.status.UptimeSeconds)*time.Second)))
 	} else {
-		parts = append(parts, "agent not running; dashboard is read-only")
+		parts = append(parts, "agent not running")
 	}
 	if m.snapshotErr != nil {
 		parts = append(parts, terminalEscapeString(m.snapshotErr.Error()))
@@ -120,46 +167,6 @@ func (m dashboardModel) dashboardSummary() string {
 		parts = append(parts, terminalEscapeString(m.logs.detail))
 	}
 	return m.styles.muted(strings.Join(parts, "  "))
-}
-
-func (m dashboardModel) appendRouteLines(lines *[]string, width, limit int) {
-	start := min(m.routeOffset, max(0, len(m.routes)-limit))
-	end := min(len(m.routes), start+limit)
-	*lines = append(*lines, clipTerminalLine(m.dashboardSectionTitle("ROUTES", start, end, len(m.routes), m.focus == dashboardFocusRoutes), width))
-	*lines = append(*lines, clipTerminalLine(formatDashboardRoute(ipc.Claim{Name: "NAME", OwnerCWD: "LOCAL"}, width, m.styles, m.tlsPort, true), width))
-	if len(m.routes) == 0 {
-		*lines = append(*lines, clipTerminalLine(m.styles.muted("No active local routes"), width))
-		return
-	}
-	for _, claim := range m.routes[start:end] {
-		*lines = append(*lines, clipTerminalLine(formatDashboardRoute(claim, width, m.styles, m.tlsPort, false), width))
-	}
-}
-
-func (m dashboardModel) appendExposureLines(lines *[]string, width, limit int) {
-	start := min(m.exposureOffset, max(0, len(m.exposures)-limit))
-	end := min(len(m.exposures), start+limit)
-	*lines = append(*lines, clipTerminalLine(m.dashboardSectionTitle("PUBLIC EXPOSURES", start, end, len(m.exposures), m.focus == dashboardFocusExposures), width))
-	*lines = append(*lines, clipTerminalLine(formatDashboardExposure(ipc.ExposureStatus{State: "STATE", Route: "ROUTE", Host: "PUBLIC URL"}, width, m.styles, true), width))
-	if len(m.exposures) == 0 {
-		*lines = append(*lines, clipTerminalLine(m.styles.muted("No active public exposures"), width))
-		return
-	}
-	for _, exposure := range m.exposures[start:end] {
-		*lines = append(*lines, clipTerminalLine(formatDashboardExposure(exposure, width, m.styles, false), width))
-	}
-}
-
-func (m dashboardModel) dashboardSectionTitle(label string, start, end, total int, focused bool) string {
-	count := fmt.Sprintf("%d", total)
-	if total > 0 && (start > 0 || end < total) {
-		count = fmt.Sprintf("%d-%d of %d", start+1, end, total)
-	}
-	title := fmt.Sprintf("%s (%s)", label, count)
-	if focused {
-		return m.styles.accent("> " + title)
-	}
-	return m.styles.label(title)
 }
 
 func (m dashboardModel) detailView() string {

@@ -10,6 +10,14 @@ import (
 	"github.com/mukul-mehta/routeup/internal/logs"
 )
 
+type dashboardFocus int
+
+const (
+	dashboardFocusRequests dashboardFocus = iota
+	dashboardFocusRoutes
+	dashboardFocusExposures
+)
+
 type dashboardModel struct {
 	client         *agentctl.Client
 	ctx            context.Context
@@ -33,14 +41,6 @@ type dashboardModel struct {
 	inspectingID   string
 	inspectErr     string
 }
-
-type dashboardFocus int
-
-const (
-	dashboardFocusRequests dashboardFocus = iota
-	dashboardFocusRoutes
-	dashboardFocusExposures
-)
 
 func newDashboardModel(client *agentctl.Client, ctx context.Context, logEvents, snapshotEvents <-chan tea.Msg, cancel context.CancelFunc, styles terminalStyles, tlsPort int) dashboardModel {
 	return dashboardModel{
@@ -223,4 +223,11 @@ func (m dashboardModel) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, inspectDashboardRequest(m.ctx, m.client, entry.ID)
 	}
 	return m, nil
+}
+
+// dashboardSectionLimits returns the max visible rows for the routes and
+// exposures sections. Extra height above 24 lines is shared proportionally.
+func (m dashboardModel) dashboardSectionLimits() (int, int) {
+	extra := max(0, m.height-24) / 4
+	return 3 + extra, 2 + extra
 }

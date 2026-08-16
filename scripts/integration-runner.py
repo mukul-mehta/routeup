@@ -45,6 +45,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
 # makes SIGKILL ineffective until the scan finishes.
 child_pid = os.fork()
 if child_pid == 0:
+    # On macOS 26, CPython's wakeup-fd-based signal delivery can be
+    # unreliable in a forked child because the inherited fd is still
+    # owned by the parent's event loop. Disabling it forces the
+    # interpreter to rely on raw POSIX signal delivery (EINTR) instead.
+    try:
+        signal.set_wakeup_fd(-1)
+    except (ValueError, OSError):
+        pass
+
     def child_stop(signum, _frame):
         write("descendant.signal", signal.Signals(signum).name)
         os._exit(0)
@@ -65,6 +74,12 @@ def stop(signum, _frame):
     global stopping
     write("app.signal", signal.Signals(signum).name)
     stopping = True
+    # Explicitly deliver the signal to the child in case process-group
+    # delivery is delayed (macOS 26 fork + wakeup-fd timing issue).
+    try:
+        os.kill(child_pid, signum)
+    except ProcessLookupError:
+        pass
 
 
 signal.signal(signal.SIGINT, stop)
@@ -75,9 +90,20 @@ try:
         server.handle_request()
 finally:
     server.server_close()
-    try:
-        os.waitpid(child_pid, 0)
-    except ChildProcessError:
-        pass
+    # Reap the child with a bounded non-blocking wait so the parent never
+    # hangs indefinitely. Fall back to SIGKILL if the child stalls.
+    for _ in range(30):  # up to 3 seconds
+        try:
+            if os.waitpid(child_pid, os.WNOHANG)[0] != 0:
+                break
+        except ChildProcessError:
+            break
+        time.sleep(0.1)
+    else:
+        try:
+            os.kill(child_pid, signal.SIGKILL)
+            os.waitpid(child_pid, 0)
+        except (ProcessLookupError, ChildProcessError):
+            pass
 
 raise SystemExit(42)
