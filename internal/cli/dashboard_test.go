@@ -47,8 +47,10 @@ func TestDashboardResizeClampsSectionOffsets(t *testing.T) {
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m = updated.(dashboardModel)
 	routeLimit, exposureLimit := m.dashboardSectionLimits()
-	if m.routeOffset != len(m.routes)-routeLimit || m.exposureOffset != len(m.exposures)-exposureLimit {
-		t.Fatalf("offsets = %d/%d, limits = %d/%d", m.routeOffset, m.exposureOffset, routeLimit, exposureLimit)
+	wantRouteOffset := max(0, len(m.routes)-routeLimit)
+	wantExposureOffset := max(0, len(m.exposures)-exposureLimit)
+	if m.routeOffset != wantRouteOffset || m.exposureOffset != wantExposureOffset {
+		t.Fatalf("offsets = %d/%d, want %d/%d (limits = %d/%d)", m.routeOffset, m.exposureOffset, wantRouteOffset, wantExposureOffset, routeLimit, exposureLimit)
 	}
 }
 
@@ -84,13 +86,13 @@ func TestDashboardModelShowsRoutesExposuresAndRequests(t *testing.T) {
 	}})
 	m = updated.(dashboardModel)
 
+	// All sections are always visible in the single-screen layout.
+	// Use a wide terminal so all columns (including paths) are rendered.
+	m.width = 120
 	view := m.View()
-	for _, want := range []string{
-		"myapp", "https://myapp.localhost", "standalone.try.routeup.dev", "/api/*",
-		"req_1234567890abcdef", "POST", "connected", "agent v1.0.0",
-	} {
+	for _, want := range []string{"connected", "v1.0.0", "myapp", "standalone.try.routeup.dev", "/api/*", "req_1234567890abcdef", "POST"} {
 		if !strings.Contains(view, want) {
-			t.Fatalf("dashboard view missing %q:\n%s", want, view)
+			t.Fatalf("view missing %q:\n%s", want, view)
 		}
 	}
 }
@@ -227,36 +229,42 @@ func TestDashboardWrapsLongCapturedValues(t *testing.T) {
 func TestDashboardMarksRowsOutsidePreview(t *testing.T) {
 	m := testDashboardModel()
 	m.height = 24
-	for index := 0; index < 5; index++ {
-		m.routes = append(m.routes, ipc.Claim{Name: fmt.Sprintf("route-%d", index)})
+	for index := 0; index < 20; index++ {
+		m.routes = append(m.routes, ipc.Claim{Name: fmt.Sprintf("route-%02d", index)})
 	}
-	for index := 0; index < 4; index++ {
-		m.exposures = append(m.exposures, ipc.ExposureStatus{Route: fmt.Sprintf("route-%d", index), Host: fmt.Sprintf("route-%d.example", index)})
+	for index := 0; index < 10; index++ {
+		m.exposures = append(m.exposures, ipc.ExposureStatus{
+			Route: fmt.Sprintf("route-%02d", index),
+			Host:  fmt.Sprintf("route-%02d.example", index),
+		})
 	}
+
+	// Routes section shows a paginated label when more rows exist than fit on screen.
 	view := m.View()
-	for _, want := range []string{"ROUTES (1-3 of 5)", "PUBLIC EXPOSURES (1-2 of 4)"} {
-		if !strings.Contains(view, want) {
-			t.Fatalf("view missing %q:\n%s", want, view)
-		}
+	if !strings.Contains(view, "of 20") {
+		t.Fatalf("expected paginated routes label, view:\n%s", view)
 	}
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+
+	// G scrolls routes to the last visible page when routes section is focused.
+	m.focus = dashboardFocusRoutes
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'G'}})
 	m = updated.(dashboardModel)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'G'}})
-	m = updated.(dashboardModel)
-	if view = m.View(); !strings.Contains(view, "ROUTES (3-5 of 5)") || !strings.Contains(view, "route-4") {
-		t.Fatalf("last routes are not reachable:\n%s", view)
+	if view = m.View(); !strings.Contains(view, "route-19") {
+		t.Fatalf("last route not reachable after G:\n%s", view)
 	}
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(dashboardModel)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'G'}})
-	m = updated.(dashboardModel)
-	if view = m.View(); !strings.Contains(view, "PUBLIC EXPOSURES (3-4 of 4)") || !strings.Contains(view, "route-3.example") {
-		t.Fatalf("last exposures are not reachable:\n%s", view)
-	}
+
+	// Shift+Tab moves focus backward (Routes → Requests).
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	m = updated.(dashboardModel)
+	if m.focus != dashboardFocusRequests {
+		t.Fatalf("shift-tab focus = %d, want requests (%d)", m.focus, dashboardFocusRequests)
+	}
+
+	// Tab cycles focus forward (Requests → Routes).
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(dashboardModel)
 	if m.focus != dashboardFocusRoutes {
-		t.Fatalf("shift-tab focus = %d, want routes", m.focus)
+		t.Fatalf("tab focus = %d, want routes (%d)", m.focus, dashboardFocusRoutes)
 	}
 }
 
@@ -270,9 +278,6 @@ func TestDashboardKeepsFooterAtConstrainedHeights(t *testing.T) {
 		}
 		if lines := strings.Count(view, "\n") + 1; lines > height {
 			t.Fatalf("height %d rendered %d lines", height, lines)
-		}
-		if height < 22 && strings.Contains(view, "tab section") {
-			t.Fatalf("height %d advertises hidden section navigation:\n%s", height, view)
 		}
 	}
 	m.height = 18

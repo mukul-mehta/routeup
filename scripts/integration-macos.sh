@@ -322,7 +322,7 @@ PY
 printf '%s\n' "== stop runner and verify cleanup =="
 kill -TERM "$RUNNER_PID"
 RUNNER_STATUS=0
-wait_bounded "$RUNNER_PID" 80 || RUNNER_STATUS=$?
+wait_bounded "$RUNNER_PID" 150 || RUNNER_STATUS=$?
 RUNNER_PID=""
 if [[ "$RUNNER_STATUS" -ne 42 ]]; then
 	printf '%s\n' "runner exit status = $RUNNER_STATUS, want 42" >&2

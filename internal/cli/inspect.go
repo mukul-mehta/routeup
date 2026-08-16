@@ -7,6 +7,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -170,7 +172,18 @@ func writeCapturedMessageStyled(out io.Writer, label string, msg *logs.CapturedM
 	}
 	body := msg.Body
 	if !raw {
-		body = []byte(terminalEscapeBytes(body))
+		if json.Valid(body) {
+			var indented bytes.Buffer
+			if err := json.Indent(&indented, body, "", "  "); err == nil {
+				body = []byte(terminalEscapeBody(indented.Bytes()))
+			} else {
+				body = []byte(terminalEscapeBody(body))
+			}
+		} else if utf8.Valid(body) {
+			body = []byte(terminalEscapeBody(body))
+		} else {
+			body = []byte(terminalEscapeBytes(body))
+		}
 	}
 	if _, err := out.Write(body); err != nil {
 		return fmt.Errorf("write %s body: %w", label, err)
