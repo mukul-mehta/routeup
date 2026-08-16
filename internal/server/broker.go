@@ -18,11 +18,23 @@ type routeBroker struct {
 	store           *Store
 	ensureNamespace func(ctx context.Context, base string)
 	metrics         *serverMetrics
+	claimLimiter    *multiLimiter
+	anonLimiter     *multiLimiter
 }
 
 // Hold authorizes spec for token, persists the hold, and ensures a cert for its
 // namespace. It returns the resolved public host.
 func (k *routeBroker) Hold(ctx context.Context, token string, spec tunnel.ClaimSpec) (tunnel.RouteLease, error) {
+	// Check rate limits before the DB-backed authorize path.
+	if token == "" {
+		if !k.anonLimiter.allow("anon") {
+			k.metrics.claimRateLimited()
+			return tunnel.RouteLease{}, &codedError{msg: "rate limit exceeded", code: http.StatusTooManyRequests}
+		}
+	} else if !k.claimLimiter.allow(token) {
+		k.metrics.claimRateLimited()
+		return tunnel.RouteLease{}, &codedError{msg: "rate limit exceeded", code: http.StatusTooManyRequests}
+	}
 	decision, err := k.authorizer.Authorize(ctx, ClaimAttempt{
 		TokenSecret: token,
 		Route:       spec.Route,

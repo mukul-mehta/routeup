@@ -20,11 +20,14 @@ type Server struct {
 	cfg    ServerConfig
 	logger *slog.Logger
 
-	store      *Store
-	authorizer *Authorizer
-	tunnels    *tunnel.TunnelRegistry
-	cm         certManager
-	metrics    *serverMetrics
+	store          *Store
+	authorizer     *Authorizer
+	tunnels        *tunnel.TunnelRegistry
+	cm             certManager
+	metrics        *serverMetrics
+	claimLimiter   *multiLimiter
+	anonLimiter    *multiLimiter
+	requestLimiter *multiLimiter
 }
 
 // New validates cfg and returns a Server ready to Run. The store is opened by
@@ -45,11 +48,16 @@ func New(cfg ServerConfig, logger *slog.Logger) (*Server, error) {
 func (s *Server) attach(store *Store) {
 	s.store = store
 	s.authorizer = NewAuthorizer(s.cfg, store)
+	s.claimLimiter = newMultiLimiter(s.cfg.RateLimit.ClaimRate, s.cfg.RateLimit.ClaimBurst)
+	s.anonLimiter = newMultiLimiter(s.cfg.RateLimit.AnonRate, s.cfg.RateLimit.AnonBurst)
+	s.requestLimiter = newMultiLimiter(s.cfg.RateLimit.RequestRate, s.cfg.RateLimit.RequestBurst)
 	broker := &routeBroker{
 		authorizer:      s.authorizer,
 		store:           store,
 		ensureNamespace: s.ensureNamespaceCert,
 		metrics:         s.metrics,
+		claimLimiter:    s.claimLimiter,
+		anonLimiter:     s.anonLimiter,
 	}
 	s.tunnels = tunnel.NewTunnelRegistry(broker, s.logger, s.metrics)
 }

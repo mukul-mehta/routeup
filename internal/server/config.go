@@ -20,21 +20,33 @@ const (
 
 const CloudflareTokenEnv = "CLOUDFLARE_API_TOKEN"
 
+// RateLimiterConfig holds per-dimension rate limit settings. A zero Rate
+// disables that limit (self-hosted default).
+type RateLimiterConfig struct {
+	ClaimRate    float64 `json:"claim_rate"`
+	ClaimBurst   int     `json:"claim_burst"`
+	AnonRate     float64 `json:"anon_rate"`
+	AnonBurst    int     `json:"anon_burst"`
+	RequestRate  float64 `json:"request_rate"`
+	RequestBurst int     `json:"request_burst"`
+}
+
 type ServerConfig struct {
-	Domain          string   `json:"domain"`
-	Listen          string   `json:"listen"`
-	PublicNamespace string   `json:"public_namespace"`
-	DBPath          string   `json:"db"`
-	Reserved        []string `json:"reserved"`
-	TLSMode         string   `json:"tls_mode"`
-	ACMEEmail       string   `json:"acme_email"`
-	ACMECA          string   `json:"acme_ca"`
-	ACMEStorage     string   `json:"acme_storage"`
-	TLSCert         string   `json:"tls_cert"`
-	TLSKey          string   `json:"tls_key"`
-	LogFormat       string   `json:"log_format"`
-	LogLevel        string   `json:"log_level"`
-	MetricsListen   string   `json:"metrics_listen"`
+	Domain          string            `json:"domain"`
+	Listen          string            `json:"listen"`
+	PublicNamespace string            `json:"public_namespace"`
+	DBPath          string            `json:"db"`
+	Reserved        []string          `json:"reserved"`
+	TLSMode         string            `json:"tls_mode"`
+	ACMEEmail       string            `json:"acme_email"`
+	ACMECA          string            `json:"acme_ca"`
+	ACMEStorage     string            `json:"acme_storage"`
+	TLSCert         string            `json:"tls_cert"`
+	TLSKey          string            `json:"tls_key"`
+	LogFormat       string            `json:"log_format"`
+	LogLevel        string            `json:"log_level"`
+	MetricsListen   string            `json:"metrics_listen"`
+	RateLimit       RateLimiterConfig `json:"rate_limit"`
 }
 
 func DefaultServerConfig() ServerConfig {
@@ -104,6 +116,24 @@ func Overlay(base, over ServerConfig) ServerConfig {
 	}
 	if over.MetricsListen != "" {
 		out.MetricsListen = over.MetricsListen
+	}
+	if over.RateLimit.ClaimRate != 0 {
+		out.RateLimit.ClaimRate = over.RateLimit.ClaimRate
+	}
+	if over.RateLimit.ClaimBurst != 0 {
+		out.RateLimit.ClaimBurst = over.RateLimit.ClaimBurst
+	}
+	if over.RateLimit.AnonRate != 0 {
+		out.RateLimit.AnonRate = over.RateLimit.AnonRate
+	}
+	if over.RateLimit.AnonBurst != 0 {
+		out.RateLimit.AnonBurst = over.RateLimit.AnonBurst
+	}
+	if over.RateLimit.RequestRate != 0 {
+		out.RateLimit.RequestRate = over.RateLimit.RequestRate
+	}
+	if over.RateLimit.RequestBurst != 0 {
+		out.RateLimit.RequestBurst = over.RateLimit.RequestBurst
 	}
 	return out
 }

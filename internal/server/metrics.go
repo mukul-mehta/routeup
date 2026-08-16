@@ -34,6 +34,8 @@ type serverMetrics struct {
 	requestCount        [requestOutcomeCount]atomic.Uint64
 	forwardErrors       atomic.Uint64
 	reapedHolds         atomic.Uint64
+	rateLimitedClaims   atomic.Uint64
+	rateLimitedRequests atomic.Uint64
 }
 
 func newServerMetrics() *serverMetrics {
@@ -86,6 +88,9 @@ func (m *serverMetrics) holdsReaped(count int) {
 		m.reapedHolds.Add(uint64(count))
 	}
 }
+
+func (m *serverMetrics) claimRateLimited()   { m.rateLimitedClaims.Add(1) }
+func (m *serverMetrics) requestRateLimited() { m.rateLimitedRequests.Add(1) }
 
 func statusClassIndex(status int) int {
 	class := status / 100
@@ -143,6 +148,10 @@ func (m *serverMetrics) serveHTTP(w http.ResponseWriter, _ *http.Request) {
 
 	writeMetricHeader(&out, "routeup_holds_reaped_total", "Expired or stale route holds removed by the server.", "counter")
 	_, _ = fmt.Fprintf(&out, "routeup_holds_reaped_total %d\n", m.reapedHolds.Load())
+
+	writeMetricHeader(&out, "routeup_rate_limited_total", "Requests or claims rejected by the rate limiter.", "counter")
+	_, _ = fmt.Fprintf(&out, "routeup_rate_limited_total{kind=\"claim\"} %d\n", m.rateLimitedClaims.Load())
+	_, _ = fmt.Fprintf(&out, "routeup_rate_limited_total{kind=\"request\"} %d\n", m.rateLimitedRequests.Load())
 
 	_, _ = w.Write([]byte(out.String()))
 }

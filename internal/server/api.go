@@ -73,6 +73,13 @@ func (s *Server) serveIngress(w http.ResponseWriter, r *http.Request) {
 	// DNS hostnames are case-insensitive, while tunnel registrations use the
 	// canonical lowercase form returned by the authorizer.
 	host := strings.ToLower(stripPort(r.Host))
+	if !s.requestLimiter.allow(host) {
+		s.metrics.requestRateLimited()
+		outcome = requestNoTunnel
+		observed.Header().Set("Retry-After", "1")
+		http.Error(observed, "routeup: rate limit exceeded", http.StatusTooManyRequests)
+		return
+	}
 	h, ok := s.tunnels.Handler(host)
 	if !ok {
 		outcome = requestNoTunnel
