@@ -94,21 +94,12 @@ func TestLogsFollowDoesNotPrintHeaderWithoutAgent(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	t.Setenv("ROUTEUP_AGENT_SOCKET", filepath.Join(dir, "missing.sock"))
-	stdout, _, err := runRoot(t, "logs", "--follow", "--plain")
+	stdout, _, err := runRoot(t, "logs", "--follow")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(stdout, "TIME") || !strings.Contains(stdout, "agent not running") {
 		t.Fatalf("output = %q", stdout)
-	}
-}
-
-func TestLogsPlainValidation(t *testing.T) {
-	if _, _, err := runRoot(t, "logs", "--plain"); err == nil || !strings.Contains(err.Error(), "requires --follow") {
-		t.Fatalf("plain error = %v", err)
-	}
-	if _, _, err := runRoot(t, "logs", "--follow", "--plain", "--json"); err == nil || !strings.Contains(err.Error(), "cannot be used together") {
-		t.Fatalf("plain/json error = %v", err)
 	}
 }
 

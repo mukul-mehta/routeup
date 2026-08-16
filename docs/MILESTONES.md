@@ -572,11 +572,9 @@ Goal: make local and public traffic visible.
 > for local and public completed request metadata. `routeup logs [route]` reads
 > the JSON agent API, and `--follow` consumes its SSE stream. The proxy records
 > the matched target, status, and duration without buffering request or response
-> bodies; request capture and inspect are implemented in Phase 10 below. In an
-> interactive terminal, `--follow` uses a Bubble Tea live viewer; redirected
-> output and `--plain` preserve line-oriented streaming, while `--json` emits
-> NDJSON. The shared Lip Gloss theme is also used by existing human-readable
-> status commands.
+> bodies; request capture and inspect are implemented in Phase 10 below.
+> `--follow` always streams plain lines; `--json` emits NDJSON. The shared
+> Lip Gloss theme is also used by existing human-readable status commands.
 
 Build:
 

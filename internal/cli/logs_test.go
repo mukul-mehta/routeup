@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -54,7 +55,7 @@ func TestWriteLogHeader(t *testing.T) {
 	if err := writeLogHeader(&output); err != nil {
 		t.Fatal(err)
 	}
-	const want = "TIME      SOURCE  ROUTE                 METHOD   PATH                                      STATUS  DURATION  ID\n"
+	const want = "TIME      ROUTE                 SOURCE  STATUS  ID                    METHOD   DURATION  PATH\n"
 	if output.String() != want {
 		t.Fatalf("header = %q, want %q", output.String(), want)
 	}
@@ -153,5 +154,31 @@ func TestParseLogSince(t *testing.T) {
 	}
 	if _, err := parseLogSince("later", now); err == nil {
 		t.Fatal("invalid since value accepted")
+	}
+}
+
+func TestTerminalStylesCanBeDisabled(t *testing.T) {
+	plain := terminalStyles{}.accent("routeup")
+	if plain != "routeup" {
+		t.Fatalf("plain style = %q", plain)
+	}
+}
+
+func TestPrintErrorKeepsRedirectedOutputPlain(t *testing.T) {
+	var out bytes.Buffer
+	PrintError(&out, errors.New("route failed\n  hint: try another name"))
+	if got, want := out.String(), "route failed\n  hint: try another name\n"; got != want {
+		t.Fatalf("output = %q, want %q", got, want)
+	}
+}
+
+func TestPrintErrorEscapesTTYOutputWithoutColor(t *testing.T) {
+	var out bytes.Buffer
+	printError(&out, errors.New("route \x1b[2J failed\n  hint: retry"), terminalStyles{tty: true})
+	if strings.Contains(out.String(), "\x1b") {
+		t.Fatalf("output contains terminal control: %q", out.String())
+	}
+	if !strings.Contains(out.String(), `route \x1b[2J failed`) {
+		t.Fatalf("output lost escaped context: %q", out.String())
 	}
 }

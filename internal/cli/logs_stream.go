@@ -13,7 +13,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/spf13/cobra"
 
 	"github.com/mukul-mehta/routeup/internal/agentctl"
 	"github.com/mukul-mehta/routeup/internal/logs"
@@ -156,86 +155,7 @@ func (m followLogsModel) visibleRows() int {
 }
 
 func (m followLogsModel) View() string {
-	width := max(1, m.width)
-	state := m.styles.muted(m.state)
-	switch m.state {
-	case "connected":
-		state = m.styles.success(m.state)
-	case "waiting", "reconnecting":
-		state = m.styles.warning(m.state)
-	case "error":
-		state = m.styles.failure(m.state)
-	}
-
-	var view strings.Builder
-	view.WriteString(joinAcross(m.styles.accent("routeup logs"), state, width))
-	view.WriteByte('\n')
-	detail := m.styles.muted(followLogFilterSummary(m.opts))
-	if m.detail != "" {
-		detail += m.styles.muted("  " + terminalEscapeString(m.detail))
-	}
-	view.WriteString(clipTerminalLine(detail, width))
-	view.WriteString("\n\n")
-	view.WriteString(clipTerminalLine(formatFollowLogHeader(width, m.styles), width))
-	view.WriteByte('\n')
-
-	visible := m.visibleRows()
-	end := len(m.entries) - m.scroll
-	start := max(0, end-visible)
-	if start == end {
-		view.WriteString(clipTerminalLine(m.styles.muted("Waiting for matching requests..."), width))
-		view.WriteByte('\n')
-	} else {
-		for _, entry := range m.entries[start:end] {
-			view.WriteString(clipTerminalLine(formatFollowLogEntry(entry, width, m.styles), width))
-			view.WriteByte('\n')
-		}
-	}
-
-	shown := fmt.Sprintf("%d-%d of %d", min(start+1, end), end, len(m.entries))
-	if len(m.entries) == 0 {
-		shown = "0 requests"
-	}
-	footer := m.styles.muted("up/k scroll  down/j scroll  g/G first/last  q quit")
-	view.WriteByte('\n')
-	view.WriteString(joinAcross(footer, m.styles.muted(shown), width))
-	return view.String()
-}
-
-func runLogsTUI(cmd *cobra.Command, client *agentctl.Client, opts logs.ListOptions) error {
-	parent := cmd.Context()
-	if parent == nil {
-		parent = context.Background()
-	}
-	streamCtx, cancelStream := context.WithCancel(parent)
-	events := make(chan tea.Msg, 64)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		followLogEvents(streamCtx, client, opts, events)
-	}()
-
-	styles := newTerminalStyles(cmd.OutOrStdout())
-	program := tea.NewProgram(
-		newFollowLogsModel(events, cancelStream, opts, styles),
-		tea.WithContext(parent),
-		tea.WithInput(cmd.InOrStdin()),
-		tea.WithOutput(cmd.OutOrStdout()),
-		tea.WithAltScreen(),
-	)
-	final, err := program.Run()
-	cancelStream()
-	<-done
-	if model, ok := final.(followLogsModel); ok && model.err != nil {
-		return fmt.Errorf("follow request logs: %w", model.err)
-	}
-	if err == nil || errors.Is(err, tea.ErrInterrupted) {
-		return nil
-	}
-	if errors.Is(err, tea.ErrProgramKilled) && parent.Err() != nil {
-		return nil
-	}
-	return fmt.Errorf("run live request viewer: %w", err)
+	return ""
 }
 
 func followLogEvents(ctx context.Context, client *agentctl.Client, opts logs.ListOptions, events chan<- tea.Msg) {
@@ -310,29 +230,6 @@ func waitForFollowRetry(ctx context.Context) bool {
 	}
 }
 
-func followLogFilterSummary(opts logs.ListOptions) string {
-	filters := make([]string, 0, 5)
-	if opts.Route != "" {
-		filters = append(filters, "route="+terminalEscapeString(opts.Route))
-	}
-	if opts.Source != "" {
-		filters = append(filters, "source="+terminalEscapeString(string(opts.Source)))
-	}
-	if opts.Method != "" {
-		filters = append(filters, "method="+terminalEscapeString(opts.Method))
-	}
-	if opts.Status != 0 {
-		filters = append(filters, fmt.Sprintf("status=%d", opts.Status))
-	}
-	if !opts.Since.IsZero() {
-		filters = append(filters, "since="+opts.Since.Local().Format("15:04:05"))
-	}
-	if len(filters) == 0 {
-		return "all requests"
-	}
-	return strings.Join(filters, "  ")
-}
-
 func formatFollowLogHeader(width int, styles terminalStyles) string {
 	return formatFollowLogColumns(logs.Entry{
 		Source: "SOURCE", Route: "ROUTE", Method: "METHOD", RequestPath: "PATH", ID: "ID",
@@ -358,30 +255,27 @@ func formatFollowLogColumns(entry logs.Entry, width int, styles terminalStyles, 
 	}
 	columns := []column{{timeText, 8, "muted"}}
 	if width >= 80 {
-		columns = append(columns, column{terminalEscapeString(string(entry.Source)), 6, "source"})
-	}
-	columns = append(columns,
-		column{terminalEscapeString(entry.Method), 7, "method"},
-		column{statusText, 3, "status"},
-	)
-	if width >= 110 {
-		columns = append(columns, column{durationText, 8, "muted"})
-	}
-	if width >= 80 {
 		routeWidth := 16
 		if width >= 120 {
 			routeWidth = 20
 		}
 		columns = append(columns, column{terminalEscapeString(entry.Route), routeWidth, "route"})
+		columns = append(columns, column{terminalEscapeString(string(entry.Source)), 6, "source"})
 	}
-	idWidth := 20
-	fixedWidth := idWidth + 2*(len(columns)+1)
+	columns = append(columns,
+		column{statusText, 3, "status"},
+		column{terminalEscapeString(entry.ID), 20, "id"},
+		column{terminalEscapeString(entry.Method), 7, "method"},
+	)
+	if width >= 110 {
+		columns = append(columns, column{durationText, 8, "muted"})
+	}
+	fixedWidth := 2 * len(columns)
 	for _, col := range columns {
 		fixedWidth += col.width
 	}
 	columns = append(columns,
 		column{terminalEscapeString(entry.RequestPath), max(4, width-fixedWidth), "path"},
-		column{terminalEscapeString(entry.ID), idWidth, "id"},
 	)
 
 	parts := make([]string, 0, len(columns))

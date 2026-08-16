@@ -141,5 +141,22 @@ func terminalEscapeBytes(value []byte) string {
 }
 
 func terminalEscapeString(value string) string {
-	return terminalEscapeBytes([]byte(value))
+	var out strings.Builder
+	for _, r := range value {
+		switch {
+		case r == '\\':
+			out.WriteString(`\\`)
+		case r == '\n':
+			out.WriteString(`\n`)
+		case r == '\r':
+			out.WriteString(`\r`)
+		case r == '\t':
+			out.WriteString(`\t`)
+		case r < 0x20 || r == 0x7f:
+			_, _ = fmt.Fprintf(&out, `\x%02x`, r)
+		default:
+			out.WriteRune(r)
+		}
+	}
+	return out.String()
 }
