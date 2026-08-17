@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"sync"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/hashicorp/yamux"
@@ -54,6 +55,9 @@ type TunnelRegistry struct {
 	broker   RouteBroker
 	logger   *slog.Logger
 	observer RegistryObserver
+	// handshakeTimeout is configurable only inside the package so tests can use
+	// a short deadline without weakening the production value.
+	handshakeTimeout time.Duration
 
 	mu     sync.RWMutex
 	routes map[string]*tunnelRoute // public host -> reverse proxy over its session
@@ -77,10 +81,11 @@ func NewTunnelRegistry(broker RouteBroker, logger *slog.Logger, observer Registr
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	return &TunnelRegistry{
-		broker:   broker,
-		logger:   logger,
-		observer: observer,
-		routes:   make(map[string]*tunnelRoute),
+		broker:           broker,
+		logger:           logger,
+		observer:         observer,
+		handshakeTimeout: claimHandshakeTimeout,
+		routes:           make(map[string]*tunnelRoute),
 	}
 }
 
@@ -123,6 +128,10 @@ func (reg *TunnelRegistry) AcceptHandler() http.HandlerFunc {
 //
 // Two phases: handshake (one-time) and session lifetime (the block).
 func (reg *TunnelRegistry) ServeConn(ctx context.Context, conn net.Conn, token string) error {
+	if err := conn.SetDeadline(time.Now().Add(reg.handshakeTimeout)); err != nil {
+		return fmt.Errorf("set claim handshake deadline: %w", err)
+	}
+
 	// The agent dialed, so the server takes the yamux *server* role. From here
 	// either side can open streams over this one connection.
 	session, err := yamux.Server(conn, yamuxConfig())
@@ -172,6 +181,9 @@ func (reg *TunnelRegistry) ServeConn(ctx context.Context, conn net.Conn, token s
 	// serving request streams.
 	if err := writeHandshakeMessage(ctrl, HandshakeMessage{Type: msgClaimOK, Granted: host}); err != nil {
 		return err
+	}
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		return fmt.Errorf("clear claim handshake deadline: %w", err)
 	}
 	if reg.observer != nil {
 		reg.observer.TunnelEstablished()

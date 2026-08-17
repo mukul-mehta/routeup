@@ -6,12 +6,14 @@ on:
       - "v*"
 
 permissions:
+  actions: read
   contents: write
 
 jobs:
   goreleaser:
     name: goreleaser
     runs-on: ubuntu-latest
+    environment: release
     steps:
       - uses: actions/checkout@v7
         with:
@@ -21,6 +23,24 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: require successful CI for release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          release_sha=$(git rev-list -n 1 "$GITHUB_REF_NAME")
+          git fetch origin main:refs/remotes/origin/main --no-tags
+          git merge-base --is-ancestor "$release_sha" origin/main
+          green_runs=$(gh api --method GET "/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+            -f head_sha="$release_sha" \
+            -f event=push \
+            -f status=completed \
+            -f per_page=100 \
+            --jq '[.workflow_runs[] | select(.head_branch == "main" and .conclusion == "success")] | length')
+          if [[ "$green_runs" -lt 1 ]]; then
+            printf 'no successful main CI run found for release commit %s\n' "$release_sha" >&2
+            exit 1
+          fi
 
       - name: validate release tag and repository
         env:

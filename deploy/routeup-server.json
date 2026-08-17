@@ -7,6 +7,14 @@
   "acme_ca": "production",
   "acme_storage": "/data/acme",
   "reserved": ["edge", "get"],
+  "rate_limit": {
+    "claim_rate": 1,
+    "claim_burst": 20,
+    "anon_rate": 2,
+    "anon_burst": 100,
+    "request_rate": 50,
+    "request_burst": 250
+  },
   "log_format": "json",
   "log_level": "info",
   "metrics_listen": ":9091"

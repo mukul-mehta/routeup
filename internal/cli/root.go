@@ -29,15 +29,15 @@ func newRootCmd() *cobra.Command {
 		Use:   "routeup",
 		Short: "Stable HTTPS routes for local services",
 		Long: "routeup gives local services stable HTTPS names like\n" +
-			"https://myapp.localhost, and can expose those same routes publicly\n" +
+			"https://example-app.localhost, and can expose those same routes publicly\n" +
 			"when you need to.\n\n" +
 			"Run `routeup setup` once to create and trust a local CA and bind\n" +
 			"port 443, then `routeup serve <name> --port <p>` to put a local app\n" +
 			"on a trusted HTTPS route.",
 		Example: "  # one-time machine setup: local CA, OS trust, port 443\n" +
 			"  routeup setup\n\n" +
-			"  # serve a local app on https://myapp.localhost\n" +
-			"  routeup serve myapp --port 3000\n\n" +
+			"  # serve a local app on https://example-app.localhost\n" +
+			"  routeup serve example-app --port 3000\n\n" +
 			"  # run your dev server on a stable route (Portless mode)\n" +
 			"  routeup\n\n" +
 			"  # list what's currently served\n" +
@@ -76,11 +76,25 @@ func newRootCmd() *cobra.Command {
 		commandGroup(groupManage, newSetupCmd()),
 		commandGroup(groupManage, newUninstallCmd()),
 		commandGroup(groupManage, newUpdateCmd()),
+		commandGroup(groupManage, newVersionCmd()),
 		commandGroup(groupManage, newForwardCmd()),
 		commandGroup(groupManage, newTokenCmd()),
 		commandGroup(groupManage, newServerCmd()),
 	)
 	return root
+}
+
+func newVersionCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print the routeup version",
+		Args:  cobra.NoArgs,
+		Run: func(cmd *cobra.Command, _ []string) {
+			out := cmd.OutOrStdout()
+			styles := newTerminalStyles(out)
+			_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("routeup"), styles.accent(cmd.Root().Version))
+		},
+	}
 }
 
 func commandGroup(group string, cmd *cobra.Command) *cobra.Command {

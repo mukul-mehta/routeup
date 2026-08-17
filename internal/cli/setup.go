@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -48,8 +49,8 @@ func newSetupCmd() *cobra.Command {
 			"  3. Starts the background agent that routes requests to your apps.\n\n" +
 			"You'll confirm once with Touch ID or your password so these\n" +
 			"changes can be made. After that, serving a route never asks again.\n\n" +
-			"In a terminal, setup first asks for a public server and token so\n" +
-			"`expose` needs no flags later. The server defaults to\n" +
+			"After local setup, you'll be asked for a public server and token\n" +
+			"so `expose` needs no flags later. The server defaults to\n" +
 			"https://edge.routeup.dev — press Enter to accept, or type 'none' to\n" +
 			"stay local. Pass --server/--token to skip those questions.\n\n" +
 			"Re-running setup is safe — it skips anything already done.",
@@ -108,25 +109,15 @@ func runSetup(cmd *cobra.Command, opts runSetupOpts) error {
 	out := cmd.OutOrStdout()
 	styles := newTerminalStyles(out)
 
-	if err := promptServerCreds(cmd, out, &opts); err != nil {
-		return err
-	}
-	if opts.server != "" {
-		opts.server, err = normalizeServerURL(opts.server)
-		if err != nil {
-			return err
-		}
-	}
-
 	caState, _, _ := certs.Inspect(certPath, keyPath)
 
 	needCreate := false
 	switch caState {
 	case certs.CAPresent:
-		_, _ = fmt.Fprintln(out, styles.success("certificate authority: already set up"))
+		_, _ = fmt.Fprintln(out, styles.stepOK("certificate authority", "already set up"))
 
 	case certs.CAPartial, certs.CABroken:
-		_, _ = fmt.Fprintln(out, styles.warning("certificate authority: recreating (the previous one was incomplete)"))
+		_, _ = fmt.Fprintln(out, styles.stepRun("certificate authority", "recreating (previous was incomplete)"))
 		needCreate = true
 
 	case certs.CAAbsent:
@@ -140,7 +131,7 @@ func runSetup(cmd *cobra.Command, opts runSetupOpts) error {
 		if _, err := certs.Create(certPath, keyPath); err != nil {
 			return fmt.Errorf("creating local CA: %w", err)
 		}
-		_, _ = fmt.Fprintf(out, "%s %s\n", styles.success("certificate authority: created"), styles.muted("("+terminalEscapeString(certPath)+")"))
+		_, _ = fmt.Fprintln(out, styles.stepOK("certificate authority", "created", terminalEscapeString(certPath)))
 	}
 
 	if opts.trust {
@@ -149,7 +140,7 @@ func runSetup(cmd *cobra.Command, opts runSetupOpts) error {
 			return err
 		}
 	} else {
-		_, _ = fmt.Fprintln(out, styles.muted("certificate: trust unchanged (--no-trust)"))
+		_, _ = fmt.Fprintln(out, styles.stepSkip("certificate", "trust unchanged (--no-trust)"))
 	}
 
 	if opts.bind {
@@ -157,7 +148,7 @@ func runSetup(cmd *cobra.Command, opts runSetupOpts) error {
 			return err
 		}
 	} else {
-		_, _ = fmt.Fprintln(out, styles.muted("port setup: skipped (--no-bind)"))
+		_, _ = fmt.Fprintln(out, styles.stepSkip("port", "skipped (--no-bind)"))
 	}
 
 	marker := &state.SetupMarker{Version: state.CurrentSetupVersion, TLSPort: opts.tlsPort}
@@ -170,14 +161,36 @@ func runSetup(cmd *cobra.Command, opts runSetupOpts) error {
 		return fmt.Errorf("write setup marker: %w", err)
 	}
 
+	if err := promptServerCreds(cmd, out, &opts); err != nil {
+		return err
+	}
+	if opts.server != "" {
+		opts.server, err = normalizeServerURL(opts.server)
+		if err != nil {
+			return err
+		}
+	}
+
 	if err := saveClientCreds(out, opts.server, opts.token, opts.clearClient); err != nil {
 		return err
 	}
 
 	if !opts.startAgent {
-		_, _ = fmt.Fprintln(out, styles.muted("agent: not started (--no-start)"))
+		_, _ = fmt.Fprintln(out, styles.stepSkip("agent", "not started (--no-start)"))
+		printSetupSummary(out, styles)
 		return nil
 	}
 
-	return startLocalAgent(cmd, out)
+	if err := startLocalAgent(cmd, out); err != nil {
+		return err
+	}
+	printSetupSummary(out, styles)
+	return nil
+}
+
+func printSetupSummary(out io.Writer, styles terminalStyles) {
+	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out, "  "+styles.accent("routeup is ready"))
+	_, _ = fmt.Fprintf(out, "  %s\n", styles.muted("try: routeup serve example-app --port 3000"))
+	_, _ = fmt.Fprintf(out, "  %s\n", styles.muted("run routeup --help to see all commands"))
 }

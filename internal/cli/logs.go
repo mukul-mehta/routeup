@@ -44,7 +44,7 @@ func newLogsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "logs [route]",
 		Short:   "Show recent local and public route requests",
-		Example: "  routeup logs api.myapp\n  routeup logs api.myapp --public --follow\n  routeup logs --json",
+		Example: "  routeup logs api.example-app\n  routeup logs api.example-app --public --follow\n  routeup logs --json",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if opts.public && opts.local {

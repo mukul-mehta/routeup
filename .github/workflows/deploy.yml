@@ -17,8 +17,15 @@ concurrency:
 jobs:
   deploy:
     name: Fly server and log shipper
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
+    environment: production
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
     steps:
@@ -29,7 +36,7 @@ jobs:
       - uses: superfly/flyctl-actions/setup-flyctl@v1
 
       - name: verify deploy secrets
-        run: ': "${FLY_API_TOKEN:?Set the FLY_API_TOKEN repository secret}"'
+        run: ': "${FLY_API_TOKEN:?Set the FLY_API_TOKEN secret on the production environment}"'
 
       - name: validate server configuration
         run: flyctl config validate -c deploy/fly.toml

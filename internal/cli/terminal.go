@@ -80,10 +80,38 @@ func (s terminalStyles) failure(value string) string {
 }
 
 func (s terminalStyles) url(value string) string {
-	return s.render(lipgloss.NewStyle().Underline(true).Foreground(lipgloss.AdaptiveColor{
+	styled := s.render(lipgloss.NewStyle().Underline(true).Foreground(lipgloss.AdaptiveColor{
 		Light: "#1971C2",
 		Dark:  "#74C0FC",
 	}), value)
+	if s.tty {
+		return "\x1b]8;;" + value + "\x1b\\" + styled + "\x1b]8;;\x1b\\"
+	}
+	return styled
+}
+
+// stepOK formats a completed setup step: "  ✓  <label>  <status>  (<detail>)".
+func (s terminalStyles) stepOK(label, status string, detail ...string) string {
+	sym := s.success("✓")
+	lbl := s.render(lipgloss.NewStyle().Bold(true), fmt.Sprintf("%-22s", label))
+	if len(detail) > 0 && detail[0] != "" {
+		return fmt.Sprintf("  %s  %s  %s  %s", sym, lbl, status, s.muted("("+detail[0]+")"))
+	}
+	return fmt.Sprintf("  %s  %s  %s", sym, lbl, status)
+}
+
+// stepRun formats an in-progress setup step: "  →  <label>  <status>".
+func (s terminalStyles) stepRun(label, status string) string {
+	sym := s.warning("→")
+	lbl := s.render(lipgloss.NewStyle().Bold(true), fmt.Sprintf("%-22s", label))
+	return fmt.Sprintf("  %s  %s  %s", sym, lbl, s.warning(status))
+}
+
+// stepSkip formats a skipped setup step: "  –  <label>  <status>".
+func (s terminalStyles) stepSkip(label, status string) string {
+	sym := s.muted("–")
+	lbl := s.render(lipgloss.NewStyle().Bold(true), fmt.Sprintf("%-22s", label))
+	return fmt.Sprintf("  %s  %s  %s", sym, lbl, s.muted(status))
 }
 
 func (s terminalStyles) statusCode(status int) string {

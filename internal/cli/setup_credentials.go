@@ -52,11 +52,13 @@ func promptServerCreds(cmd *cobra.Command, out io.Writer, opts *runSetupOpts) er
 // saved values, while choosing "none" explicitly clears both fields.
 func (p serverCredPrompter) collect(cc state.ClientConfig, serverFromFlag, tokenFromFlag bool, opts *runSetupOpts) error {
 	if !serverFromFlag {
+		styles := newTerminalStyles(p.out)
+		_, _ = fmt.Fprintf(p.out, "\n  %s\n", styles.muted("Public server for routeup expose (optional — press Enter to accept, 'none' to skip):"))
 		def := cc.Server
 		if def == "" {
 			def = defaultPublicServer
 		}
-		answer := p.line("Public server URL for `expose` (leave empty for default, 'none' to stay local)", def)
+		answer := p.line("  server", def)
 		if strings.EqualFold(answer, "none") {
 			if tokenFromFlag && strings.TrimSpace(opts.token) != "" {
 				return errors.New("--token cannot be combined with choosing 'none' for the public server")
@@ -70,7 +72,13 @@ func (p serverCredPrompter) collect(cc state.ClientConfig, serverFromFlag, token
 		return nil
 	}
 
-	tok, err := p.secret(fmt.Sprintf("Token for %s (blank to keep current)", opts.server))
+	styles := newTerminalStyles(p.out)
+	_, _ = fmt.Fprintf(p.out, "  %s%s%s\n",
+		styles.muted("Tokens authorize persistent public routes. Get one from "),
+		styles.url("https://routeup.dev"),
+		styles.muted(", or press Enter to skip:"),
+	)
+	tok, err := p.secret("  token")
 	if err != nil {
 		_, _ = fmt.Fprintln(p.out, newTerminalStyles(p.out).warning(fmt.Sprintf("  (skipping token: %v)", err)))
 		return nil
@@ -111,7 +119,7 @@ func saveClientCreds(out io.Writer, server, token string, clear bool) error {
 		if err := state.WriteClientConfig(state.ClientConfig{}); err != nil {
 			return fmt.Errorf("clear server/token: %w", err)
 		}
-		_, _ = fmt.Fprintln(out, styles.success("server/token: cleared"))
+		_, _ = fmt.Fprintln(out, styles.stepOK("server/token", "cleared"))
 		return nil
 	}
 	if server == "" && token == "" {
@@ -138,10 +146,10 @@ func saveClientCreds(out io.Writer, server, token string, clear bool) error {
 		return fmt.Errorf("save server/token: %w", err)
 	}
 	if server != "" {
-		_, _ = fmt.Fprintf(out, "%s %s\n", styles.success("server: saved"), styles.muted("("+terminalEscapeString(server)+")"))
+		_, _ = fmt.Fprintln(out, styles.stepOK("server", "saved", terminalEscapeString(server)))
 	}
 	if token != "" {
-		_, _ = fmt.Fprintln(out, styles.success("token: saved"))
+		_, _ = fmt.Fprintln(out, styles.stepOK("token", "saved"))
 	}
 	return nil
 }

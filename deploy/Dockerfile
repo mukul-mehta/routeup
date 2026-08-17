@@ -4,7 +4,7 @@
 # certmagic, coder/websocket, and yamux all build static, so CGO_ENABLED=0 works
 # and the runtime image can be distroless/static.
 
-FROM golang:1.26 AS build
+FROM golang:1.26.6 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

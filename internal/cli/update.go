@@ -59,6 +59,7 @@ func runUpdate(cmd *cobra.Command, checkOnly bool) error {
 	if err != nil {
 		return fmt.Errorf("checking for updates: %w", err)
 	}
+	latest = strings.TrimPrefix(latest, "v")
 
 	_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("current:"), terminalEscapeString(current))
 	_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("latest: "), styles.accent(terminalEscapeString(latest)))

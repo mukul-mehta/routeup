@@ -371,6 +371,15 @@ func TestIngress_ClientDisconnectCancelsUpstream(t *testing.T) {
 }
 
 func startIngressTunnel(t *testing.T, backend http.Handler) (publicURL string, host string, cleanup func()) {
+	publicURL, host, _, cleanup = startIngressTunnelWithRateLimit(t, backend, RateLimiterConfig{})
+	return publicURL, host, cleanup
+}
+
+func startIngressTunnelWithRateLimit(
+	t *testing.T,
+	backend http.Handler,
+	rateLimit RateLimiterConfig,
+) (publicURL string, host string, srv *Server, cleanup func()) {
 	t.Helper()
 
 	store, err := OpenStore(context.Background(), filepath.Join(t.TempDir(), "ingress-streaming.db"))
@@ -384,8 +393,14 @@ func startIngressTunnel(t *testing.T, backend http.Handler) (publicURL string, h
 		t.Fatal(err)
 	}
 
-	cfg := ServerConfig{Domain: "routeup.dev", Listen: ":0", DBPath: "x", PublicNamespace: "try"}
-	srv := newServerWithStore(t, cfg, store)
+	cfg := ServerConfig{
+		Domain:          "routeup.dev",
+		Listen:          ":0",
+		DBPath:          "x",
+		PublicNamespace: "try",
+		RateLimit:       rateLimit,
+	}
+	srv = newServerWithStore(t, cfg, store)
 	ts := httptest.NewServer(srv.handler())
 
 	grantedCh := make(chan string, 1)
@@ -419,7 +434,7 @@ func startIngressTunnel(t *testing.T, backend http.Handler) (publicURL string, h
 			t.Log("tunnel client did not exit before cleanup timeout")
 		}
 	}
-	return ts.URL, host, cleanup
+	return ts.URL, host, srv, cleanup
 }
 
 func ingressWSURL(httpURL, path string) string {

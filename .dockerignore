@@ -1,6 +1,14 @@
 .git
 .github
 bin/
+dist/
+.routeup*/
+.env
+.env.*
+node_modules/
+coverage.*
+profile.*
+.DS_Store
 *.db
 *.db-shm
 *.db-wal

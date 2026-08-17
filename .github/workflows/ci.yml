@@ -141,9 +141,14 @@ jobs:
         port: [443, 47443]
     steps:
       - name: install deps
-        run: dnf install -y git golang libcap ca-certificates sudo python3 curl shadow-utils
+        run: dnf install -y git libcap ca-certificates sudo python3 curl shadow-utils
 
       - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
 
       - name: build
         run: go build -buildvcs=false -o bin/routeup ./cmd/routeup
