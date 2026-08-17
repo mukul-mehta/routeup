@@ -43,6 +43,25 @@ jobs:
         with:
           version: v2.12.2
 
+  validation:
+    name: repository configuration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: validate modules, Actions, and JSON artifacts
+        run: |
+          go mod tidy -diff
+          go mod verify
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          python3 -m json.tool deploy/grafana-dashboard.json >/dev/null
+          python3 -m json.tool routeup.schema.json >/dev/null
+
   examples:
     name: examples
     runs-on: ubuntu-latest
@@ -64,25 +83,6 @@ jobs:
 
       - name: validate examples
         run: go test ./examples/...
-
-  validation:
-    name: repository configuration
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: validate modules, Actions, and JSON artifacts
-        run: |
-          go mod tidy -diff
-          go mod verify
-          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
-          python3 -m json.tool deploy/grafana-dashboard.json >/dev/null
-          python3 -m json.tool routeup.schema.json >/dev/null
 
   dev-server-integration:
     name: integration (Vite/Next HMR)
@@ -163,9 +163,13 @@ jobs:
         run: sudo -u routeup-ci -H bash scripts/integration-linux.sh ./bin/routeup ${{ matrix.port }}
 
   integration-macos:
-    name: integration (macOS)
-    runs-on: macos-26
-    timeout-minutes: 10
+    name: integration (macOS ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
     steps:
       - uses: actions/checkout@v7
 

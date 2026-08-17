@@ -16,6 +16,11 @@ write("app.pgid", os.getpgrp())
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
+    # Keep per-connection socket timeout short so the keep-alive receive loop
+    # doesn't block handle_request() for the default 30 s, which would prevent
+    # the outer `while not stopping` loop from checking the SIGTERM flag.
+    timeout = 0.1
+
     def do_GET(self):
         if self.path != "/env":
             self.send_error(404)
