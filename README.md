@@ -349,9 +349,10 @@ Runnable examples live in [`examples/`](examples/):
 
 ## Implementation status
 
-Phases 0–10 are complete. Phase 8.5 runner exposure is complete:
-`expose.enabled` is implemented and the runner owns the full public tunnel
-lifecycle. Framework-specific command adapters are out of scope.
+Phases 0–11 and the Phase 15 TUI dashboard are complete. Phase 8.5 runner
+exposure is complete: `expose.enabled` is implemented and the runner owns the
+full public tunnel lifecycle. Framework-specific command adapters are out of
+scope. The web dashboard is deferred to a later release.
 
 <details>
 <summary>Phase checklist</summary>
@@ -369,16 +370,16 @@ lifecycle. Framework-specific command adapters are out of scope.
 - [x] Phase 8.5 — Runner exposure (`expose.enabled`; framework adapters out of scope)
 - [x] Phase 9 — Route logs
 - [x] Phase 10 — Request capture & inspect
+- [x] Phase 11 — Public server rate limiting
+- [x] Phase 15 — Local TUI dashboard (web dashboard deferred)
 
 </details>
 
 Planned post-v1 milestones:
 
-- [ ] Phase 11 — Public server rate limiting
 - [ ] Phase 12 — Public-route protection
 - [ ] Phase 13 — Request replay
 - [ ] Phase 14 — `routeup init`
-- [ ] Phase 15 — Local TUI and web dashboard
 - [ ] Phase 16 — mDNS/LAN mobile mode
 
 ## LLM Usage
