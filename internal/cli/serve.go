@@ -41,15 +41,15 @@ func newServeCmd() *cobra.Command {
 			"The route name comes from the argument, or from routeup.json or the\n" +
 			"package.json \"routeup\" block when omitted. A bare name is prefixed\n" +
 			"with the project name; a dotted name is taken literally:\n\n" +
-			"  serve myapp      ->  https://myapp.localhost\n" +
-			"  serve api        ->  https://api.<project>.localhost\n" +
-			"  serve api.myapp  ->  https://api.myapp.localhost\n\n" +
+			"  serve example-app      ->  https://example-app.localhost\n" +
+			"  serve api              ->  https://api.<project>.localhost\n" +
+			"  serve api.example-app  ->  https://api.example-app.localhost\n\n" +
 			"Add --expose, or set expose.enabled in config, to also publish it through\n" +
 			"a routeup server (the same as `routeup expose`); the public name is a\n" +
 			"single label under your token's namespace.",
-		Example: "  routeup serve myapp --port 3000\n" +
-			"  routeup serve api.myapp --port 8080\n" +
-			"  routeup serve myapp --port 3000 --expose",
+		Example: "  routeup serve example-app --port 3000\n" +
+			"  routeup serve api.example-app --port 8080\n" +
+			"  routeup serve example-app --port 3000 --expose",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if opts.random && len(args) != 0 {

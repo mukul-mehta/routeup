@@ -45,7 +45,7 @@ func newExposeCmd() *cobra.Command {
 			"The public host is decided by the server from your token (or its\n" +
 			"public namespace when you have no token), so you pass a route name and\n" +
 			"the server returns the full URL. The tunnel is held until you stop it",
-		Example: "routeup expose api.myapp --port 8080",
+		Example: "routeup expose api.example-app --port 8080",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if opts.random && len(args) != 0 {

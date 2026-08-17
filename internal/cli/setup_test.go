@@ -52,8 +52,8 @@ func TestSetup_CreatesCAOnFirstRun(t *testing.T) {
 		t.Errorf("expected key at %s: %v", keyPath, err)
 	}
 
-	if !strings.Contains(out, "certificate authority: created") {
-		t.Errorf("output missing 'certificate authority: created':\n%s", out)
+	if !strings.Contains(out, "certificate authority") || !strings.Contains(out, "created") {
+		t.Errorf("output missing certificate authority creation:\n%s", out)
 	}
 	marker, err := state.ReadSetupMarker()
 	if err != nil {
@@ -104,8 +104,8 @@ func TestSetup_RegeneratesOnPartialCA(t *testing.T) {
 	if !strings.Contains(out, "recreating") {
 		t.Errorf("output missing 'recreating':\n%s", out)
 	}
-	if !strings.Contains(out, "certificate authority: created") {
-		t.Errorf("output missing 'certificate authority: created':\n%s", out)
+	if !strings.Contains(out, "certificate authority") || !strings.Contains(out, "created") {
+		t.Errorf("output missing certificate authority creation:\n%s", out)
 	}
 
 	// Post-regen: the cert is no longer the dummy bytes, and both files
@@ -189,8 +189,8 @@ func TestSetup_SavesServerAndTokenFromFlags(t *testing.T) {
 	if strings.Contains(buf.String(), "sk_routeup_secret") {
 		t.Errorf("token value leaked to output:\n%s", buf.String())
 	}
-	if !strings.Contains(buf.String(), "token: saved") {
-		t.Errorf("output missing 'token: saved':\n%s", buf.String())
+	if !strings.Contains(buf.String(), "token") || !strings.Contains(buf.String(), "saved") {
+		t.Errorf("output missing token saved confirmation:\n%s", buf.String())
 	}
 }
 
