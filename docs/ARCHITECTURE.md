@@ -757,6 +757,7 @@ Public conflicts (two clients claim the same route via the same server):
 ```txt
 default:           409 Conflict; generic message, owner identity is not disclosed
 grace window:      30s after a disconnect, the same token may resume the claim
+server restart:    active token holds enter the same grace window at startup
 cross-token:       a held route cannot be reclaimed by a different token
 public namespace:  session-only, no grace window, first-come-first-served
 verbose mode:      self-hosted single-operator servers may opt in to detailed errors

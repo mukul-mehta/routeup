@@ -171,6 +171,10 @@ func (c *Client) handshake(ctx context.Context) (yamuxSession *yamux.Session, ct
 	// A WebSocket is one ordered byte stream; yamux multiplexes many streams
 	// over it. The agent dials, so it is the yamux client.
 	conn := websocket.NetConn(ctx, wsConn, websocket.MessageBinary)
+	if err := conn.SetDeadline(time.Now().Add(claimHandshakeTimeout)); err != nil {
+		_ = wsConn.Close(websocket.StatusNormalClosure, "")
+		return nil, nil, nil, fmt.Errorf("set claim handshake deadline: %w", err)
+	}
 	session, err := yamux.Client(conn, yamuxConfig())
 	if err != nil {
 		_ = wsConn.Close(websocket.StatusNormalClosure, "")
@@ -204,6 +208,10 @@ func (c *Client) handshake(ctx context.Context) (yamuxSession *yamux.Session, ct
 	if !validGrantedHost(reply.Granted) {
 		cleanup()
 		return nil, nil, nil, &PermanentError{Err: errors.New("server granted an invalid public host")}
+	}
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		cleanup()
+		return nil, nil, nil, fmt.Errorf("clear claim handshake deadline: %w", err)
 	}
 	if c.onGranted != nil {
 		c.onGranted(reply.Granted)

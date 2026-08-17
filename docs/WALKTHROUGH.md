@@ -657,7 +657,8 @@ HTTP roles are inverted from the yamux roles (agent = HTTP server, public server
 and wiring.
 
 **Server.Run** (`server.go`):
-1. Open store, run migrations, purge ephemeral holds.
+1. Open store, run migrations, purge ephemeral holds, and move token holds left
+   active by a previous process into the normal grace window.
 2. Wire components: authorizer, routeBroker, TunnelRegistry.
 3. Reap loop (10s) for expired grace holds.
 4. Build cert manager (ACME with certmagic + Cloudflare DNS-01, or static).
@@ -696,6 +697,8 @@ via `modernc.org/sqlite` (pure-Go, no cgo), opened WAL with a 5s busy timeout an
 process-level `holdMu` so the read-check-upsert conflict decision is atomic.
 Grace window: 30s for token holds (`holds.go:11`), same token resumes within the
 window; namespace holds are ephemeral (deleted on release and purged at startup).
+Because no old tunnel survives a server process restart, persisted active token
+holds are treated as disconnected and enter grace during startup.
 
 ### Agent-side expose
 

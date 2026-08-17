@@ -55,7 +55,7 @@ primary_region = "sin"             # Singapore — closest free-plan region to I
 # Keep Go's heap under the machine's RAM so the VM doesn't OOM. Set to ~85% of
 # `memory`; raise both together if you scale up.
 [env]
-  GOMEMLIMIT = "220MiB"
+  GOMEMLIMIT = "850MiB"
 
 # Fly scrapes this internal Prometheus endpoint every 15 seconds. Port 9091 is
 # intentionally absent from [[services]], so it is not exposed publicly.
@@ -64,9 +64,7 @@ primary_region = "sin"             # Singapore — closest free-plan region to I
   path = "/metrics"
 
 [[vm]]
-  size   = "shared-cpu-1x"
-  # 256MB rides the Legacy Hobby free allowance (3x shared-cpu-1x-256mb free).
-  # Resize anytime without redeploying:
-  #   fly scale memory 512           (then GOMEMLIMIT 440MiB; ~$3/mo compute)
-  #   fly scale vm shared-cpu-2x     (more CPU, if Metrics shows CPU pegged)
-  memory = "256mb"
+  # Launch profile: extra CPU and memory for TLS, long-lived tunnels, yamux
+  # streams, SQLite, and burst traffic. Scale down after observing real usage.
+  size   = "shared-cpu-2x"
+  memory = "1gb"

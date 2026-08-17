@@ -31,6 +31,13 @@ India that's available on the free Legacy Hobby plan (Mumbai `bom` is paid-only)
 Asia egress is pricier than US/EU ($0.04 vs $0.02/GB, 30 vs 100 GB free) — fine
 at low traffic.
 
+The tracked launch config starts with twenty authenticated claim attempts per
+token followed by one per second, one hundred anonymous claim attempts followed
+by two per second globally, and two hundred fifty public requests followed by
+fifty per second per active host. The larger bursts absorb an announcement spike
+without allowing unbounded sustained traffic. Watch `routeup_rate_limited_total`
+and adjust only after measuring real page-load, HMR, and webhook traffic.
+
 ## 3. Create the app, IPs, volume, secret
 
 ```bash
@@ -149,9 +156,16 @@ fly tokens create org \
   --expiry 2160h \
   --name "Routeup GitHub deployments"
 
-gh secret set FLY_API_TOKEN                    # paste the full FlyV1 value
-# or add it under GitHub → Settings → Secrets and variables → Actions
+gh secret set --env production FLY_API_TOKEN   # paste the full FlyV1 value
+# or add it under GitHub → Settings → Environments → production
 ```
+
+The deploy workflow accepts automatic runs only from a successful `push` CI run
+for `main` in this repository. Manual runs are also restricted to `main`. Create
+a protected GitHub environment named `production`, require approval for it, and
+store `FLY_API_TOKEN` as an environment secret instead of a repository secret.
+Prefer app-scoped deploy tokens for each Fly app when separate workflow jobs are
+introduced; the shared organization token remains broader than necessary.
 
 The workflow validates both Fly configurations, deploys the server from the
 repository source, then deploys the external log-shipper image with the tracked
@@ -162,11 +176,14 @@ server is a single stateful instance.
 
 ```bash
 fly logs -a routeup-server                  # tail logs
-fly scale memory 512 -a routeup-server      # more RAM (also bump GOMEMLIMIT in fly.toml to ~440MiB, then redeploy)
-fly scale vm shared-cpu-2x -a routeup-server# more CPU
 fly deploy -c deploy/fly.toml               # redeploy after editing the config or code
 fly ssh console -a routeup-server           # shell on the box (token admin, /data inspection)
 ```
+
+The tracked launch profile uses `shared-cpu-2x`, 1 GiB RAM, and an 850 MiB Go
+heap limit. Scale down only after observing CPU, memory, active tunnels, and
+request load through the launch window; update `GOMEMLIMIT` and `[[vm]].memory`
+together so a later deploy does not restore stale sizing.
 
 Backup and restore procedures are documented in
 [`docs/RECOVERY.md`](../docs/RECOVERY.md). Fly volume snapshots are the v1 backup
@@ -205,16 +222,19 @@ Header value: FlyV1 <read-only-token>
 The custom metrics are named `routeup_*` and cover active tunnels, tunnel
 lifecycle events, claim outcomes, requests by status class and bounded outcome,
 in-flight requests, forwarded versus no-tunnel request duration, forwarding
-errors, and reaped holds. They contain no route, public-host, token, path,
-source-IP, or user labels. Fly retains metrics for roughly 15 days; longer
-retention requires federating or remote-writing into another
-Prometheus-compatible store.
+errors, reaped holds, and rate-limit rejections split only by claim versus
+request. Fly also supplies built-in per-Machine CPU and memory metrics. None of
+these metrics need the Loki log shipper. Routeup metrics contain no route,
+public-host, token, path, source-IP, or user labels. Fly retains metrics for
+roughly 15 days; longer retention requires federating or remote-writing into
+another Prometheus-compatible store.
 
 An importable dashboard is included at `deploy/grafana-dashboard.json`. In
 Grafana, open **Dashboards → New → Import**, upload that file, and select the Fly
 Prometheus datasource when prompted. It includes active tunnels, request rate,
 5xx percentage, latency percentiles, claim outcomes, tunnel lifecycle events,
-forwarding errors, and reaped holds.
+forwarding errors, reaped holds, rate-limit rejection rates and totals, and
+Machine CPU and memory utilization.
 
 ### Logs in Grafana
 

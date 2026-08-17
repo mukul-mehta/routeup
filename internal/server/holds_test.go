@@ -196,3 +196,65 @@ func TestPurgeEphemeralHolds(t *testing.T) {
 		t.Errorf("token hold should survive purge")
 	}
 }
+
+func TestRecoverActiveTokenHolds(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+	activeHost := "active.alice.routeup.dev"
+	releasedHost := "released.alice.routeup.dev"
+	anonymousHost := "anonymous.try.routeup.dev"
+
+	if _, err := s.HoldRoute(ctx, tokenReq(activeHost, "tokA")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.HoldRoute(ctx, tokenReq(releasedHost, "tokA")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Release(ctx, releasedHost); err != nil {
+		t.Fatal(err)
+	}
+	releasedBefore, _, err := s.GetHold(ctx, releasedHost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.HoldRoute(ctx, nsReq(anonymousHost)); err != nil {
+		t.Fatal(err)
+	}
+
+	started := time.Now().UTC()
+	n, err := s.RecoverActiveTokenHolds(ctx)
+	if err != nil || n != 1 {
+		t.Fatalf("recover = (%d, %v), want (1, nil)", n, err)
+	}
+
+	active, found, err := s.GetHold(ctx, activeHost)
+	if err != nil || !found {
+		t.Fatalf("active hold = (%+v, %v, %v)", active, found, err)
+	}
+	if active.State != holdStateReleased || active.GraceUntil == nil {
+		t.Fatalf("recovered hold = %+v, want released with grace", active)
+	}
+	if active.GraceUntil.Before(started.Add(graceWindow)) || active.GraceUntil.After(time.Now().UTC().Add(graceWindow)) {
+		t.Fatalf("recovered grace deadline = %v, want approximately now+%s", active.GraceUntil, graceWindow)
+	}
+
+	releasedAfter, _, err := s.GetHold(ctx, releasedHost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if releasedAfter.GraceUntil == nil || releasedBefore.GraceUntil == nil || !releasedAfter.GraceUntil.Equal(*releasedBefore.GraceUntil) {
+		t.Fatalf("already-released hold changed: before=%+v after=%+v", releasedBefore, releasedAfter)
+	}
+	anonymous, found, err := s.GetHold(ctx, anonymousHost)
+	if err != nil || !found || anonymous.State != holdStateActive {
+		t.Fatalf("anonymous hold changed: hold=%+v found=%v err=%v", anonymous, found, err)
+	}
+
+	resumed, err := s.HoldRoute(ctx, tokenReq(activeHost, "tokA"))
+	if err != nil {
+		t.Fatalf("same token resume after recovery: %v", err)
+	}
+	if resumed.State != holdStateActive || resumed.GraceUntil != nil {
+		t.Fatalf("resumed hold = %+v, want active without grace", resumed)
+	}
+}

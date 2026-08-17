@@ -25,20 +25,35 @@ type routeBroker struct {
 // Hold authorizes spec for token, persists the hold, and ensures a cert for its
 // namespace. It returns the resolved public host.
 func (k *routeBroker) Hold(ctx context.Context, token string, spec tunnel.ClaimSpec) (tunnel.RouteLease, error) {
-	// Check rate limits before the DB-backed authorize path.
+	var (
+		decision Decision
+		err      error
+	)
+
 	if token == "" {
 		if !k.anonLimiter.allow("anon") {
 			k.metrics.claimRateLimited()
 			return tunnel.RouteLease{}, &codedError{msg: "rate limit exceeded", code: http.StatusTooManyRequests}
 		}
-	} else if !k.claimLimiter.allow(token) {
-		k.metrics.claimRateLimited()
-		return tunnel.RouteLease{}, &codedError{msg: "rate limit exceeded", code: http.StatusTooManyRequests}
+		decision, err = k.authorizer.Authorize(ctx, ClaimAttempt{Route: spec.Route})
+	} else {
+		tok, authErr := k.authorizer.authenticateToken(ctx, token)
+		if authErr != nil {
+			// Invalid credentials share one bounded bucket. Never retain the
+			// presented secret as limiter state.
+			if !k.claimLimiter.allow("invalid") {
+				k.metrics.claimRateLimited()
+				return tunnel.RouteLease{}, &codedError{msg: "rate limit exceeded", code: http.StatusTooManyRequests}
+			}
+			err = authErr
+		} else if !k.claimLimiter.allow("token:" + tok.ID) {
+			k.metrics.claimRateLimited()
+			return tunnel.RouteLease{}, &codedError{msg: "rate limit exceeded", code: http.StatusTooManyRequests}
+		} else {
+			decision, err = k.authorizer.authorizeVerifiedToken(ctx, ClaimAttempt{Route: spec.Route}, tok)
+		}
 	}
-	decision, err := k.authorizer.Authorize(ctx, ClaimAttempt{
-		TokenSecret: token,
-		Route:       spec.Route,
-	})
+
 	if err != nil {
 		k.metrics.claimRejected()
 		var ae *AuthzError

@@ -147,6 +147,26 @@ func (s *Store) PurgeEphemeralHolds(ctx context.Context) (int, error) {
 	return int(n), err
 }
 
+// RecoverActiveTokenHolds moves token holds left active by an abrupt server
+// exit into the normal grace window. At startup no tunnel sessions from the
+// previous process can still be live, so every persisted active token hold is
+// stale. The same token may reconnect during grace; another token must wait.
+func (s *Store) RecoverActiveTokenHolds(ctx context.Context) (int, error) {
+	s.holdMu.Lock()
+	defer s.holdMu.Unlock()
+
+	grace := time.Now().UTC().Add(graceWindow)
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE route_holds SET state = ?, grace_until = ?
+		 WHERE state = ? AND kind = ? AND ephemeral = 0`,
+		holdStateReleased, grace.UnixNano(), holdStateActive, string(HoldByToken))
+	if err != nil {
+		return 0, fmt.Errorf("recover active token holds: %w", err)
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
+}
+
 // GetHold returns the hold for host, if any.
 func (s *Store) GetHold(ctx context.Context, host string) (RouteHold, bool, error) {
 	row := s.db.QueryRowContext(ctx,

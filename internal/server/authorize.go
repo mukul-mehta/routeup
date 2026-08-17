@@ -72,14 +72,25 @@ func (a *Authorizer) Authorize(ctx context.Context, attempt ClaimAttempt) (Decis
 }
 
 func (a *Authorizer) authorizeToken(ctx context.Context, attempt ClaimAttempt) (Decision, error) {
-	tok, err := a.store.VerifyToken(ctx, attempt.TokenSecret)
+	tok, err := a.authenticateToken(ctx, attempt.TokenSecret)
+	if err != nil {
+		return Decision{}, err
+	}
+	return a.authorizeVerifiedToken(ctx, attempt, tok)
+}
+
+func (a *Authorizer) authenticateToken(ctx context.Context, secret string) (*Token, error) {
+	tok, err := a.store.VerifyToken(ctx, secret)
 	if err != nil {
 		if errors.Is(err, ErrTokenInvalid) {
-			return Decision{}, &AuthzError{Status: http.StatusUnauthorized, Reason: "invalid or revoked token"}
+			return nil, &AuthzError{Status: http.StatusUnauthorized, Reason: "invalid or revoked token"}
 		}
-		return Decision{}, fmt.Errorf("verify token: %w", err)
+		return nil, fmt.Errorf("verify token: %w", err)
 	}
+	return tok, nil
+}
 
+func (a *Authorizer) authorizeVerifiedToken(ctx context.Context, attempt ClaimAttempt, tok *Token) (Decision, error) {
 	label, aerr := resolvePublicLabel(attempt)
 	if aerr != nil {
 		return Decision{}, aerr

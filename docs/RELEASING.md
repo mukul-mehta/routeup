@@ -3,6 +3,13 @@
 Releases are immutable and start from a clean `main` checkout. Never move or
 reuse a published tag; cut a patch release when a release needs correction.
 
+Create a protected GitHub environment named `release`, require approval, and
+store the Homebrew tap token on that environment:
+
+```bash
+gh secret set --env release HOMEBREW_TAP_TOKEN
+```
+
 ## Prepare
 
 ```bash
@@ -11,6 +18,7 @@ git status --short
 git switch main
 git pull --ff-only
 just ci
+gh run list --workflow ci.yml --commit "$(git rev-parse HEAD)"
 fly config validate -c deploy/fly.toml
 fly config validate -c deploy/log-shipper/fly.toml
 goreleaser check
@@ -32,9 +40,12 @@ git tag -a "$VERSION" -m "$VERSION"
 git push origin "$VERSION"
 ```
 
-The `Release` GitHub Actions workflow validates the tag, modules, tests,
-installer, and GoReleaser configuration before publishing four archives and
-`checksums.txt`, then updates the Homebrew tap.
+The `Release` GitHub Actions workflow requires the tagged commit to be on
+`main` with a successful CI `push` run for that exact SHA. It then validates the
+tag, modules, tests, installer, and GoReleaser configuration before publishing
+four archives and `checksums.txt`, then updates the Homebrew tap. Protect the
+GitHub `release` environment with required reviewers and keep the Homebrew token
+as an environment secret.
 
 Watch the workflow:
 

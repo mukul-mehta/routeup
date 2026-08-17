@@ -70,9 +70,9 @@ func (s *Server) ensureNamespaceCert(ctx context.Context, base string) {
 	}
 }
 
-// Run opens the store, purges stale ephemeral claims, starts the grace reaper
-// and the HTTP listener, and serves until ctx is cancelled or the listener
-// fails fatally.
+// Run opens the store, recovers claims left by a previous process, starts the
+// grace reaper and HTTP listener, and serves until ctx is cancelled or the
+// listener fails fatally.
 func (s *Server) Run(ctx context.Context) error {
 	store, err := OpenStore(ctx, s.cfg.DBPath)
 	if err != nil {
@@ -86,6 +86,11 @@ func (s *Server) Run(ctx context.Context) error {
 	} else if n > 0 {
 		s.metrics.holdsReaped(n)
 		s.logger.Info("purged ephemeral holds at startup", "count", n)
+	}
+	if n, err := store.RecoverActiveTokenHolds(ctx); err != nil {
+		return err
+	} else if n > 0 {
+		s.logger.Info("moved stale token holds into grace at startup", "count", n)
 	}
 
 	reapCtx, cancelReap := context.WithCancel(ctx)

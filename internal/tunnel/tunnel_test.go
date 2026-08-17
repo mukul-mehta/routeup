@@ -239,6 +239,27 @@ func TestTunnel_NoSession(t *testing.T) {
 	}
 }
 
+func TestTunnel_ClaimHandshakeTimeout(t *testing.T) {
+	reg := NewTunnelRegistry(newFakeBroker(), nil, nil)
+	reg.handshakeTimeout = 50 * time.Millisecond
+	serverConn, clientConn := net.Pipe()
+	defer func() { _ = clientConn.Close() }()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- reg.ServeConn(context.Background(), serverConn, "")
+	}()
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("idle handshake returned no error")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("idle handshake was not closed by its deadline")
+	}
+}
+
 func TestTunnel_ClaimRejected(t *testing.T) {
 	broker := newFakeBroker()
 	broker.mockFailToken = "invalid_token"

@@ -55,6 +55,11 @@ fly ssh console -a routeup-server \
 fly logs -a routeup-server
 ```
 
+On startup, anonymous holds from the snapshot are deleted and token holds left
+active by the old process enter the normal 30-second grace window. Existing
+clients using the same token can reconnect immediately; a different token may
+claim the route after grace expires.
+
 After verification, either keep the restored volume name in deployment config
 or schedule a maintenance window to move back to a newly restored
 `routeup_data`. Delete the damaged volume only after the replacement and a fresh

@@ -191,6 +191,23 @@ func (c ServerConfig) Validate() error {
 			return fmt.Errorf("invalid metrics_listen port %q (must be 1-65535)", portText)
 		}
 	}
+	limits := []struct {
+		name  string
+		rate  float64
+		burst int
+	}{
+		{name: "claim", rate: c.RateLimit.ClaimRate, burst: c.RateLimit.ClaimBurst},
+		{name: "anon", rate: c.RateLimit.AnonRate, burst: c.RateLimit.AnonBurst},
+		{name: "request", rate: c.RateLimit.RequestRate, burst: c.RateLimit.RequestBurst},
+	}
+	for _, limit := range limits {
+		if limit.rate < 0 {
+			return fmt.Errorf("rate_limit.%s_rate must not be negative", limit.name)
+		}
+		if limit.rate > 0 && limit.burst <= 0 {
+			return fmt.Errorf("rate_limit.%s_burst must be positive when the rate is enabled", limit.name)
+		}
+	}
 	return nil
 }
 

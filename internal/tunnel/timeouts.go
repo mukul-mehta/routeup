@@ -8,6 +8,9 @@ import "time"
 const (
 	// dialTimeout bounds one WebSocket dial + upgrade in handshake.
 	dialTimeout = 15 * time.Second
+	// claimHandshakeTimeout bounds yamux setup and the initial claim exchange on
+	// both sides. The deadline is cleared once the route is granted.
+	claimHandshakeTimeout = 10 * time.Second
 
 	// baseBackoff and maxBackoff bound Run's reconnect backoff: it starts at
 	// baseBackoff and doubles up to maxBackoff between session attempts.

@@ -107,6 +107,10 @@ func TestServerConfig_Validate(t *testing.T) {
 		{name: "invalid log level", cfg: ServerConfig{Domain: "routeup.dev", Listen: ":443", DBPath: "s.db", LogLevel: "trace"}, errSubstr: "log_level"},
 		{name: "invalid metrics address", cfg: ServerConfig{Domain: "routeup.dev", Listen: ":443", DBPath: "s.db", MetricsListen: "9091"}, errSubstr: "metrics_listen"},
 		{name: "invalid metrics port", cfg: ServerConfig{Domain: "routeup.dev", Listen: ":443", DBPath: "s.db", MetricsListen: ":70000"}, errSubstr: "metrics_listen port"},
+		{name: "negative claim rate", cfg: ServerConfig{Domain: "routeup.dev", Listen: ":443", DBPath: "s.db", RateLimit: RateLimiterConfig{ClaimRate: -1}}, errSubstr: "claim_rate"},
+		{name: "enabled claim rate without burst", cfg: ServerConfig{Domain: "routeup.dev", Listen: ":443", DBPath: "s.db", RateLimit: RateLimiterConfig{ClaimRate: 1}}, errSubstr: "claim_burst"},
+		{name: "enabled anonymous rate without burst", cfg: ServerConfig{Domain: "routeup.dev", Listen: ":443", DBPath: "s.db", RateLimit: RateLimiterConfig{AnonRate: 1}}, errSubstr: "anon_burst"},
+		{name: "enabled request rate without burst", cfg: ServerConfig{Domain: "routeup.dev", Listen: ":443", DBPath: "s.db", RateLimit: RateLimiterConfig{RequestRate: 1}}, errSubstr: "request_burst"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
