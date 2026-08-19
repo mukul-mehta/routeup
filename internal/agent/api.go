@@ -18,6 +18,9 @@ func (a *Agent) apiHandler() http.Handler {
 	mux.HandleFunc("POST "+ipc.PathRoutes, a.handleRegister)
 	mux.HandleFunc("DELETE "+ipc.PathRoutes+"/{name}", a.handleUnregister)
 	mux.HandleFunc("GET "+ipc.PathRoutes, a.handleList)
+	mux.HandleFunc("GET "+ipc.PathOwners+"/{name}", a.handleOwnerEvents)
+	mux.HandleFunc("POST "+ipc.PathOwners+"/{name}/stop", a.handleStopOwner)
+	mux.HandleFunc("POST "+ipc.PathOwners+"/{name}/ack", a.handleOwnerStopAck)
 	mux.HandleFunc("GET "+ipc.PathLogs, a.handleLogs)
 	mux.HandleFunc("GET "+ipc.PathRequests+"/{id}", a.handleInspect)
 	mux.HandleFunc("GET "+ipc.PathStatus, a.handleStatus)
@@ -25,6 +28,111 @@ func (a *Agent) apiHandler() http.Handler {
 	mux.HandleFunc("POST "+ipc.PathExpose, a.handleExpose)
 	mux.HandleFunc("POST "+ipc.PathUnexpose, a.handleUnexpose)
 	return mux
+}
+
+func (a *Agent) handleOwnerEvents(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	ownerPID, err := strconv.Atoi(r.URL.Query().Get("owner_pid"))
+	if name == "" || err != nil || ownerPID <= 0 {
+		writeJSONError(w, http.StatusBadRequest, "route name and valid owner_pid are required", nil)
+		return
+	}
+	claim, ok := a.reg.Lookup(name)
+	if !ok {
+		writeJSONError(w, http.StatusNotFound, "route is not active", nil)
+		return
+	}
+	if claim.OwnerPID != ownerPID {
+		writeJSONError(w, http.StatusConflict, "route owner does not match", &claim)
+		return
+	}
+	control, ok := a.owners.attach(name, ownerPID)
+	if !ok {
+		writeJSONError(w, http.StatusConflict, "route owner control is already connected", &claim)
+		return
+	}
+	defer a.owners.detach(name, control)
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeJSONError(w, http.StatusInternalServerError, "streaming response is unavailable", nil)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	_, _ = w.Write([]byte("event: ready\ndata: {}\n\n"))
+	flusher.Flush()
+
+	select {
+	case <-r.Context().Done():
+		return
+	case <-control.stop:
+		_, _ = w.Write([]byte("event: stop\ndata: {}\n\n"))
+		flusher.Flush()
+		select {
+		case <-r.Context().Done():
+		case <-control.ack:
+		}
+	}
+}
+
+func (a *Agent) handleStopOwner(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	claim, ok := a.reg.Lookup(name)
+	if !ok {
+		writeJSONError(w, http.StatusNotFound, "route is not active", nil)
+		return
+	}
+	control := a.owners.stop(name, claim.OwnerPID)
+	if control == nil {
+		writeJSONError(w, http.StatusConflict,
+			"route owner cannot be stopped remotely; stop the holding process from its terminal", &claim)
+		return
+	}
+	acknowledged := false
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for !acknowledged {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-control.ack:
+			acknowledged = true
+		case <-ticker.C:
+			claim, active := a.reg.Lookup(name)
+			if !active || claim.OwnerPID != control.ownerPID {
+				writeJSON(w, http.StatusAccepted, map[string]string{"status": "stopped"})
+				return
+			}
+		}
+	}
+	for {
+		claim, active := a.reg.Lookup(name)
+		if !active || claim.OwnerPID != control.ownerPID {
+			writeJSON(w, http.StatusAccepted, map[string]string{"status": "stopped"})
+			return
+		}
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (a *Agent) handleOwnerStopAck(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	ownerPID, err := strconv.Atoi(r.URL.Query().Get("owner_pid"))
+	if name == "" || err != nil || ownerPID <= 0 {
+		writeJSONError(w, http.StatusBadRequest, "route name and valid owner_pid are required", nil)
+		return
+	}
+	if !a.owners.acknowledge(name, ownerPID) {
+		writeJSONError(w, http.StatusConflict, "route owner control does not match", nil)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *Agent) handleRegister(w http.ResponseWriter, r *http.Request) {

@@ -11,7 +11,7 @@ func envFor(vars map[string]string) func(string) string {
 	return func(k string) string { return vars[k] }
 }
 
-// TestResolve exercises the full precedence chain and bare-name resolution.
+// TestResolve exercises the full precedence chain and literal name resolution.
 // errSubstr == "" means the case must succeed; wantRoute / wantPort are checked.
 func TestResolve(t *testing.T) {
 	cases := []struct {
@@ -74,7 +74,7 @@ func TestResolve(t *testing.T) {
 			errSubstr: "out of range",
 		},
 
-		// name precedence and bare-name rule
+		// name precedence and literal positional names
 		{
 			name: "positional with dot is literal",
 			in: Inputs{
@@ -86,13 +86,13 @@ func TestResolve(t *testing.T) {
 			wantPort:  8080,
 		},
 		{
-			name: "bare positional + file name -> prefixed",
+			name: "bare positional ignores file name",
 			in: Inputs{
 				PositionalName: "api",
 				PortFlag:       8080,
 				File:           Config{Name: "myapp"},
 			},
-			wantRoute: "api.myapp",
+			wantRoute: "api",
 			wantPort:  8080,
 		},
 		{
@@ -155,7 +155,7 @@ func TestResolve(t *testing.T) {
 				Env:            envFor(map[string]string{"ROUTEUP_NAME": "envname"}),
 				File:           Config{Name: "filename"},
 			},
-			wantRoute: "cli.filename",
+			wantRoute: "cli",
 			wantPort:  8080,
 		},
 

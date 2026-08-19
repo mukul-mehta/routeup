@@ -571,6 +571,48 @@ package-manager lifecycle hook emulation
 framework-specific command adapters
 ```
 
+## Phase 8.6: Detached Serve Ownership
+
+Goal: make `routeup serve` useful in both foreground and background workflows
+without moving desired route state into persistent agent storage.
+
+> Implementation note: complete. Foreground `serve` follows new request logs
+> for its route after readiness. `serve -d/--detach` re-execs a detached owner,
+> passes its resolved plan and credentials through anonymous pipes, and returns
+> only after the claim, optional exposure, and cooperative owner-control stream
+> are ready. `routeup stop <name>` requests shutdown over that live stream and
+> never signals the PID reported by the route registry. Detached owners retain
+> the existing agent-restart and exposure reconciliation behavior. Non-secret
+> runtime owner records (route, kind, PID) let stop/uninstall distinguish an
+> inactive command from a live owner currently restoring the agent; targets and
+> credentials are never written there.
+
+Build:
+
+```txt
+foreground per-route request-log follow
+-d/--detach serve mode
+detached readiness handshake
+cooperative route owner control stream
+non-secret live owner identity records
+routeup stop [name]
+owner-conditional route and exposure cleanup
+```
+
+Acceptance:
+
+```bash
+routeup serve myapp --port 8080 --detach
+routeup agent restart
+curl https://myapp.localhost
+routeup stop myapp
+```
+
+The detached command exits only after the route is usable, the route survives
+an agent restart while its owner remains alive, and `stop` removes only that
+owner's route and optional exposure. Claims without a live serve control stream
+fail closed rather than receiving an OS signal.
+
 ## Phase 9: Route Logs
 
 Goal: make local and public traffic visible.

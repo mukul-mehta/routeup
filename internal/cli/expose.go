@@ -126,6 +126,11 @@ func startTunnel(cmd *cobra.Command, serverURL, token, localRouteName, publicRou
 	}
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	ownerLease, err := state.RegisterOwner(localRouteName, state.OwnerExpose, os.Getpid())
+	if err != nil {
+		return fmt.Errorf("record expose owner: %w", err)
+	}
+	defer func() { _ = ownerLease.Release() }()
 
 	startCtx, cancelStart := context.WithTimeout(ctx, 10*time.Second)
 	defer cancelStart()

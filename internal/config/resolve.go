@@ -34,13 +34,8 @@ type Resolved struct {
 //	Targets: File port/targets, overridden per path by ROUTEUP_PORT, --port,
 //	         and --target. Errors if all are unset. Out-of-range values error.
 //
-//	Name: PositionalName (with bare-name rule) > ROUTEUP_NAME env > File.Name.
-//	      Errors if both are empty.
-//
-// Bare-name rule: if PositionalName has no dot AND File.Name is non-empty,
-// the final name is PositionalName + "." + File.Name (closest project becomes
-// the suffix). Otherwise the chosen string is used literally and parsed via
-// route.Parse.
+//	Name: PositionalName (literal) > ROUTEUP_NAME env > File.Name.
+//	      Errors if all are empty.
 func Resolve(in Inputs) (Resolved, error) {
 	targets, err := resolveTargets(in)
 	if err != nil {
@@ -55,8 +50,8 @@ func Resolve(in Inputs) (Resolved, error) {
 	return Resolved{Route: parsed, Port: route.PrimaryPort(targets), Targets: targets}, nil
 }
 
-// ResolveName applies positional/env/file precedence and the positional
-// bare-name rule, then parses the result as a route name.
+// ResolveName applies positional/env/file precedence, then parses the result as
+// a literal route name.
 func ResolveName(in Inputs) (route.Name, error) {
 	nameStr, err := resolveName(in)
 	if err != nil {
@@ -146,11 +141,11 @@ func setTarget(targets []route.Target, target route.Target) ([]route.Target, err
 	return append(targets, normalized), nil
 }
 
-// resolveName picks a name string via positional (with bare-name rule) >
-// ROUTEUP_NAME env (literal) > File.Name (literal).
+// resolveName picks a literal name string via positional > ROUTEUP_NAME env >
+// File.Name > working-directory basename.
 func resolveName(in Inputs) (string, error) {
 	if in.PositionalName != "" {
-		return applyBareName(in.PositionalName, in.File.Name), nil
+		return in.PositionalName, nil
 	}
 	if envName := strings.TrimSpace(envGet(in.Env, "ROUTEUP_NAME")); envName != "" {
 		return envName, nil
@@ -162,20 +157,6 @@ func resolveName(in Inputs) (string, error) {
 		return in.DirName, nil
 	}
 	return "", errors.New("no route name (pass a positional, set ROUTEUP_NAME, set name in config, or run from a named directory)")
-}
-
-// applyBareName implements the PLAN.md rule: if positional has no dot and a
-// project name is in scope, the project becomes the suffix; otherwise the
-// positional is used literally. No validation here — route.Parse is the
-// authority and produces specific errors downstream.
-func applyBareName(positional, project string) string {
-	if strings.Contains(positional, ".") {
-		return positional
-	}
-	if project == "" {
-		return positional
-	}
-	return positional + "." + project
 }
 
 // envGet is a nil-safe wrapper around the injected env func.

@@ -17,6 +17,8 @@ type routeReadyEvent struct {
 	PublicURL     string         `json:"public_url,omitempty"`
 	ExposurePaths []string       `json:"exposure_paths,omitempty"`
 	Targets       []route.Target `json:"targets"`
+	Detached      bool           `json:"detached,omitempty"`
+	OwnerPID      int            `json:"owner_pid,omitempty"`
 }
 
 func writeRouteReadyEvent(out io.Writer, event routeReadyEvent) error {

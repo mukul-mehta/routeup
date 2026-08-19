@@ -28,6 +28,7 @@ const (
 const (
 	PathStatus   = "/v1/status"
 	PathRoutes   = "/v1/routes"
+	PathOwners   = "/v1/owners"
 	PathLogs     = "/v1/logs"
 	PathRequests = "/v1/requests"
 	PathShutdown = "/v1/shutdown"

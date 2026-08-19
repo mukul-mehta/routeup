@@ -41,6 +41,7 @@ type Options struct {
 // Agent is the local routeup daemon. New binds nothing; Run does the work.
 type Agent struct {
 	reg           *Registry
+	owners        *routeOwnerControls
 	logStore      *logs.Store
 	tunnels       *tunnelManager
 	sockPath      string
@@ -74,6 +75,7 @@ func New(opts Options) (*Agent, error) {
 
 	return &Agent{
 		reg:       NewRegistry(),
+		owners:    newRouteOwnerControls(),
 		logStore:  logs.NewStore(),
 		sockPath:  opts.SocketPath,
 		tlsAddr:   opts.TLSAddr,

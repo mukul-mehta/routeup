@@ -56,7 +56,24 @@ routeup serve myapp --port 3000      # https://myapp.localhost
 routeup serve api.myapp --port 8080  # https://api.myapp.localhost
 ```
 
-No config file needed for the basic case. Routes are named, stable, and trusted by the system CA.
+No config file needed for the basic case. Routes are named, stable, and trusted
+by the system CA. Foreground `serve` prints new local and public request logs for
+that route until Ctrl-C.
+
+An explicit name is always literal, even when the current directory has a
+different config name. Omit the name to use `ROUTEUP_NAME`, config `name`, or the
+working-directory basename.
+
+Keep a route running after the command returns, then stop it by name:
+
+```bash
+routeup serve myapp --port 3000 --detach  # shorthand: -d
+routeup stop myapp
+```
+
+Detached mode keeps the same live ownership and agent-restart recovery as a
+foreground serve. `stop` releases the route and public exposure; it does not
+stop the external application listening on the target port.
 
 Open an active route or emit machine-readable/QR output:
 
@@ -65,9 +82,9 @@ routeup serve myapp --port 3000 --json
 routeup serve myapp --port 3000 --qr
 ```
 
-`--json` writes one ready event after the route is usable. `--qr` prefers the
-public URL when exposure is enabled; a local `.localhost` QR only works on the
-machine running routeup.
+`--json` writes one ready event after the route is usable and does not mix live
+request rows into stdout. `--qr` prefers the public URL when exposure is
+enabled; a local `.localhost` QR only works on the machine running routeup.
 
 ## Runner mode
 
@@ -217,8 +234,8 @@ public: https://myapp.<your-namespace>.routeup.dev
 
 `ROUTEUP_LOCAL_URL` stays local. `ROUTEUP_URL` holds the public address. No
 second terminal needed — the tunnel releases with the process.
-Foreground commands restore their route and public exposure if the local agent
-restarts or a tunnel terminates unexpectedly.
+Live owner commands, including detached `serve`, restore their route and public
+exposure if the local agent restarts or a tunnel terminates unexpectedly.
 
 ## Frontend + API
 
@@ -248,8 +265,7 @@ go through the public tunnel.
 
 ```bash
 routeup logs myapp                   # recent traffic
-routeup logs myapp --follow          # interactive live viewer in a terminal
-routeup logs myapp --follow --plain  # append-only lines in a terminal
+routeup logs myapp --follow          # append-only live request rows
 routeup logs myapp --public --json   # public traffic as JSON
 routeup logs myapp --since 10m --method POST --status 202 --limit 50
 ```
@@ -290,6 +306,7 @@ contains terminal formatting.
 routeup dashboard   # interactive routes, exposures, live logs, and inspect
 routeup exec -- …   # run one command with the Routeup project environment
 routeup routes      # list active local routes (PUBLIC annotation when exposed)
+routeup stop myapp  # stop a foreground or detached serve owner
 routeup doctor      # check CA, OS trust, port 443, and agent health
 routeup config      # show the discovered file and resolved non-secret settings
 routeup update      # self-update (use brew upgrade for Homebrew installs)
@@ -298,6 +315,8 @@ routeup uninstall   # remove the CA, port-443 helper, and ~/.routeup
 
 `routes`, `doctor`, `agent status`, `config`, and `inspect` support `--json`.
 `logs --json` remains NDJSON and writes no human messages to stdout.
+`uninstall` stops live serve owners first and refuses to continue while a runner
+or standalone exposure command is still active.
 
 `routeup dashboard` is read-only and requires an interactive terminal. Use Tab
 to move between routes, exposures, and requests; `j`/`k` to navigate; Enter to
@@ -320,7 +339,7 @@ routeup completion fish > ~/.config/fish/completions/routeup.fish
 ```
 
 Subcommands and flags complete statically. When the agent is running,
-`routeup logs <Tab>` completes active route names and
+`routeup logs <Tab>` and `routeup stop <Tab>` complete active route names, and
 `routeup inspect <Tab>` completes captured request IDs.
 
 See [Shell completions](https://routeup.dev/docs/cli-reference/completion) for

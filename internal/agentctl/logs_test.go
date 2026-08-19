@@ -126,6 +126,37 @@ func TestFollowLogsRejectsUnexpectedEOF(t *testing.T) {
 	}
 }
 
+func TestFollowLogsFromSendsLastEventID(t *testing.T) {
+	socketPath := filepath.Join(shortSocketDir(t), "agent.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Last-Event-ID"); got != "req_old" {
+			http.Error(w, "last event id = "+got, http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "id: req_new\ndata: {\"id\":\"req_new\"}\n\n")
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	})}
+	t.Cleanup(func() { _ = server.Close() })
+	go func() { _ = server.Serve(listener) }()
+
+	stop := errors.New("stop")
+	err = NewClient(socketPath, "", "").FollowLogsFrom(context.Background(), logs.ListOptions{}, "req_old", func(entry logs.Entry) error {
+		if entry.ID != "req_new" {
+			t.Fatalf("entry = %#v", entry)
+		}
+		return stop
+	})
+	if !errors.Is(err, stop) {
+		t.Fatalf("FollowLogsFrom error = %v, want stop", err)
+	}
+}
+
 func shortSocketDir(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "rup-")

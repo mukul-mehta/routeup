@@ -59,6 +59,8 @@ routeup
 routeup serve
 routeup serve --port 8080
 routeup serve --port 8080 --expose
+routeup serve --port 8080 --detach
+routeup stop <name>
 routeup exec -- <command>
 routeup expose <name>
 routeup agent status
@@ -125,6 +127,9 @@ Agent API surface:
 POST   /v1/routes               register a route claim
 DELETE /v1/routes/{name}?owner_pid=  release a claim if ownership still matches
 GET    /v1/routes               list active routes
+GET    /v1/owners/{name}?owner_pid=  live cooperative owner-control stream
+POST   /v1/owners/{name}/stop        ask a connected serve owner to exit
+POST   /v1/owners/{name}/ack?owner_pid=  acknowledge stop receipt
 GET    /v1/status               agent status, boot id, and managed exposures
 POST   /v1/shutdown             graceful shutdown (used by `agent stop`/restart)
 GET    /v1/logs?route=&source=&method=&status=&since=&limit=&follow=  access-log list or SSE stream
@@ -134,14 +139,17 @@ POST   /v1/unexpose             stop public exposure
 ```
 
 The status response carries a `boot_id` generated once per agent process and a
-non-secret snapshot of managed public exposures. Foreground `serve`, `expose`,
-and runner commands retain their exact desired claim/exposure state. They
+non-secret snapshot of managed public exposures. Live `serve`, `expose`, and
+runner commands retain their exact desired claim/exposure state. They
 re-register and re-expose after an agent restart, and re-expose when a tunnel
 terminates permanently. Transient tunnel reconnects remain agent-owned and are
 reported as `reconnecting`, preventing duplicate sessions. Cleanup includes the
 owner PID so an old process cannot remove a replacement. This client-driven
 reconciliation keeps the registry and tunnel state in memory: live foreground
-commands are the source of truth.
+commands are the source of truth. `serve --detach` starts the same serve owner in
+a new session and returns only after its claim, optional exposure, and owner
+control stream are ready. `routeup stop` uses that stream, never a registry PID,
+so stale PID reuse cannot terminate an unrelated process.
 
 ### Request Logs (Phase 9) And Request Capture/Inspect (Phase 10)
 
@@ -614,18 +622,18 @@ route, allocate a port, or perform readiness checks. This lets one `routeup
 serve` process own a multi-target route while independently launched workers
 share its environment without making routeup their supervisor.
 
-Bare-name resolution:
+Route-name resolution:
 
 ```txt
-Any argument containing a dot is taken literally.
-A bare name is prefixed with the project name from the config.
-If no project name is set, a bare name is used as-is.
+Any explicit argument is taken literally.
+Without an argument, ROUTEUP_NAME overrides the config name.
+The working-directory basename is the final fallback.
 
-project = myapp (from routeup.json or package.json routeup.name)
+config name = myapp (from routeup.json or package.json routeup.name)
   routeup serve                 -> route myapp
-  routeup serve api             -> route api.myapp
+  routeup serve api             -> route api (literal)
   routeup serve api.myapp       -> route api.myapp (literal)
-  routeup serve api.other       -> route api.other (literal, not scoped under myapp)
+  routeup serve api.other       -> route api.other (literal)
 ```
 
 ## Process Lifecycle
@@ -666,6 +674,19 @@ For `routeup serve --port 8080 --expose`:
 8. CLI sends owner-conditional releases on exit.
 9. Agent tears down the tunnel for this route, leaving other tunnels unaffected.
 ```
+
+After readiness, foreground `serve` follows new request records for its route
+from the registration timestamp. SSE event IDs let it resume without replaying
+rows after an agent reconnect. `--json` preserves a ready-event-only stdout
+contract and does not start the implicit human log follower.
+
+`routeup serve --detach` resolves the same plan, passes it to a re-executed owner
+through inherited anonymous pipes, and waits for the child to report readiness.
+The token is not placed in argv, the environment, or a state file. The detached
+owner keeps `Maintain` and the owner-control stream alive; `routeup stop <name>`
+cooperatively cancels it and waits for owner-conditional cleanup. An active claim
+without a serve control stream, such as runner-owned state, fails closed instead
+of being signaled.
 
 Standalone `routeup expose <name>` starts the agent but does not register a
 local route. It reuses an active route's targets when one exists, otherwise it
@@ -729,6 +750,7 @@ trusted setup marker
 server URL
 token file
 agent socket path
+live CLI owner records (route, kind, PID only)
 bounded log store
 ```
 
@@ -741,6 +763,11 @@ remains the highest-precedence socket-only override; Linux uses
 `$XDG_RUNTIME_DIR/routeup/agent.sock` only when neither override is set.
 The `routeup-devel` build embeds its `.routeup-devel` state path at build time so it
 works directly from `PATH`; `ROUTEUP_STATE_DIR` can still override that default.
+The `owners/` directory contains one non-secret runtime identity record per live
+`serve`, runner, or standalone `expose` command. It is not desired-state
+persistence: records contain no targets or credentials and disappear when their
+owner exits. `stop` and `uninstall` use them to fail closed while the agent is
+between in-memory instances.
 
 The setup marker uses the initial version 1 format. `doctor` rejects missing or
 malformed markers, and macOS additionally validates that the installed

@@ -68,8 +68,8 @@ func TestResolveExposeRoute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.String() != "api.myapp" {
-		t.Fatalf("route = %q, want %q", got, "api.myapp")
+	if got.String() != "api" {
+		t.Fatalf("route = %q, want %q", got, "api")
 	}
 
 	if _, err := resolveExposeRoute("api..myapp", config.Config{}, false, ""); err == nil || !strings.Contains(err.Error(), "invalid route name") {

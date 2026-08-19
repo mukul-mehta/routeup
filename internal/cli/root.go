@@ -65,6 +65,7 @@ func newRootCmd() *cobra.Command {
 	root.SetCompletionCommandGroupID(groupManage)
 	root.AddCommand(
 		commandGroup(groupStart, newServeCmd()),
+		commandGroup(groupStart, newStopCmd()),
 		commandGroup(groupStart, newExecCmd()),
 		commandGroup(groupStart, newExposeCmd()),
 		commandGroup(groupObserve, newDashboardCmd()),
@@ -81,6 +82,7 @@ func newRootCmd() *cobra.Command {
 		commandGroup(groupManage, newForwardCmd()),
 		commandGroup(groupManage, newTokenCmd()),
 		commandGroup(groupManage, newServerCmd()),
+		commandGroup(groupManage, newServeOwnerCmd()),
 	)
 	return root
 }
