@@ -208,7 +208,7 @@ func TestIngress_PathTargetsAndExposePaths(t *testing.T) {
 	defer cleanup()
 
 	assertIngressBody(t, publicURL+"/api/ping", host, http.StatusOK, "api")
-	assertIngressBody(t, publicURL+"/", host, http.StatusNotFound, "routeup: path is not exposed\n")
+	assertIngressBody(t, publicURL+"/", host, http.StatusNotFound, "routeup: path does not exist or is not exposed\n")
 }
 
 func TestIngress_WebSocketHMR(t *testing.T) {

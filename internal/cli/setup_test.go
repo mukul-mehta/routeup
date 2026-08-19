@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -282,7 +283,9 @@ func TestServerCredPrompter_Collect(t *testing.T) {
 		wantServer       string
 		wantToken        string
 		wantClear        bool
+		wantClearToken   bool
 		wantSecretCalled bool
+		wantSavedMask    bool
 		wantErr          string
 	}{
 		{
@@ -334,6 +337,17 @@ func TestServerCredPrompter_Collect(t *testing.T) {
 			wantServer:       "https://edge.routeup.dev",
 			wantToken:        "sk_saved",
 			wantSecretCalled: true,
+			wantSavedMask:    true,
+		},
+		{
+			name:             "none clears saved token but keeps server",
+			input:            "https://edge.routeup.dev\n",
+			secret:           "none",
+			cc:               state.ClientConfig{Server: "https://edge.routeup.dev", Token: "sk_saved"},
+			wantServer:       "https://edge.routeup.dev",
+			wantClearToken:   true,
+			wantSecretCalled: true,
+			wantSavedMask:    true,
 		},
 		{
 			name:             "blank token does not reuse token from another server",
@@ -375,9 +389,10 @@ func TestServerCredPrompter_Collect(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			called := false
+			out := &bytes.Buffer{}
 			p := serverCredPrompter{
 				in:  bufio.NewReader(strings.NewReader(tt.input)),
-				out: &bytes.Buffer{},
+				out: out,
 				readSecret: func() (string, error) {
 					called = true
 					return tt.secret, nil
@@ -408,6 +423,83 @@ func TestServerCredPrompter_Collect(t *testing.T) {
 			if opts.clearClient != tt.wantClear {
 				t.Errorf("clear client = %v, want %v", opts.clearClient, tt.wantClear)
 			}
+			if opts.clearToken != tt.wantClearToken {
+				t.Errorf("clear token = %v, want %v", opts.clearToken, tt.wantClearToken)
+			}
+			if got := strings.Contains(out.String(), "["+savedTokenMask+"]"); got != tt.wantSavedMask {
+				t.Errorf("saved token mask present = %v, want %v\noutput: %s", got, tt.wantSavedMask, out)
+			}
+			if tt.wantSavedMask && !strings.Contains(out.String(), "Press Enter to keep the saved token, or type 'none' to clear it") {
+				t.Errorf("saved token prompt missing keep instruction: %s", out)
+			}
+			if tt.cc.Token != "" && strings.Contains(out.String(), tt.cc.Token) {
+				t.Errorf("saved token leaked to output: %s", out)
+			}
+		})
+	}
+}
+
+func TestReadMaskedInput(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantSecret string
+		wantOutput string
+		wantErr    error
+	}{
+		{
+			name:       "masks typed token",
+			input:      "sk_routeup\r",
+			wantSecret: "sk_routeup",
+			wantOutput: "**********",
+		},
+		{
+			name:       "backspace updates token and mask",
+			input:      "abc\x7fd\n",
+			wantSecret: "abd",
+			wantOutput: "***\b \b*",
+		},
+		{
+			name:       "control-u clears token and mask",
+			input:      "abc\x15d\n",
+			wantSecret: "d",
+			wantOutput: "***\b \b\b \b\b \b*",
+		},
+		{
+			name:       "control-c interrupts",
+			input:      "abc\x03",
+			wantOutput: "***",
+			wantErr:    errTokenPromptInterrupted,
+		},
+		{
+			name:       "control-d accepts typed token",
+			input:      "abc\x04",
+			wantSecret: "abc",
+			wantOutput: "***",
+		},
+		{
+			name:    "empty control-d returns EOF",
+			input:   "\x04",
+			wantErr: io.EOF,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := &bytes.Buffer{}
+			secret, err := readMaskedInput(strings.NewReader(tt.input), out)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("error = %v, want %v", err, tt.wantErr)
+			}
+			if secret != tt.wantSecret {
+				t.Errorf("secret = %q, want %q", secret, tt.wantSecret)
+			}
+			if out.String() != tt.wantOutput {
+				t.Errorf("output = %q, want %q", out.String(), tt.wantOutput)
+			}
+			if tt.wantSecret != "" && strings.Contains(out.String(), tt.wantSecret) {
+				t.Errorf("secret leaked to output: %q", out.String())
+			}
 		})
 	}
 }
@@ -417,7 +509,7 @@ func TestSaveClientCredsDoesNotCarryTokenAcrossServers(t *testing.T) {
 	if err := state.WriteClientConfig(state.ClientConfig{Server: "https://old.example", Token: "sk_old"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := saveClientCreds(&bytes.Buffer{}, "https://new.example", "", false); err != nil {
+	if err := saveClientCreds(&bytes.Buffer{}, "https://new.example", "", false, false); err != nil {
 		t.Fatal(err)
 	}
 	config, err := state.ReadClientConfig()
@@ -428,7 +520,7 @@ func TestSaveClientCredsDoesNotCarryTokenAcrossServers(t *testing.T) {
 		t.Fatalf("client config = %#v, want new server without old token", config)
 	}
 
-	if err := saveClientCreds(&bytes.Buffer{}, "", "", true); err != nil {
+	if err := saveClientCreds(&bytes.Buffer{}, "", "", true, false); err != nil {
 		t.Fatal(err)
 	}
 	config, err = state.ReadClientConfig()
@@ -445,7 +537,7 @@ func TestSaveClientCredsClearsTokenWithoutServerIdentity(t *testing.T) {
 	if err := state.WriteClientConfig(state.ClientConfig{Token: "orphaned-token"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := saveClientCreds(&bytes.Buffer{}, "https://new.example", "", false); err != nil {
+	if err := saveClientCreds(&bytes.Buffer{}, "https://new.example", "", false, false); err != nil {
 		t.Fatal(err)
 	}
 	config, err := state.ReadClientConfig()
@@ -457,9 +549,49 @@ func TestSaveClientCredsClearsTokenWithoutServerIdentity(t *testing.T) {
 	}
 }
 
+func TestSaveClientCredsClearsOnlyToken(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := state.WriteClientConfig(state.ClientConfig{Server: "https://saved.example", Token: "sk_saved"}); err != nil {
+		t.Fatal(err)
+	}
+	out := &bytes.Buffer{}
+	if err := saveClientCreds(out, "", "", false, true); err != nil {
+		t.Fatal(err)
+	}
+	config, err := state.ReadClientConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Server != "https://saved.example" || config.Token != "" {
+		t.Fatalf("client config = %#v, want saved server without token", config)
+	}
+	if !strings.Contains(out.String(), "token") || !strings.Contains(out.String(), "cleared") {
+		t.Fatalf("output missing token cleared confirmation: %s", out)
+	}
+}
+
+func TestSetupTokenNoneClearsOnlyToken(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := state.WriteClientConfig(state.ClientConfig{Server: "https://saved.example", Token: "sk_saved"}); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newSetupCmd()
+	cmd.SetArgs([]string{"--no-start", "--no-trust", "--no-bind", "--port", "47443", "--token", "none"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	config, err := state.ReadClientConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Server != "https://saved.example" || config.Token != "" {
+		t.Fatalf("client config = %#v, want saved server without token", config)
+	}
+}
+
 func TestSaveClientCredsRejectsTokenWithoutServer(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	err := saveClientCreds(&bytes.Buffer{}, "", "orphaned-token", false)
+	err := saveClientCreds(&bytes.Buffer{}, "", "orphaned-token", false, false)
 	if err == nil || !strings.Contains(err.Error(), "requires a public server") {
 		t.Fatalf("error = %v, want missing server error", err)
 	}
