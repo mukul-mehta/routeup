@@ -23,6 +23,7 @@ type runSetupOpts struct {
 	server      string
 	token       string
 	clearClient bool
+	clearToken  bool
 }
 
 func newSetupCmd() *cobra.Command {
@@ -52,7 +53,8 @@ func newSetupCmd() *cobra.Command {
 			"After local setup, you'll be asked for a public server and token\n" +
 			"so `expose` needs no flags later. The server defaults to\n" +
 			"https://edge.routeup.dev — press Enter to accept, or type 'none' to\n" +
-			"stay local. Pass --server/--token to skip those questions.\n\n" +
+			"stay local. At a saved token, press Enter to keep it or type 'none'\n" +
+			"to clear only the token. Pass --server/--token to skip those questions.\n\n" +
 			"Re-running setup is safe — it skips anything already done.",
 		Example: "  routeup setup                # the usual: HTTPS on port 443\n" +
 			"  routeup setup --port 8443    # use a high port (no password needed)\n" +
@@ -66,11 +68,15 @@ func newSetupCmd() *cobra.Command {
 				return fmt.Errorf("--no-bind requires --port 1024 or higher (got %d)", tlsPort)
 			}
 			clearClient := strings.EqualFold(strings.TrimSpace(server), "none")
+			clearToken := strings.EqualFold(strings.TrimSpace(token), "none")
 			if clearClient {
-				if strings.TrimSpace(token) != "" {
+				if strings.TrimSpace(token) != "" && !clearToken {
 					return errors.New("--server none cannot be combined with --token")
 				}
 				server = ""
+				token = ""
+				clearToken = false
+			} else if clearToken {
 				token = ""
 			}
 			return runSetup(cmd, runSetupOpts{
@@ -82,6 +88,7 @@ func newSetupCmd() *cobra.Command {
 				server:      server,
 				token:       token,
 				clearClient: clearClient,
+				clearToken:  clearToken,
 			})
 		},
 	}
@@ -92,7 +99,7 @@ func newSetupCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&noBind, "no-bind", false, "skip port setup (requires --port 1024 or higher)")
 	cmd.Flags().BoolVar(&useSystem, "system", false, "macOS: force system-wide trust (automatic when binding a privileged port)")
 	cmd.Flags().StringVar(&server, "server", "", "public server URL to save for expose, or 'none' to clear saved credentials")
-	cmd.Flags().StringVar(&token, "token", "", "server token to save for expose")
+	cmd.Flags().StringVar(&token, "token", "", "server token to save for expose, or 'none' to clear the saved token")
 	return cmd
 }
 
@@ -171,7 +178,7 @@ func runSetup(cmd *cobra.Command, opts runSetupOpts) error {
 		}
 	}
 
-	if err := saveClientCreds(out, opts.server, opts.token, opts.clearClient); err != nil {
+	if err := saveClientCreds(out, opts.server, opts.token, opts.clearClient, opts.clearToken); err != nil {
 		return err
 	}
 

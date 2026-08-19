@@ -157,7 +157,7 @@ func serveTargets(w http.ResponseWriter, r *http.Request, targets []route.Target
 	if !route.PathAllowed(exposedPaths, r.URL.Path) {
 		response.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		response.WriteHeader(http.StatusNotFound)
-		_, _ = io.WriteString(response, "routeup: path is not exposed\n")
+		_, _ = io.WriteString(response, "routeup: path does not exist or is not exposed\n")
 		return
 	}
 

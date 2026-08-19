@@ -451,6 +451,12 @@ and owns the child and route lifecycle.
 > supported. In an interactive terminal, the child group is foreground and
 > receives Ctrl-C directly; it must respond to SIGINT. A SIGTERM sent directly
 > to routeup uses the managed shutdown and escalation path.
+>
+> `routeup exec` reuses configured command/script resolution and child process
+> lifecycle for environment-only commands. Explicit argv after `--` overrides
+> config. It injects configured project URLs and local CA trust without starting
+> the agent, claiming or exposing a route, allocating a port, or waiting for
+> readiness.
 
 Build:
 
@@ -462,6 +468,7 @@ route register while child runs
 route unregister on exit
 signal handling
 child process exit-code propagation
+environment-only exec command
 ```
 
 Example package config:

@@ -19,12 +19,14 @@ import (
 
 const defaultKillGrace = 10 * time.Second
 
-// Runner runs a single child command through the system shell.
+// Runner runs one child command. Command uses the system shell; Argv executes
+// an explicit argument vector without shell interpolation. Exactly one must be set.
 type Runner struct {
 	Command string
+	Argv    []string
 	Dir     string
 	Env     []string
-	// KillGrace is the delay before SIGKILL. Zero uses five seconds.
+	// KillGrace is the delay before SIGKILL. Zero uses ten seconds.
 	KillGrace time.Duration
 }
 
@@ -44,16 +46,15 @@ func (r Runner) Run(ctx context.Context, stdio Stdio) (code int, runErr error) {
 	if err := ctx.Err(); err != nil {
 		return 1, err
 	}
-	command := strings.TrimSpace(r.Command)
-	if command == "" {
-		return 1, errors.New("no command to run")
-	}
 	grace := r.KillGrace
 	if grace <= 0 {
 		grace = defaultKillGrace
 	}
 
-	cmd := exec.Command("sh", "-c", command)
+	cmd, err := r.execCommand()
+	if err != nil {
+		return 1, err
+	}
 	cmd.Dir = r.Dir
 	cmd.Env = r.Env
 	cmd.Stdin = stdio.In
@@ -131,6 +132,27 @@ func (r Runner) Run(ctx context.Context, stdio Stdio) (code int, runErr error) {
 			return exitCode(waitErr), nil
 		}
 	}
+}
+
+func (r Runner) execCommand() (*exec.Cmd, error) {
+	command := strings.TrimSpace(r.Command)
+	if command != "" && len(r.Argv) > 0 {
+		return nil, errors.New("set command or argv, not both")
+	}
+	if len(r.Argv) > 0 {
+		if strings.TrimSpace(r.Argv[0]) == "" {
+			return nil, errors.New("executable is required")
+		}
+		// The shell performs PATH lookup using the child's injected environment;
+		// "$@" preserves the explicit argument boundaries without interpolation.
+		args := []string{"-c", `exec "$@"`, "routeup-exec"}
+		args = append(args, r.Argv...)
+		return exec.Command("sh", args...), nil
+	}
+	if command == "" {
+		return nil, errors.New("no command to run")
+	}
+	return exec.Command("sh", "-c", command), nil
 }
 
 func signalProcessGroup(pid int, signal syscall.Signal) error {

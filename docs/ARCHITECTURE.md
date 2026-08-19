@@ -59,6 +59,7 @@ routeup
 routeup serve
 routeup serve --port 8080
 routeup serve --port 8080 --expose
+routeup exec -- <command>
 routeup expose <name>
 routeup agent status
 routeup dashboard
@@ -604,6 +605,15 @@ config. The runner executes that string through `sh -c` with the project
 `node_modules/.bin` prepended to `PATH`; it does not invoke package-manager
 lifecycle hooks for the selected child script.
 
+`routeup exec` is the process-only half of runner mode. With no arguments it
+uses the same resolved config command; argv after `--` overrides it without
+shell interpolation. Exec computes the local route URL, uses an already-active
+public exposure for `ROUTEUP_URL` when available, injects local CA trust, and
+runs one child process group. It does not start the agent, register or expose a
+route, allocate a port, or perform readiness checks. This lets one `routeup
+serve` process own a multi-target route while independently launched workers
+share its environment without making routeup their supervisor.
+
 Bare-name resolution:
 
 ```txt
@@ -779,7 +789,7 @@ token outside allowed route scope
 target port not reachable
 tunnel disconnected
 public route offline
-path not exposed
+path does not exist or is not exposed
 ```
 
 `routeup doctor` should eventually diagnose most of these.
