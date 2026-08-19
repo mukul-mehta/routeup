@@ -1,6 +1,7 @@
 package process
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net"
@@ -20,6 +21,42 @@ func TestRunner_ExitCode(t *testing.T) {
 	}
 	if code != 7 {
 		t.Fatalf("exit code = %d, want 7", code)
+	}
+}
+
+func TestRunner_ArgvExitCode(t *testing.T) {
+	code, err := Runner{Argv: []string{"sh", "-c", "exit 7"}}.Run(context.Background(), Stdio{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if code != 7 {
+		t.Fatalf("exit code = %d, want 7", code)
+	}
+}
+
+func TestRunner_RejectsCommandAndArgv(t *testing.T) {
+	_, err := Runner{Command: "true", Argv: []string{"true"}}.Run(context.Background(), Stdio{})
+	if err == nil || !strings.Contains(err.Error(), "not both") {
+		t.Fatalf("error = %v, want mutually exclusive command forms", err)
+	}
+}
+
+func TestRunner_ArgvUsesInjectedPATH(t *testing.T) {
+	dir := t.TempDir()
+	executable := filepath.Join(dir, "routeup-test-command")
+	if err := os.WriteFile(executable, []byte("#!/bin/sh\nprintf injected-path"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	code, err := Runner{
+		Argv: []string{"routeup-test-command"},
+		Env:  []string{"PATH=" + dir},
+	}.Run(context.Background(), Stdio{Out: &out})
+	if err != nil || code != 0 {
+		t.Fatalf("Run = (%d, %v)", code, err)
+	}
+	if out.String() != "injected-path" {
+		t.Fatalf("output = %q, want injected-path", out.String())
 	}
 }
 

@@ -77,6 +77,7 @@ The normal commands should be small:
 ```bash
 routeup                                # script-runner / Portless mode
 routeup serve                          # serve a local route (default local-only)
+routeup exec -- <command>              # project environment without route ownership
 routeup serve --port 8080
 routeup serve api --port 8080
 routeup serve api.myapp --port 9080
@@ -93,7 +94,14 @@ routeup update
 routeup uninstall
 ```
 
-The split: `serve` creates a route (local by default; `--expose` or `expose.enabled` adds public exposure in one go). Standalone `expose` reuses an active route's targets when available, otherwise it exposes targets from flags or config without creating a local registration. Bare `routeup` is the Phase 8 local script runner; Phase 8.5 added `expose.enabled` for config-driven exposure before child launch. Framework-specific command adapters are out of scope.
+The split: `serve` creates a route (local by default; `--expose` or
+`expose.enabled` adds public exposure in one go). `exec` runs one configured or
+explicit command with Routeup's project URL and CA environment but never owns a
+route or exposure. Standalone `expose` reuses an active route's targets when
+available, otherwise it exposes targets from flags or config without creating a
+local registration. Bare `routeup` is the Phase 8 local script runner; Phase 8.5
+added `expose.enabled` for config-driven exposure before child launch.
+Framework-specific command adapters are out of scope.
 
 Operator-only commands:
 
@@ -227,6 +235,11 @@ Non-JavaScript projects put the shell command in `routeup.json`:
 loader resolves the selected script to its command string; the runner executes
 that string through `sh -c` and does not run package-manager lifecycle hooks for
 the selected child script.
+
+`routeup exec` uses the same configured `script` or `command` when invoked
+without arguments. An explicit argv after `--` overrides it. Exec injects the
+project's local URL, an active public URL when available, and local CA trust,
+but does not start the agent, register a route, expose it, or wait for a target.
 
 For frontend + API behind one route, use path targets:
 

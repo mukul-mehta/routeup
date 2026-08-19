@@ -112,6 +112,30 @@ changes. Vite and Astro need one line of config — see
 (e.g. running from a directory called `myapp` gives `https://myapp.localhost`
 automatically).
 
+### Run supporting commands
+
+Use `routeup exec` when `routeup serve` owns the route but other processes need
+the same project URLs and local CA trust:
+
+```bash
+# terminal 1: own the route and optional public exposure
+routeup serve
+
+# other terminals: environment only, no route registration
+routeup exec -- yarn start:dev
+routeup exec -- yarn start:consumer:sync
+routeup exec -- yarn start:consumer:webhook
+```
+
+`exec` injects the configured port/host when present, `ROUTEUP_LOCAL_URL`,
+`ROUTEUP_URL`, `NODE_EXTRA_CA_CERTS`, and the project-local binary path. If the
+route already has a public exposure, `ROUTEUP_URL` uses that public URL;
+otherwise it matches the local URL. It does not start the agent, register or
+expose a route, or wait for a listening port.
+
+With no arguments, `routeup exec` runs the configured `script` or `command`.
+An explicit command after `--` takes precedence.
+
 For editor validation and completion, reference the committed JSON Schema from
 `routeup.json`:
 
@@ -155,6 +179,7 @@ Or save them permanently:
 
 ```bash
 routeup setup --server https://edge.routeup.dev
+routeup setup --token none              # clear the saved token, keep the server
 routeup setup --server none             # clear the saved server and token
 ```
 
@@ -263,6 +288,7 @@ contains terminal formatting.
 
 ```bash
 routeup dashboard   # interactive routes, exposures, live logs, and inspect
+routeup exec -- …   # run one command with the Routeup project environment
 routeup routes      # list active local routes (PUBLIC annotation when exposed)
 routeup doctor      # check CA, OS trust, port 443, and agent health
 routeup config      # show the discovered file and resolved non-secret settings
