@@ -63,13 +63,7 @@ func TestHandleLogsFollowStreamsExistingAndNewEntries(t *testing.T) {
 	}
 
 	reader := bufio.NewReader(response.Body)
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasPrefix(line, "data: ") {
-		t.Fatalf("event line = %q", line)
-	}
+	line := readSSEDataLine(t, reader)
 	if _, err := reader.ReadString('\n'); err != nil {
 		t.Fatal(err)
 	}
@@ -84,13 +78,7 @@ func TestHandleLogsFollowStreamsExistingAndNewEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	line, err = reader.ReadString('\n')
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasPrefix(line, "data: ") {
-		t.Fatalf("event line = %q", line)
-	}
+	line = readSSEDataLine(t, reader)
 	if _, err := reader.ReadString('\n'); err != nil {
 		t.Fatal(err)
 	}
@@ -100,6 +88,19 @@ func TestHandleLogsFollowStreamsExistingAndNewEntries(t *testing.T) {
 	}
 	if newEntry.ID != "req_new" {
 		t.Fatalf("new event = %#v, want req_new", newEntry)
+	}
+}
+
+func readSSEDataLine(t *testing.T, reader *bufio.Reader) string {
+	t.Helper()
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.HasPrefix(line, "data: ") {
+			return line
+		}
 	}
 }
 
@@ -118,6 +119,31 @@ func TestEntriesAfterResumesWhenCursorWasEvicted(t *testing.T) {
 	got := entriesAfter(entries, "req_evicted")
 	if len(got) != len(entries) || got[0].ID != entries[0].ID {
 		t.Fatalf("entriesAfter = %#v, want all retained entries", got)
+	}
+}
+
+func TestHandleLogsFollowResumesFromLastEventID(t *testing.T) {
+	a := &Agent{logStore: logs.NewStore(), logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	for _, id := range []string{"req_old", "req_new"} {
+		if _, err := a.logStore.Append(logs.Entry{ID: id, Route: "myapp", Source: logs.SourceLocal}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	server := httptest.NewServer(a.apiHandler())
+	defer server.Close()
+	request, err := http.NewRequest(http.MethodGet, server.URL+"/v1/logs?follow=true", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Last-Event-ID", "req_old")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	line := readSSEDataLine(t, bufio.NewReader(response.Body))
+	if !strings.Contains(line, "req_new") || strings.Contains(line, "req_old") {
+		t.Fatalf("resumed event = %q", line)
 	}
 }
 

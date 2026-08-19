@@ -27,6 +27,7 @@ SERVE_LOG="$WORK/serve.log"
 RUNNER_LOG="$WORK/runner.log"
 RUNNER_RESPONSE="$WORK/runner-response.txt"
 RUNNER_NOT_FOUND="$WORK/runner-not-found.txt"
+DETACHED_RESPONSE="$WORK/detached-response.txt"
 
 HTTP_PID=""
 SERVE_PID=""
@@ -69,6 +70,7 @@ cleanup() {
 
 	stop_and_wait "$RUNNER_PID"
 	stop_and_wait "$SERVE_PID"
+	"$BIN" stop detachedci >/dev/null 2>&1 || true
 	stop_and_wait "$HTTP_PID"
 
 	if [ -n "$APP_PID" ]; then
@@ -135,10 +137,18 @@ wait_for_https() {
 
 wait_for_exit() {
 	local pid="$1"
-	local attempt
+	local attempt stat state
 	for ((attempt = 0; attempt < 50; attempt++)); do
 		if ! kill -0 "$pid" 2>/dev/null; then
 			return 0
+		fi
+		if [ -r "/proc/$pid/stat" ]; then
+			stat=$(<"/proc/$pid/stat")
+			state=${stat#*) }
+			state=${state%% *}
+			if [ "$state" = "Z" ]; then
+				return 0
+			fi
 		fi
 		sleep 0.1
 	done
@@ -165,6 +175,34 @@ SERVE_RESPONSE=$(<"$WORK/serve-response.txt")
 printf '%s\n' "$SERVE_RESPONSE"
 if [[ "$SERVE_RESPONSE" != *"routeup-ci-ok"* ]]; then
 	printf '%s\n' "serve response did not contain routeup-ci-ok" >&2
+	exit 1
+fi
+
+printf '%s\n' "== detached serve and cooperative stop =="
+(
+	cd "$UPSTREAM_DIR"
+	"$BIN" serve detachedci --port 8080 --detach
+)
+wait_for_https "detachedci.localhost" "/" "$DETACHED_RESPONSE"
+DETACHED_PID=$("$BIN" routes --json | python3 -c '
+import json, sys
+routes = json.load(sys.stdin)
+print(next(route["owner_pid"] for route in routes if route["name"] == "detachedci"))
+')
+"$BIN" agent restart
+wait_for_https "detachedci.localhost" "/" "$DETACHED_RESPONSE" "$DETACHED_PID"
+"$BIN" stop detachedci
+if ! wait_for_exit "$DETACHED_PID"; then
+	printf '%s\n' "detached route owner remained alive after routeup stop" >&2
+	exit 1
+fi
+if "$BIN" routes --json | python3 -c '
+import json, sys
+raise SystemExit(any(route["name"] == "detachedci" for route in json.load(sys.stdin)))
+'; then
+	:
+else
+	printf '%s\n' "detached route remained registered after routeup stop" >&2
 	exit 1
 fi
 

@@ -41,7 +41,7 @@ func (a *Agent) handleLogs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	lastID := ""
+	lastID := r.Header.Get("Last-Event-ID")
 	first := true
 	for {
 		entries, changed := a.logStore.ListAndWatch(opts)
@@ -56,7 +56,7 @@ func (a *Agent) handleLogs(w http.ResponseWriter, r *http.Request) {
 				a.logger.Error("encode request log event", "err", err)
 				return
 			}
-			if _, err := fmt.Fprintf(w, "data: %s\n\n", body); err != nil {
+			if _, err := fmt.Fprintf(w, "id: %s\ndata: %s\n\n", entry.ID, body); err != nil {
 				return
 			}
 			lastID = entry.ID

@@ -203,7 +203,17 @@ func runLogs(cmd *cobra.Command, opts logs.ListOptions, commandOpts logsOpts) er
 
 func writeLogHeader(out io.Writer) error {
 	styles := newTerminalStyles(out)
-	_, err := fmt.Fprintln(out, styles.label("TIME      ROUTE                 SOURCE  STATUS  ID                    METHOD   DURATION  PATH"))
+	header := strings.Join([]string{
+		fitTerminalText("TIME", 8),
+		fitTerminalText("ROUTE", 28),
+		fitTerminalText("SOURCE", 6),
+		fitTerminalText("STATUS", 6),
+		fitTerminalText("ID", 20),
+		fitTerminalText("METHOD", 7),
+		fitTerminalText("DURATION", 8),
+		"PATH",
+	}, "  ")
+	_, err := fmt.Fprintln(out, styles.label(header))
 	if err != nil {
 		return fmt.Errorf("write request log header: %w", err)
 	}
@@ -218,20 +228,21 @@ func writeLogEntry(out io.Writer, entry logs.Entry, jsonOutput bool) error {
 		return nil
 	}
 	styles := newTerminalStyles(out)
-	source := fmt.Sprintf("%-6s", terminalEscapeString(string(entry.Source)))
+	source := fitTerminalText(terminalEscapeString(string(entry.Source)), 6)
 	if entry.Source == logs.SourcePublic {
 		source = styles.accent(source)
 	} else {
 		source = styles.muted(source)
 	}
-	routeName := styles.label(fmt.Sprintf("%-20s", terminalEscapeString(entry.Route)))
-	method := styles.label(fmt.Sprintf("%-7s", terminalEscapeString(entry.Method)))
-	requestPath := fmt.Sprintf("%-40s", terminalEscapeString(entry.RequestPath))
-	duration := styles.muted(fmt.Sprintf("%-8s", formatLogDuration(entry.Duration)))
-	status := styles.statusCode(entry.Status) + strings.Repeat(" ", max(0, 6-len(fmt.Sprintf("%d", entry.Status))))
+	routeName := styles.label(fitTerminalText(terminalEscapeString(entry.Route), 28))
+	method := styles.label(fitTerminalText(terminalEscapeString(entry.Method), 7))
+	requestPath := terminalEscapeString(entry.RequestPath)
+	duration := styles.muted(fitTerminalText(formatLogDuration(entry.Duration), 8))
+	status := fitTerminalText(styles.statusCode(entry.Status), 6)
+	id := styles.muted(fitTerminalText(terminalEscapeString(entry.ID), 20))
 	_, err := fmt.Fprintf(out, "%s  %s  %s  %s  %s  %s  %s  %s\n",
 		styles.muted(entry.StartedAt.Local().Format("15:04:05")), routeName, source,
-		status, styles.muted(fmt.Sprintf("%-20s", terminalEscapeString(entry.ID))), method, duration, requestPath)
+		status, id, method, duration, requestPath)
 	if err != nil {
 		return fmt.Errorf("write request log: %w", err)
 	}
@@ -239,8 +250,15 @@ func writeLogEntry(out io.Writer, entry logs.Entry, jsonOutput bool) error {
 }
 
 func formatLogDuration(duration time.Duration) string {
-	if duration < time.Millisecond {
+	if duration <= 0 {
 		return "0ms"
+	}
+	if duration < time.Millisecond {
+		microseconds := duration / time.Microsecond
+		if microseconds == 0 {
+			return "<1us"
+		}
+		return fmt.Sprintf("%dus", microseconds)
 	}
 	return duration.Round(time.Millisecond).String()
 }

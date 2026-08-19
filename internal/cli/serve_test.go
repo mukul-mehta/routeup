@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -58,18 +60,11 @@ func TestServeUsesExposureConfig(t *testing.T) {
 	t.Chdir(cwd)
 
 	var exposeCalls atomic.Int32
-	var statusCalls atomic.Int32
-	maintaining := make(chan struct{}, 1)
+	ownerReady := make(chan struct{}, 1)
 	socketPath := startUnixHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == ipc.PathStatus:
 			_ = json.NewEncoder(w).Encode(ipc.Status{BootID: "boot"})
-			if statusCalls.Add(1) >= 2 {
-				select {
-				case maintaining <- struct{}{}:
-				default:
-				}
-			}
 		case r.Method == http.MethodPost && r.URL.Path == ipc.PathRoutes:
 			var claim ipc.Claim
 			_ = json.NewDecoder(r.Body).Decode(&claim)
@@ -80,6 +75,10 @@ func TestServeUsesExposureConfig(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == ipc.PathExpose:
 			exposeCalls.Add(1)
 			_ = json.NewEncoder(w).Encode(ipc.ExposeResponse{Host: "myapp.example"})
+		case r.Method == http.MethodGet && r.URL.Path == ipc.PathOwners+"/myapp":
+			writeOwnerReady(w, r, ownerReady)
+		case r.Method == http.MethodGet && r.URL.Path == ipc.PathLogs:
+			writeEmptyLogStream(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -96,7 +95,7 @@ func TestServeUsesExposureConfig(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- cmd.Execute() }()
 	select {
-	case <-maintaining:
+	case <-ownerReady:
 		cancel()
 	case <-t.Context().Done():
 		cancel()
@@ -120,18 +119,11 @@ func TestServeJSONWritesOnlyReadyEvent(t *testing.T) {
 	}
 	t.Chdir(cwd)
 
-	var statusCalls atomic.Int32
-	maintaining := make(chan struct{}, 1)
+	outputWritten := make(chan struct{}, 1)
 	socketPath := startUnixHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == ipc.PathStatus:
 			_ = json.NewEncoder(w).Encode(ipc.Status{BootID: "boot"})
-			if statusCalls.Add(1) >= 2 {
-				select {
-				case maintaining <- struct{}{}:
-				default:
-				}
-			}
 		case r.Method == http.MethodPost && r.URL.Path == ipc.PathRoutes:
 			var claim ipc.Claim
 			_ = json.NewDecoder(r.Body).Decode(&claim)
@@ -139,6 +131,8 @@ func TestServeJSONWritesOnlyReadyEvent(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(claim)
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, ipc.PathRoutes+"/"):
 			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && r.URL.Path == ipc.PathOwners+"/myapp":
+			writeOwnerReady(w, r, nil)
 		default:
 			http.NotFound(w, r)
 		}
@@ -149,13 +143,13 @@ func TestServeJSONWritesOnlyReadyEvent(t *testing.T) {
 	cmd := newRootCmd()
 	cmd.SetContext(ctx)
 	var stdout, stderr bytes.Buffer
-	cmd.SetOut(&stdout)
+	cmd.SetOut(signalWriter{Writer: &stdout, written: outputWritten})
 	cmd.SetErr(&stderr)
 	cmd.SetArgs([]string{"serve", "--json"})
 	done := make(chan error, 1)
 	go func() { done <- cmd.Execute() }()
 	select {
-	case <-maintaining:
+	case <-outputWritten:
 		cancel()
 	case <-t.Context().Done():
 		cancel()
@@ -174,4 +168,37 @@ func TestServeJSONWritesOnlyReadyEvent(t *testing.T) {
 	if strings.Contains(stdout.String(), "press Ctrl-C") {
 		t.Fatalf("JSON output contains human text: %s", stdout.String())
 	}
+}
+
+func writeOwnerReady(w http.ResponseWriter, r *http.Request, ready chan<- struct{}) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	_, _ = fmt.Fprint(w, "event: ready\ndata: {}\n\n")
+	w.(http.Flusher).Flush()
+	if ready != nil {
+		select {
+		case ready <- struct{}{}:
+		default:
+		}
+	}
+	<-r.Context().Done()
+}
+
+type signalWriter struct {
+	io.Writer
+	written chan<- struct{}
+}
+
+func (w signalWriter) Write(p []byte) (int, error) {
+	n, err := w.Writer.Write(p)
+	select {
+	case w.written <- struct{}{}:
+	default:
+	}
+	return n, err
+}
+
+func writeEmptyLogStream(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.(http.Flusher).Flush()
+	<-r.Context().Done()
 }

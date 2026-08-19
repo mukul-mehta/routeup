@@ -55,9 +55,50 @@ func TestWriteLogHeader(t *testing.T) {
 	if err := writeLogHeader(&output); err != nil {
 		t.Fatal(err)
 	}
-	const want = "TIME      ROUTE                 SOURCE  STATUS  ID                    METHOD   DURATION  PATH\n"
+	const want = "TIME      ROUTE                         SOURCE  STATUS  ID                    METHOD   DURATION  PATH\n"
 	if output.String() != want {
 		t.Fatalf("header = %q, want %q", output.String(), want)
+	}
+}
+
+func TestWriteLogEntryKeepsColumnsAlignedForLongRoutes(t *testing.T) {
+	var header bytes.Buffer
+	if err := writeLogHeader(&header); err != nil {
+		t.Fatal(err)
+	}
+	entry := logs.Entry{
+		ID: "req_Ap7kQ3mN8vR2xLzC", StartedAt: time.Now(), Duration: 750 * time.Microsecond,
+		Source: logs.SourceLocal, Route: "a-route-name-that-is-far-too-long.example-app",
+		Method: http.MethodGet, RequestPath: "/routeup.json", Status: http.StatusOK,
+	}
+	var output bytes.Buffer
+	if err := writeLogEntry(&output, entry, false); err != nil {
+		t.Fatal(err)
+	}
+	sourceColumn := strings.Index(header.String(), "SOURCE")
+	if got := strings.Index(output.String(), "local"); got != sourceColumn {
+		t.Fatalf("source column starts at %d, want %d\nheader: %q\nentry:  %q", got, sourceColumn, header.String(), output.String())
+	}
+	if !strings.Contains(output.String(), "a-route-name-that-is-far-...") {
+		t.Fatalf("long route was not clipped predictably: %q", output.String())
+	}
+}
+
+func TestFormatLogDurationPreservesSubMillisecondPrecision(t *testing.T) {
+	tests := []struct {
+		duration time.Duration
+		want     string
+	}{
+		{0, "0ms"},
+		{500 * time.Nanosecond, "<1us"},
+		{432 * time.Microsecond, "432us"},
+		{999*time.Microsecond + 999*time.Nanosecond, "999us"},
+		{time.Millisecond, "1ms"},
+	}
+	for _, test := range tests {
+		if got := formatLogDuration(test.duration); got != test.want {
+			t.Errorf("formatLogDuration(%s) = %q, want %q", test.duration, got, test.want)
+		}
 	}
 }
 

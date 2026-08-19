@@ -57,17 +57,15 @@ For local-only use, `routeup` never contacts a server and never needs a token. T
 Name resolution rule:
 
 ```txt
-Any argument containing a dot is taken literally:
+Any explicit route argument is taken literally:
+  routeup serve api             -> route api
   routeup serve api.myapp       -> route api.myapp
   routeup serve api.other       -> route api.other (no myapp scope)
 
-A bare name (no dots) is prefixed with the project name from config:
-  project = myapp
+Without an argument, the route comes from ROUTEUP_NAME, config name, or the
+working-directory basename:
+  config name = myapp
   routeup serve                 -> route myapp
-  routeup serve api             -> route api.myapp
-
-If no project is detected in scope, a bare name is used as-is:
-  routeup serve foo             -> route foo
 ```
 
 ## User Experience
@@ -82,6 +80,8 @@ routeup serve --port 8080
 routeup serve api --port 8080
 routeup serve api.myapp --port 9080
 routeup serve api.myapp --port 9080 --expose   # also expose publicly
+routeup serve api.myapp --port 9080 --detach   # keep serving in the background
+routeup stop api.myapp                         # stop a serve owner
 routeup expose api.myapp               # expose active or configured targets publicly
 routeup agent status
 routeup dashboard
@@ -255,13 +255,23 @@ For frontend + API behind one route, use path targets:
 
 The older `port` field remains shorthand for `{ "path": "/", "port": <port> }`.
 
-There is no separate "project" concept; the `name` field on the config is the project name used for bare-name resolution. Shared server and token settings live in `~/.routeup/client.json`, written by `routeup setup`, not in the per-service file.
+There is no separate "project" concept; the `name` field on the config is the
+default route when no explicit name is passed. Shared server and token settings
+live in `~/.routeup/client.json`, written by `routeup setup`, not in the
+per-service file.
 
 For isolated development and integration tests, `ROUTEUP_STATE_DIR` relocates
 the complete per-user state root (socket, PID, log, CA, setup marker, and client
 configuration) without changing `HOME`. It does not affect project config
 discovery. `ROUTEUP_AGENT_SOCKET` remains a socket-only override with higher
 precedence.
+
+Long-running CLI owners keep non-secret runtime identity records under the state
+root (`owners/`: random record ID, route, owner kind, and PID). These records do not persist
+targets, exposure configuration, or tokens. Normal exits remove records;
+lifecycle checks prune records whose PID is dead. They let lifecycle commands
+distinguish an inactive route from a live owner temporarily restoring the
+in-memory agent after a restart.
 
 ## Exposure Model
 
@@ -486,14 +496,17 @@ The CLI should talk to the agent over a local socket. If the agent is not runnin
 Lifecycle ownership:
 
 ```txt
-The agent owns connections      tunnels and active proxy state
-The foreground CLI owns claims  route registrations, exposure, child processes
+The agent owns connections       tunnels and active proxy state
+Live CLI owners own desired state route registrations, exposure, child processes
 ```
 
 Foreground commands normally release their own registrations and exposures on
-exit. If one crashes, the agent reaps state owned by its dead PID and tears down
-matching connections. Other active claims and connections are unaffected. No
-`proxy start` or `proxy stop` style commands are exposed.
+exit. `serve --detach` re-execs a detached CLI owner with the same reconciliation
+behavior; `routeup stop [name]` asks that owner to exit through a live agent
+control stream rather than signaling a registry PID. If an owner crashes, the
+agent reaps state owned by its dead PID and tears down matching connections.
+Other active claims and connections are unaffected. No `proxy start` or `proxy
+stop` style commands are exposed.
 
 CLI-to-agent IPC:
 
@@ -641,25 +654,28 @@ routeup logs
 routeup logs myapp
 routeup logs api.myapp
 routeup logs api.myapp --follow
-routeup logs api.myapp --follow --plain
 routeup logs api.myapp --public
 routeup logs api.myapp --local
 routeup logs api.myapp --json
 routeup logs api.myapp --since 10m --method POST --status 202 --limit 50
 ```
 
+Foreground `routeup serve` follows new request records for its own route after
+printing readiness. `serve --json` keeps stdout to the single ready event;
+detached routes are followed explicitly with `routeup logs <route> --follow`.
+
 Default log line:
 
 ```txt
-12:41:03 public api.myapp POST /api/webhooks/github 200 38ms req_Ap7kQ3mN8vR2xLzC
-12:41:07 local  myapp     GET  /settings             200 12ms req_B9vL5rTs1mX8qK2d
+TIME      ROUTE                         SOURCE  STATUS  ID                    METHOD   DURATION  PATH
+12:41:03  api.myapp                     public  200     req_Ap7kQ3mN8vR2xLzC  POST     38ms      /api/webhooks/github
+12:41:07  myapp                         local   200     req_B9vL5rTs1mX8qK2d  GET      432us     /settings
 ```
 
-In an interactive terminal, `--follow` opens a Bubble Tea live viewer with a
-bounded 200-row display, scrolling, reconnect handling, and responsive columns.
-`--plain` forces append-only lines in a terminal, redirected output selects that
-format automatically, and `--json` writes NDJSON. Human terminal output uses
-Lip Gloss styling and honors `NO_COLOR`; machine output never contains ANSI
+`--follow` always writes append-only request rows; `--json` writes NDJSON. The
+full-screen reconnecting viewer is `routeup dashboard`, not `routeup logs`.
+Human rows use fixed-width columns and microsecond precision for sub-millisecond
+requests. Terminal output honors `NO_COLOR`; machine output never contains ANSI
 formatting.
 
 Request IDs are compact opaque values in `req_<16-char-random>` form. The log
@@ -722,9 +738,10 @@ routeup uninstall  # remove agent, CA, certs, and state dir
 
 `routeup update` detects the install channel (Homebrew vs direct binary) and
 delegates to the appropriate updater. `routeup uninstall` must work even when
-the binary is being replaced: it stops the agent, removes the macOS port
-forwarder or Linux capability, removes the local CA from the trust store,
-deletes generated certificates, and removes `~/.routeup/`.
+the binary is being replaced: it cooperatively stops live serve owners, refuses
+to race an active runner or standalone exposure, stops the agent, removes the
+macOS port forwarder or Linux capability, removes the local CA from the trust
+store, deletes generated certificates, and removes `~/.routeup/`.
 
 ## Non-Goals For V1
 

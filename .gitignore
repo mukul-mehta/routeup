@@ -3,6 +3,7 @@
 /dist/
 /routeup
 /routeup.exe
+/dogfood-output/
 /.routeup-devel/
 
 # Test and coverage artifacts

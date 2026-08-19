@@ -8,16 +8,13 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
-	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/mukul-mehta/routeup/internal/agentctl"
 	"github.com/mukul-mehta/routeup/internal/certs"
 	"github.com/mukul-mehta/routeup/internal/config"
 	"github.com/mukul-mehta/routeup/internal/ipc"
 	"github.com/mukul-mehta/routeup/internal/route"
-	"github.com/mukul-mehta/routeup/internal/state"
 )
 
 type serveOpts struct {
@@ -29,6 +26,18 @@ type serveOpts struct {
 	token   string
 	json    bool
 	qr      bool
+	detach  bool
+}
+
+type servePlan struct {
+	Route           string             `json:"route"`
+	Targets         []route.Target     `json:"targets"`
+	CaptureRequest  bool               `json:"capture_request,omitempty"`
+	CaptureResponse bool               `json:"capture_response,omitempty"`
+	RedactHeaders   []string           `json:"redact_headers,omitempty"`
+	ExposurePaths   []string           `json:"exposure_paths,omitempty"`
+	Exposure        *ipc.ExposeRequest `json:"exposure,omitempty"`
+	CWD             string             `json:"cwd"`
 }
 
 func newServeCmd() *cobra.Command {
@@ -39,10 +48,10 @@ func newServeCmd() *cobra.Command {
 		Short: "Serve a local app on a stable HTTPS route",
 		Long: "Serve a local app on https://<name>.localhost.\n\n" +
 			"The route name comes from the argument, or from routeup.json or the\n" +
-			"package.json \"routeup\" block when omitted. A bare name is prefixed\n" +
-			"with the project name; a dotted name is taken literally:\n\n" +
+			"package.json \"routeup\" block when omitted. An explicit name is\n" +
+			"always taken literally:\n\n" +
 			"  serve example-app      ->  https://example-app.localhost\n" +
-			"  serve api              ->  https://api.<project>.localhost\n" +
+			"  serve api              ->  https://api.localhost\n" +
 			"  serve api.example-app  ->  https://api.example-app.localhost\n\n" +
 			"Add --expose, or set expose.enabled in config, to also publish it through\n" +
 			"a routeup server (the same as `routeup expose`); the public name is a\n" +
@@ -72,6 +81,7 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.token, "token", "", "with --expose, server token (or ROUTEUP_TOKEN, or saved by setup)")
 	cmd.Flags().BoolVar(&opts.json, "json", false, "write the ready event as JSON")
 	cmd.Flags().BoolVar(&opts.qr, "qr", false, "print a QR code for the route URL")
+	cmd.Flags().BoolVarP(&opts.detach, "detach", "d", false, "keep the route running in the background")
 	cmd.MarkFlagsMutuallyExclusive("json", "qr")
 
 	return cmd
@@ -81,10 +91,34 @@ func runServe(cmd *cobra.Command, args []string, cwd string, opts serveOpts) err
 	if err := certs.EnsureLocalCA(); err != nil {
 		return err
 	}
-
-	discovered, err := config.Discover(cwd)
+	plan, err := resolveServePlan(args, cwd, opts)
 	if err != nil {
 		return err
+	}
+	if opts.detach {
+		event, err := startDetachedServe(cmd.Context(), cmd.Root().Version, plan)
+		if err != nil {
+			return err
+		}
+		event.Detached = true
+		return writeServeReady(cmd, event, opts)
+	}
+
+	parent := cmd.Context()
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return runServeOwner(ctx, cmd.Root().Version, plan, !opts.json, cmd.OutOrStdout(), cmd.ErrOrStderr(), func(event routeReadyEvent) error {
+		return writeServeReady(cmd, event, opts)
+	})
+}
+
+func resolveServePlan(args []string, cwd string, opts serveOpts) (servePlan, error) {
+	discovered, err := config.Discover(cwd)
+	if err != nil {
+		return servePlan{}, err
 	}
 
 	positional := ""
@@ -97,7 +131,7 @@ func runServe(cmd *cobra.Command, args []string, cwd string, opts serveOpts) err
 
 	targetFlags, err := parseTargetFlags(opts.targets)
 	if err != nil {
-		return err
+		return servePlan{}, err
 	}
 
 	resolved, err := config.Resolve(config.Inputs{
@@ -109,138 +143,44 @@ func runServe(cmd *cobra.Command, args []string, cwd string, opts serveOpts) err
 		DirName:        filepath.Base(cwd),
 	})
 	if err != nil {
-		return err
+		return servePlan{}, err
 	}
 
-	tlsPort := state.TLSPortOrDefault()
-	out := cmd.OutOrStdout()
-
-	sockPath, err := state.AgentSocketPath()
+	exposePaths, err := route.NormalizePathPatterns(discovered.Config.Expose.Paths)
 	if err != nil {
-		return err
+		return servePlan{}, err
 	}
-	client := agentctl.NewClient(sockPath, "", cmd.Root().Version)
-
-	parent := cmd.Context()
-	if parent == nil {
-		parent = context.Background()
-	}
-	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	startCtx, cancelStart := context.WithTimeout(ctx, 12*time.Second)
-	defer cancelStart()
-	ensured, err := client.EnsureRunning(startCtx)
-	if err != nil {
-		return fmt.Errorf("start agent: %w", err)
-	}
-	if ensured == agentctl.EnsureRestarted {
-		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "note: restarted the local agent to pick up a new build")
-	}
-
-	claim := ipc.Claim{
-		Name:            resolved.Route.String(),
-		Port:            resolved.Port,
+	plan := servePlan{
+		Route:           resolved.Route.String(),
 		Targets:         resolved.Targets,
 		CaptureRequest:  discovered.Config.Capture.Request,
 		CaptureResponse: discovered.Config.Capture.Response,
 		RedactHeaders:   discovered.Config.Capture.RedactHeaders,
-		OwnerPID:        os.Getpid(),
-		OwnerCWD:        cwd,
+		ExposurePaths:   exposePaths,
+		CWD:             cwd,
 	}
-
-	if _, err := client.Register(startCtx, claim); err != nil {
-		if _, ok := errors.AsType[*ipc.ConflictError](err); ok {
-			return fmt.Errorf("%w\n  hint: stop the holding process or pick a different route name", err)
-		}
-		return err
-	}
-
-	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_ = client.Unregister(shutdownCtx, claim.Name, claim.OwnerPID)
-	}()
-
-	exposePaths, err := route.NormalizePathPatterns(discovered.Config.Expose.Paths)
-	if err != nil {
-		return err
-	}
-
-	var publicHost string
-	var exposeReq *ipc.ExposeRequest
 	if opts.expose || discovered.Config.Expose.Enabled {
-		host, request, stopExpose, err := serveExpose(ctx, client, resolved.Route, resolved.Targets, exposePaths, discovered.Config.Capture.Request, discovered.Config.Capture.Response, discovered.Config.Capture.RedactHeaders, opts)
+		serverURL, token, err := resolveServerToken(opts.server, opts.token)
 		if err != nil {
-			return err
+			return servePlan{}, err
 		}
-		defer stopExpose()
-		publicHost = host
-		exposeReq = &request
-	}
-
-	localRouteURL := localURL(resolved.Route.LocalHost(), tlsPort)
-	publicURL := ""
-	if publicHost != "" {
-		publicURL = "https://" + publicHost
-	}
-	if opts.json {
-		if err := writeRouteReadyEvent(out, routeReadyEvent{
-			Route: resolved.Route.String(), LocalURL: localRouteURL, PublicURL: publicURL,
-			ExposurePaths: exposePaths, Targets: resolved.Targets,
-		}); err != nil {
-			return err
+		if serverURL == "" {
+			return servePlan{}, errors.New("public exposure needs a server — pass --server, set ROUTEUP_SERVER, or run `routeup setup --server …`")
 		}
-	} else {
-		styles := newTerminalStyles(out)
-		_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("route:"), styles.accent(resolved.Route.String()))
-		_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("local:"), styles.url(localRouteURL))
-		if publicHost != "" {
-			_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("public:"), styles.url(publicURL))
-			_, _ = fmt.Fprintf(out, "%s %s\n", styles.label("expose:"), formatExposePaths(exposePaths))
+		plan.Exposure = &ipc.ExposeRequest{
+			Name:            normalizePublicName(resolved.Route),
+			Route:           resolved.Route.String(),
+			Port:            resolved.Port,
+			Targets:         resolved.Targets,
+			Paths:           exposePaths,
+			CaptureRequest:  discovered.Config.Capture.Request,
+			CaptureResponse: discovered.Config.Capture.Response,
+			RedactHeaders:   discovered.Config.Capture.RedactHeaders,
+			Server:          serverURL,
+			Token:           token,
 		}
-		printTargets(out, resolved.Targets)
-		if opts.qr {
-			qrURL := localRouteURL
-			if publicURL != "" {
-				qrURL = publicURL
-			}
-			writeRouteQR(out, qrURL)
-		}
-		_, _ = fmt.Fprintln(out, "")
-		_, _ = fmt.Fprintln(out, styles.muted("press Ctrl-C to stop"))
 	}
-
-	client.Maintain(ctx, agentctl.DesiredState{
-		Claim: &claim, Exposure: exposeReq, PublicHost: publicHost,
-	}, cmd.ErrOrStderr())
-	return nil
-}
-
-func serveExpose(ctx context.Context, client *agentctl.Client, routeName route.Name, targets []route.Target, paths []string, captureRequest bool, captureResponse bool, redactHeaders []string, opts serveOpts) (string, ipc.ExposeRequest, func(), error) {
-	serverURL, token, err := resolveServerToken(opts.server, opts.token)
-	if err != nil {
-		return "", ipc.ExposeRequest{}, nil, err
-	}
-	if serverURL == "" {
-		return "", ipc.ExposeRequest{}, nil, errors.New("public exposure needs a server — pass --server, set ROUTEUP_SERVER, or run `routeup setup --server …`")
-	}
-
-	req := ipc.ExposeRequest{
-		Name:            normalizePublicName(routeName),
-		Route:           routeName.String(),
-		Port:            route.PrimaryPort(targets),
-		Targets:         targets,
-		Paths:           paths,
-		CaptureRequest:  captureRequest,
-		CaptureResponse: captureResponse,
-		RedactHeaders:   redactHeaders,
-		Server:          serverURL,
-		Token:           token,
-		OwnerPID:        os.Getpid(),
-	}
-	host, stop, err := holdExposure(ctx, client, req)
-	return host, req, stop, err
+	return plan, nil
 }
 
 func localURL(host string, port int) string {

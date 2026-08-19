@@ -35,11 +35,20 @@ func (c *Client) Logs(ctx context.Context, opts logs.ListOptions) ([]logs.Entry,
 // FollowLogs calls handle once for each existing and future matching entry. It
 // blocks until ctx is cancelled, the agent closes the stream, or handle fails.
 func (c *Client) FollowLogs(ctx context.Context, opts logs.ListOptions, handle func(logs.Entry) error) error {
+	return c.FollowLogsFrom(ctx, opts, "", handle)
+}
+
+// FollowLogsFrom resumes a request-log stream after lastID. The caller can
+// retain the latest handled entry ID and pass it back after reconnecting.
+func (c *Client) FollowLogsFrom(ctx context.Context, opts logs.ListOptions, lastID string, handle func(logs.Entry) error) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://unix"+logPath(opts, true), nil)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Accept", "text/event-stream")
+	if lastID != "" {
+		req.Header.Set("Last-Event-ID", lastID)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

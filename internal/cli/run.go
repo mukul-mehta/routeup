@@ -72,6 +72,11 @@ func runRun(cmd *cobra.Command, cwd string) error {
 	}
 	ctx, stop := process.NotifyContext(parent)
 	defer stop()
+	ownerLease, err := state.RegisterOwner(routeName.String(), state.OwnerRunner, os.Getpid())
+	if err != nil {
+		return fmt.Errorf("record runner owner: %w", err)
+	}
+	defer func() { _ = ownerLease.Release() }()
 
 	startCtx, cancelStart := context.WithTimeout(ctx, 12*time.Second)
 	defer cancelStart()
@@ -106,7 +111,6 @@ func runRun(cmd *cobra.Command, cwd string) error {
 			_, _ = fmt.Fprintf(errOut, "routeup: unregister %q: %v\n", claim.Name, err)
 		}
 	}()
-
 	publicURL := ""
 	var exposeReq *ipc.ExposeRequest
 	if file.Expose.Enabled {

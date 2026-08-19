@@ -69,7 +69,9 @@ func runUninstall(cmd *cobra.Command, yes bool) error {
 		}
 	}
 
-	stopAgent(cmd, out)
+	if err := stopOwnersAndAgent(cmd, out); err != nil {
+		return err
+	}
 	if isolatedDir != "" {
 		certPath := filepath.Join(isolatedDir, state.CACertName)
 		if _, err := os.Stat(certPath); err == nil {
@@ -115,6 +117,99 @@ func runUninstall(cmd *cobra.Command, yes bool) error {
 	_, _ = fmt.Fprintln(out, "")
 	_, _ = fmt.Fprintln(out, styles.success("done. you can now remove the routeup binary (e.g. `brew uninstall routeup`)."))
 	return nil
+}
+
+func stopOwnersAndAgent(cmd *cobra.Command, out io.Writer) error {
+	for attempt := 0; attempt < 3; attempt++ {
+		if err := stopActiveOwners(cmd, out); err != nil {
+			return err
+		}
+		if err := stopAgent(cmd, out); err != nil {
+			return err
+		}
+		timer := time.NewTimer(250 * time.Millisecond)
+		select {
+		case <-cmd.Context().Done():
+			timer.Stop()
+			return cmd.Context().Err()
+		case <-timer.C:
+		}
+		owners, err := state.LiveOwners()
+		if err != nil {
+			return fmt.Errorf("recheck active routeup owners: %w", err)
+		}
+		if len(owners) == 0 {
+			return nil
+		}
+	}
+	return errors.New("routeup owners kept starting during uninstall; stop them and retry")
+}
+
+func stopActiveOwners(cmd *cobra.Command, out io.Writer) error {
+	owners, err := state.LiveOwners()
+	if err != nil {
+		return fmt.Errorf("read active routeup owners: %w", err)
+	}
+	if len(owners) == 0 {
+		return nil
+	}
+	for _, owner := range owners {
+		if owner.Kind != state.OwnerServe {
+			return fmt.Errorf("cannot uninstall while %s owner for route %q is active (pid %d); stop its command first", owner.Kind, owner.Route, owner.PID)
+		}
+	}
+	sockPath, err := state.AgentSocketPath()
+	if err != nil {
+		return err
+	}
+	parent := cmd.Context()
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, 85*time.Second)
+	defer cancel()
+	client := agentctl.NewClient(sockPath, "", cmd.Root().Version)
+	stopped := 0
+	stoppedRoutes := make(map[string]struct{})
+	for _, owner := range owners {
+		if _, ok := stoppedRoutes[owner.Route]; ok {
+			continue
+		}
+		found, stopErr := stopRouteAfterReconcile(ctx, client, owner.Route, 75*time.Second)
+		if stopErr != nil {
+			return fmt.Errorf("stop route %q before uninstall: %w", owner.Route, stopErr)
+		}
+		if !found {
+			return fmt.Errorf("cannot uninstall while serve owner for route %q is active (pid %d)", owner.Route, owner.PID)
+		}
+		if err := waitForRouteStop(ctx, client, owner.Route); err != nil {
+			return fmt.Errorf("stop route %q before uninstall: %w", owner.Route, err)
+		}
+		stoppedRoutes[owner.Route] = struct{}{}
+		stopped++
+	}
+	if stopped > 0 {
+		_, _ = fmt.Fprintf(out, "%s %d\n", newTerminalStyles(out).success("route owners: stopped"), stopped)
+	}
+	return waitForOwnerRecordsGone(ctx)
+}
+
+func waitForOwnerRecordsGone(ctx context.Context) error {
+	for {
+		remaining, err := state.LiveOwners()
+		if err != nil {
+			return fmt.Errorf("verify routeup owners stopped: %w", err)
+		}
+		if len(remaining) == 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			owner := remaining[0]
+			return fmt.Errorf("cannot uninstall while %s owner for route %q is active (pid %d): %w", owner.Kind, owner.Route, owner.PID, ctx.Err())
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }
 
 func safeIsolatedStateDir() (string, error) {
@@ -165,6 +260,7 @@ func removeIsolatedState(dir string) (bool, error) {
 		state.AgentSocketName,
 		state.AgentLogName,
 		state.AgentPIDName,
+		state.OwnersDirName,
 		state.CACertName,
 		state.CAKeyName,
 		state.ClientConfigName,
@@ -188,11 +284,11 @@ func removeIsolatedState(dir string) (bool, error) {
 }
 
 // stopAgent shuts the agent down if it's running. Best-effort.
-func stopAgent(cmd *cobra.Command, out io.Writer) {
+func stopAgent(cmd *cobra.Command, out io.Writer) error {
 	styles := newTerminalStyles(out)
 	sockPath, err := state.AgentSocketPath()
 	if err != nil {
-		return
+		return err
 	}
 	parent := cmd.Context()
 	if parent == nil {
@@ -205,12 +301,13 @@ func stopAgent(cmd *cobra.Command, out io.Writer) {
 	stopped, err := client.Stop(ctx)
 	switch {
 	case err != nil:
-		_, _ = fmt.Fprintln(out, styles.warning(fmt.Sprintf("agent: couldn't stop (%v)", err)))
+		return fmt.Errorf("stop agent before uninstall: %w", err)
 	case stopped:
 		_, _ = fmt.Fprintln(out, styles.success("agent: stopped"))
 	default:
 		_, _ = fmt.Fprintln(out, styles.muted("agent: not running"))
 	}
+	return nil
 }
 
 // confirm prompts on out and reads a yes/no answer from the command's input.

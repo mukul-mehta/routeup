@@ -84,7 +84,9 @@ Avoid:
 - Pulling in a large config framework before the config model settles.
 - Supporting many equivalent config shapes for the same behavior.
 - Adding aliases for every command or field before users ask for them.
-- Inferring route names from the directory name or top-level package name.
+- Inferring route names from the top-level package name. The working-directory
+  basename is allowed only as the documented final fallback after an explicit
+  positional name, `ROUTEUP_NAME`, and config `name`.
 
 ## Networking Standards
 

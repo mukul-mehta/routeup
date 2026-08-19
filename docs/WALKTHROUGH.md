@@ -40,6 +40,7 @@ internal/
   state/                   # Filesystem paths and state helpers
     constants.go           #   File/dir/env names
     paths.go               #   AgentSocketPath, CACertPath, etc.
+    owners.go              #   Non-secret owner leases and stale-record pruning
     setupmarker.go         #   Setup marker file
     clientconfig.go        #   ClientConfig (saved server URL + token)
 
@@ -48,6 +49,7 @@ internal/
 
   agentctl/                # CLI-side agent IPC client stub
     client.go              #   Client: Status, Register, Unregister, List
+    owners.go              #   Cooperative serve-owner watch, stop, and acknowledgment
     logs.go                #   Logs and FollowLogs
     inspect.go             #   Inspect one retained exchange
     lifecycle.go           #   EnsureRunning, Stop, Restart, spawnAndWait
@@ -113,6 +115,9 @@ internal/
     run_process.go         #   startup readiness and child result handling
     targets.go             #   target flag parsing and display
     serve.go               #   `routeup serve` — local + optional expose
+    serve_owner.go         #   shared foreground/detached lifecycle + live logs
+    serve_detach.go        #   detached re-exec and anonymous-pipe readiness
+    stop.go                #   `routeup stop` — cooperatively stop a serve owner
     expose.go              #   `routeup expose` — public tunnel only
     route_output.go        #   ready-event JSON and optional terminal QR output
     server.go              #   `routeup server` — run the public server
@@ -127,7 +132,7 @@ internal/
     config.go              #   resolved project configuration output
     routes.go              #   `routeup routes` — list active local routes (+ public)
     logs.go                #   `routeup logs` — metadata list and follow
-    logs_tui.go            #   Bubble Tea live request viewer and reconnect loop
+    logs_stream.go         #   dashboard live-log reconnect and responsive row formatting
     inspect.go              #   `routeup inspect` — retained exchange output
     terminal.go             #   safe escaping, TTY detection, and Lip Gloss theme
     update.go              #   `routeup update` — self update
@@ -168,9 +173,9 @@ occurs.
 
 `config.Resolve(inputs)` resolves a route name and target set by precedence:
 config targets/port, overridden by `ROUTEUP_PORT`, `--port`, and repeatable
-`--target /path=port`. Bare names are prefixed with the project name; dotted
-names are taken literally (`resolve.go`). `port` remains shorthand for the root
-`/` target.
+`--target /path=port`. Explicit positional names are literal; without one,
+`ROUTEUP_NAME`, config `name`, and the working-directory basename are consulted
+in that order (`resolve.go`). `port` remains shorthand for the root `/` target.
 
 Example M7 path-proxy config:
 
@@ -209,6 +214,7 @@ routeup
   # user-facing
   setup                     One-time machine setup: local CA, OS trust, port 443
   serve [name]              Serve a local app on https://<name>.localhost (optionally --expose)
+  stop [name]               Stop a foreground or detached serve owner
   expose [name]             Expose a local port publicly through a routeup server
   routes                    List active local routes
   config                    Show resolved project configuration
@@ -229,7 +235,7 @@ routeup
   forward <from> <to>       TCP byte-pipe used by the macOS port-443 LaunchDaemon
 ```
 
-`server`, `token`, `agent run`, and `forward` are `Hidden: true` in cobra — real
+`server`, `token`, `serve-owner`, `agent run`, and `forward` are hidden Cobra commands — real
 commands, just kept out of `--help`. `server` and `token` are operator commands
 that open the server's database directly (the server need not be running).
 
@@ -249,11 +255,15 @@ delivered directly to that group. Direct cancellation of routeup forwards the
 signal and escalates to SIGKILL after five seconds; an interactive child that
 ignores SIGINT cannot trigger that parent-side timer.
 
-The `serve` command (`serve.go`): resolves the route name and port, ensures the
-local CA exists, ensures the agent is running, registers the route claim with
-the agent, optionally calls `serveExpose` (same path as `expose`), then blocks
-on `Maintain` - a 2s desired-state loop that restores the claim and exposure
-after agent restart or terminal tunnel failure.
+The `serve` command (`serve.go`, `serve_owner.go`): resolves the route name and
+targets, ensures the local CA and agent exist, registers the route claim,
+optionally starts exposure, and runs `Maintain` - a 2s desired-state loop that
+restores the claim and exposure after agent restart or terminal tunnel failure.
+Foreground mode also follows new request logs for that route. `serve_detach.go`
+re-execs a hidden owner in a new session for `-d/--detach`, passing the complete
+plan through anonymous pipes and waiting for an explicit readiness response.
+`routeup stop` cooperatively cancels a connected serve owner through the agent;
+it does not signal the PID stored in the route registry.
 
 The `expose` command (`expose.go`): resolves server URL + token (flag > env >
 saved client config), resolves the route name, calls `startTunnel` which starts
@@ -308,8 +318,8 @@ type UnexposeRequest struct {
 }
 ```
 
-Path constants: `/v1/status`, `/v1/routes`, `/v1/logs`, `/v1/requests`,
-`/v1/shutdown`, `/v1/expose`, `/v1/unexpose`.
+Path constants: `/v1/status`, `/v1/routes`, `/v1/owners`, `/v1/logs`,
+`/v1/requests`, `/v1/shutdown`, `/v1/expose`, `/v1/unexpose`.
 
 ---
 
@@ -321,8 +331,9 @@ Created once per machine by `agentctl` when the CLI needs an agent. Key fields:
 
 ```go
 type Agent struct {
-    reg      *Registry       // in-memory route claims
-    tunnels  *tunnelManager  // M5: public tunnel sessions
+    reg      *Registry           // in-memory route claims
+    owners   *routeOwnerControls // live cooperative serve control streams
+    tunnels  *tunnelManager      // M5: public tunnel sessions
     sockPath string          // Unix socket for CLI IPC
     tlsAddr  string          // internal high-port TLS listener (127.0.0.1:47443); 443 reaches it post-setup
     bootID   string          // random, changes on every start (reconcile signal)
@@ -372,11 +383,14 @@ with public `expose.paths` filtering.
 
 ### API handlers (`api.go`)
 
-Nine endpoint forms over the Unix socket:
+Twelve endpoint forms over the Unix socket:
 
 - `POST /v1/routes` — register a claim
 - `DELETE /v1/routes/{name}` — unregister
 - `GET /v1/routes` — list claims
+- `GET /v1/owners/{name}` — attach a live serve-owner control stream
+- `POST /v1/owners/{name}/stop` — cooperatively ask that owner to exit
+- `POST /v1/owners/{name}/ack` — confirm the owner received that stop
 - `GET /v1/status` — agent status + boot ID
 - `GET /v1/logs` — metadata snapshot or SSE follow stream
 - `GET /v1/requests/{id}` — one retained exchange for inspection
@@ -392,8 +406,9 @@ The CLI stub that speaks to the agent over the Unix socket.
 
 ### Client (`client.go`)
 
-Wraps `http.Client` with a Unix-socket `DialContext`. Methods: `Status`,
-`Register`, `Unregister`, `List`, `Logs`, `FollowLogs`, and `Inspect`.
+Wraps `http.Client` with a Unix-socket `DialContext`. Methods include `Status`,
+`Register`, `Unregister`, `List`, `WatchRouteOwner`, `StopRoute`, `Logs`,
+`FollowLogs`, and `Inspect`.
 
 ### Lifecycle (`lifecycle.go`)
 
@@ -467,6 +482,10 @@ omitted names in inspect output.
 
 The API serves `GET /v1/logs` for a filtered finite metadata snapshot or
 `follow=true` SSE stream, and `GET /v1/requests/{id}` for one retained exchange.
+Each SSE row carries its request ID as the event ID, so a reconnecting follower
+can send `Last-Event-ID` and resume from the bounded ring without duplicating
+retained rows. Foreground `routeup serve` follows its route from the claim's
+agent-stamped registration time.
 `routeup logs` and `routeup inspect` only query an already-running agent; they do
 not start one because the ring is process-local. A request without capture
 returns a conflict from the inspect endpoint, while an evicted or unknown ID
@@ -510,6 +529,7 @@ Resolves filesystem paths under `~/.routeup/`:
 | `AgentSocketPath()` | `agent.sock` | CLI↔agent IPC |
 | `AgentLogPath()` | `agent.log` | Spawned agent stdout/stderr |
 | `AgentPIDPath()` | `agent.pid` | Running agent PID |
+| `RegisterOwner()` | `owners/*.json` | Non-secret live CLI owner identity |
 | `CACertPath()` | `ca.crt` | Local CA certificate |
 | `CAKeyPath()` | `ca.key` | Local CA private key |
 | `ReadClientConfig()` | `client.json` | Saved server URL + token |
