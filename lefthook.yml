@@ -1,0 +1,17 @@
+min_version: 2.1.10
+assert_lefthook_installed: true
+
+pre-commit:
+  jobs:
+    - name: format Go source
+      glob: "*.go"
+      run: golangci-lint fmt --diff
+
+    - name: lint Go source
+      glob: "*.go"
+      run: just lint
+
+pre-push:
+  jobs:
+    - name: contributor checks
+      run: just check
