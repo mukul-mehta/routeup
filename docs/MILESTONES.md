@@ -580,10 +580,10 @@ without moving desired route state into persistent agent storage.
 > for its route after readiness. `serve -d/--detach` re-execs a detached owner,
 > passes its resolved plan and credentials through anonymous pipes, and returns
 > only after the claim, optional exposure, and cooperative owner-control stream
-> are ready. `routeup stop <name>` requests shutdown over that live stream and
+> are ready. `routeup stop [name]` requests shutdown over that live stream and
 > never signals the PID reported by the route registry. Detached owners retain
 > the existing agent-restart and exposure reconciliation behavior. Non-secret
-> runtime owner records (route, kind, PID) let stop/uninstall distinguish an
+> runtime owner records (record ID, route, kind, PID) let stop/uninstall distinguish an
 > inactive command from a live owner currently restoring the agent; targets and
 > credentials are never written there.
 
@@ -624,6 +624,8 @@ Goal: make local and public traffic visible.
 > bodies; request capture and inspect are implemented in Phase 10 below.
 > `--follow` always streams plain lines; `--json` emits NDJSON. The shared
 > Lip Gloss theme is also used by existing human-readable status commands.
+> Fixed-width human columns keep paths aligned, and sub-millisecond durations
+> retain microsecond precision instead of rounding to zero.
 
 Build:
 

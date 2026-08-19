@@ -98,6 +98,42 @@ func TestStopRouteWaitsForOwnerToReconcileAfterAgentRestart(t *testing.T) {
 	}
 }
 
+func TestStopRouteWaitsForOwnerControlAfterAgentRestart(t *testing.T) {
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	t.Setenv(state.StateDirEnv, t.TempDir())
+	lease, err := state.RegisterOwner("myapp", state.OwnerServe, os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lease.Release() }()
+
+	var stopCalls atomic.Int32
+	socketPath := startUnixHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == ipc.PathOwners+"/myapp/stop":
+			if stopCalls.Add(1) < 3 {
+				w.WriteHeader(http.StatusConflict)
+				_ = json.NewEncoder(w).Encode(ipc.ErrorBody{Error: "route owner cannot be stopped remotely; stop the holding process from its terminal"})
+				return
+			}
+			w.WriteHeader(http.StatusAccepted)
+		case r.Method == http.MethodGet && r.URL.Path == ipc.PathRoutes:
+			_ = json.NewEncoder(w).Encode(map[string]any{"routes": []ipc.Claim{}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Setenv("ROUTEUP_AGENT_SOCKET", socketPath)
+	stdout, _, err := runRoot(t, "stop", "myapp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stopCalls.Load() < 3 || !strings.Contains(stdout, "route stopped:") {
+		t.Fatalf("stop calls = %d, output = %q", stopCalls.Load(), stdout)
+	}
+}
+
 func TestServeDetachFlagUsesConventionalPair(t *testing.T) {
 	flag := newServeCmd().Flags().Lookup("detach")
 	if flag == nil || flag.Shorthand != "d" {

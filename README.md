@@ -75,6 +75,11 @@ Detached mode keeps the same live ownership and agent-restart recovery as a
 foreground serve. `stop` releases the route and public exposure; it does not
 stop the external application listening on the target port.
 
+The stop name is optional and uses the same `ROUTEUP_NAME`, config-name, and
+directory fallback as `serve`. `routeup stop` controls only foreground or
+detached `serve` owners. Stop bare runner mode and standalone `routeup expose`
+from their owning terminal.
+
 Open an active route or emit machine-readable/QR output:
 
 ```bash
@@ -178,6 +183,10 @@ routeup expose --qr                     # public URL plus terminal QR code
 routeup expose --json                   # ready event for scripts/editors
 ```
 
+Standalone `expose` remains attached after printing readiness, including with
+`--json`, and restores its tunnel after agent restarts. Stop it with Ctrl-C in
+that terminal; `routeup stop` does not control standalone exposures.
+
 What you get depends on your token:
 
 ```txt
@@ -234,8 +243,9 @@ public: https://myapp.<your-namespace>.routeup.dev
 
 `ROUTEUP_LOCAL_URL` stays local. `ROUTEUP_URL` holds the public address. No
 second terminal needed — the tunnel releases with the process.
-Live owner commands, including detached `serve`, restore their route and public
-exposure if the local agent restarts or a tunnel terminates unexpectedly.
+Live owner commands, including detached `serve`, restore the local claim and/or
+public exposure they own if the local agent restarts or a tunnel terminates
+unexpectedly.
 
 ## Frontend + API
 
@@ -269,6 +279,10 @@ routeup logs myapp --follow          # append-only live request rows
 routeup logs myapp --public --json   # public traffic as JSON
 routeup logs myapp --since 10m --method POST --status 202 --limit 50
 ```
+
+Human request rows use fixed-width columns and clip overlong fields so the path
+column stays aligned. Sub-millisecond requests retain microsecond precision,
+such as `<1us`, `432us`, or `999us`, instead of rounding to `0ms`.
 
 Enable opt-in capture for webhook debugging:
 
@@ -315,8 +329,10 @@ routeup uninstall   # remove the CA, port-443 helper, and ~/.routeup
 
 `routes`, `doctor`, `agent status`, `config`, and `inspect` support `--json`.
 `logs --json` remains NDJSON and writes no human messages to stdout.
-`uninstall` stops live serve owners first and refuses to continue while a runner
-or standalone exposure command is still active.
+`uninstall` first checks runtime owners. It aborts while a runner or standalone
+exposure is active; stop that command in its terminal and retry. When all live
+owners are foreground or detached serve commands, uninstall stops them
+cooperatively before stopping the agent and removing setup state.
 
 `routeup dashboard` is read-only and requires an interactive terminal. Use Tab
 to move between routes, exposures, and requests; `j`/`k` to navigate; Enter to
@@ -413,6 +429,7 @@ scope. The web dashboard is deferred to a later release.
 - [x] Phase 7 — Path proxy
 - [x] Phase 8 — Local process runner
 - [x] Phase 8.5 — Runner exposure (`expose.enabled`; framework adapters out of scope)
+- [x] Phase 8.6 — Detached serve ownership and `routeup stop`
 - [x] Phase 9 — Route logs
 - [x] Phase 10 — Request capture & inspect
 - [x] Phase 11 — Public server rate limiting

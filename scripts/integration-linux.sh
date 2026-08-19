@@ -137,10 +137,18 @@ wait_for_https() {
 
 wait_for_exit() {
 	local pid="$1"
-	local attempt
+	local attempt stat state
 	for ((attempt = 0; attempt < 50; attempt++)); do
 		if ! kill -0 "$pid" 2>/dev/null; then
 			return 0
+		fi
+		if [ -r "/proc/$pid/stat" ]; then
+			stat=$(<"/proc/$pid/stat")
+			state=${stat#*) }
+			state=${state%% *}
+			if [ "$state" = "Z" ]; then
+				return 0
+			fi
 		fi
 		sleep 0.1
 	done

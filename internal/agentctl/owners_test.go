@@ -2,6 +2,7 @@ package agentctl
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -61,5 +62,27 @@ func TestClientWatchesAndStopsRouteOwner(t *testing.T) {
 	}
 	if stopped := <-watchDone; !stopped {
 		t.Fatal("owner stream ended without stop event")
+	}
+}
+
+func TestStopRouteClassifiesUnavailableOwnerControl(t *testing.T) {
+	socketPath := filepath.Join(shortSocketDir(t), "agent.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/owners/myapp/stop" {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		http.NotFound(w, r)
+	})}
+	t.Cleanup(func() { _ = server.Close() })
+	go func() { _ = server.Serve(listener) }()
+
+	_, err = NewClient(socketPath, "", "").StopRoute(context.Background(), "myapp")
+	if !errors.Is(err, ErrRouteOwnerControlUnavailable) {
+		t.Fatalf("StopRoute error = %v, want ErrRouteOwnerControlUnavailable", err)
 	}
 }

@@ -49,7 +49,7 @@ install-devel:
 
 # Stop and remove routeup-devel plus its isolated profile
 uninstall-devel:
-    @if [[ -x "{{devel_bin}}" ]]; then "{{devel_bin}}" uninstall --yes; rm -f "{{devel_bin}}"; else printf '%s\n' "development binary not found: {{devel_bin}}"; fi
+    @if [[ -x "{{devel_bin}}" ]]; then "{{devel_bin}}" uninstall --yes && rm -f "{{devel_bin}}"; else printf '%s\n' "development binary not found: {{devel_bin}}"; fi
 
 # Fast contributor checks; excludes network-heavy and OS integration tests
 check: test-race lint test-examples

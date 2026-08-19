@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -87,7 +88,8 @@ func stopRouteAfterReconcile(ctx context.Context, client *agentctl.Client, name 
 		if err == nil && found {
 			return true, nil
 		}
-		if err != nil && !agentctl.IsUnavailable(err) {
+		controlUnavailable := errors.Is(err, agentctl.ErrRouteOwnerControlUnavailable)
+		if err != nil && !agentctl.IsUnavailable(err) && !controlUnavailable {
 			return false, err
 		}
 		live, ownerErr := hasLiveServeOwner(name)
@@ -95,6 +97,9 @@ func stopRouteAfterReconcile(ctx context.Context, client *agentctl.Client, name 
 			return false, ownerErr
 		}
 		if !live {
+			if controlUnavailable {
+				return false, err
+			}
 			return false, nil
 		}
 		if time.Now().After(deadline) {

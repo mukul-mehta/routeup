@@ -3,6 +3,7 @@ package agentctl
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,10 @@ import (
 
 	"github.com/mukul-mehta/routeup/internal/ipc"
 )
+
+// ErrRouteOwnerControlUnavailable means the route is active but its serve owner
+// has not attached a cooperative control stream to the current agent yet.
+var ErrRouteOwnerControlUnavailable = errors.New("route owner cannot be stopped remotely; stop the holding process from its terminal")
 
 // WatchRouteOwner keeps a cooperative control stream open for a route owner.
 // onReady runs after the agent has attached the stream. stopped is true only
@@ -100,6 +105,10 @@ func (c *Client) StopRoute(ctx context.Context, name string) (found bool, err er
 	if resp.StatusCode == http.StatusNotFound {
 		_, _ = io.Copy(io.Discard, resp.Body)
 		return false, nil
+	}
+	if resp.StatusCode == http.StatusConflict {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return false, fmt.Errorf("agent: %w", ErrRouteOwnerControlUnavailable)
 	}
 	if resp.StatusCode != http.StatusAccepted {
 		return false, decodeErrorResponse(resp)

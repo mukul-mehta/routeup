@@ -60,7 +60,7 @@ routeup serve
 routeup serve --port 8080
 routeup serve --port 8080 --expose
 routeup serve --port 8080 --detach
-routeup stop <name>
+routeup stop [name]
 routeup exec -- <command>
 routeup expose <name>
 routeup agent status
@@ -166,12 +166,12 @@ route, source, method, path/query, matched target when one exists, status, and
 duration. They disappear when the agent restarts. The current public server has
 no separate request-log store; `routeup logs` always reads from the agent.
 
-In a TTY, `routeup logs --follow` presents the stream through a full-screen
-Bubble Tea viewer. The viewer retains at most 200 rendered rows, deduplicates
-the snapshot after reconnecting, and clears stale rows when the agent boot ID
-changes. `--plain` forces line-oriented streaming in a terminal, redirected
-output selects it automatically, and `--json` writes NDJSON. All untrusted
-values are escaped before Lip Gloss styling is applied.
+`routeup logs --follow` writes append-only, line-oriented request rows.
+Redirected output uses the same format without terminal styling, and `--json`
+writes NDJSON. The full-screen request viewer and reconnect model belong to
+`routeup dashboard`; `logs` has no `--plain` flag. Human rows use fixed-width
+columns, clip overlong fields to preserve alignment, and retain microsecond
+precision below one millisecond. All untrusted values are escaped before styling.
 
 Phase 10 adds per-route opt-in request retention:
 
@@ -645,7 +645,7 @@ For `routeup` as a runner:
 2. CLI chooses a free app port and starts the local agent if needed.
 3. CLI reserves the local route.
 4. CLI starts the child process group with `PORT`, `HOST`, and local route URLs.
-5. CLI waits up to 15 seconds for the root target to accept connections.
+5. CLI waits up to 120 seconds for the root target to accept connections.
 6. CLI prints the ready route and waits for the child process group.
 7. CLI unregisters the route on exit or signal.
 8. After readiness, CLI exits with the child process exit code.
@@ -683,7 +683,7 @@ contract and does not start the implicit human log follower.
 `routeup serve --detach` resolves the same plan, passes it to a re-executed owner
 through inherited anonymous pipes, and waits for the child to report readiness.
 The token is not placed in argv, the environment, or a state file. The detached
-owner keeps `Maintain` and the owner-control stream alive; `routeup stop <name>`
+owner keeps `Maintain` and the owner-control stream alive; `routeup stop [name]`
 cooperatively cancels it and waits for owner-conditional cleanup. An active claim
 without a serve control stream, such as runner-owned state, fails closed instead
 of being signaled.
@@ -750,7 +750,7 @@ trusted setup marker
 server URL
 token file
 agent socket path
-live CLI owner records (route, kind, PID only)
+live CLI owner records (record ID, route, kind, PID)
 bounded log store
 ```
 
@@ -764,10 +764,12 @@ remains the highest-precedence socket-only override; Linux uses
 The `routeup-devel` build embeds its `.routeup-devel` state path at build time so it
 works directly from `PATH`; `ROUTEUP_STATE_DIR` can still override that default.
 The `owners/` directory contains one non-secret runtime identity record per live
-`serve`, runner, or standalone `expose` command. It is not desired-state
-persistence: records contain no targets or credentials and disappear when their
-owner exits. `stop` and `uninstall` use them to fail closed while the agent is
-between in-memory instances.
+`serve`, runner, or standalone `expose` command: random record ID, route, owner
+kind, and PID. It is not desired-state persistence and contains no targets,
+exposure configuration, or credentials. Normal exits remove records; lifecycle
+checks prune records whose PID is dead. PID reuse deliberately fails closed.
+`stop` and `uninstall` use these records while the agent is between in-memory
+instances.
 
 The setup marker uses the initial version 1 format. `doctor` rejects missing or
 malformed markers, and macOS additionally validates that the installed

@@ -40,6 +40,7 @@ internal/
   state/                   # Filesystem paths and state helpers
     constants.go           #   File/dir/env names
     paths.go               #   AgentSocketPath, CACertPath, etc.
+    owners.go              #   Non-secret owner leases and stale-record pruning
     setupmarker.go         #   Setup marker file
     clientconfig.go        #   ClientConfig (saved server URL + token)
 
@@ -48,6 +49,7 @@ internal/
 
   agentctl/                # CLI-side agent IPC client stub
     client.go              #   Client: Status, Register, Unregister, List
+    owners.go              #   Cooperative serve-owner watch, stop, and acknowledgment
     logs.go                #   Logs and FollowLogs
     inspect.go             #   Inspect one retained exchange
     lifecycle.go           #   EnsureRunning, Stop, Restart, spawnAndWait
@@ -113,6 +115,9 @@ internal/
     run_process.go         #   startup readiness and child result handling
     targets.go             #   target flag parsing and display
     serve.go               #   `routeup serve` — local + optional expose
+    serve_owner.go         #   shared foreground/detached lifecycle + live logs
+    serve_detach.go        #   detached re-exec and anonymous-pipe readiness
+    stop.go                #   `routeup stop` — cooperatively stop a serve owner
     expose.go              #   `routeup expose` — public tunnel only
     route_output.go        #   ready-event JSON and optional terminal QR output
     server.go              #   `routeup server` — run the public server
@@ -127,7 +132,7 @@ internal/
     config.go              #   resolved project configuration output
     routes.go              #   `routeup routes` — list active local routes (+ public)
     logs.go                #   `routeup logs` — metadata list and follow
-    logs_tui.go            #   Bubble Tea live request viewer and reconnect loop
+    logs_stream.go         #   dashboard live-log reconnect and responsive row formatting
     inspect.go              #   `routeup inspect` — retained exchange output
     terminal.go             #   safe escaping, TTY detection, and Lip Gloss theme
     update.go              #   `routeup update` — self update
@@ -209,6 +214,7 @@ routeup
   # user-facing
   setup                     One-time machine setup: local CA, OS trust, port 443
   serve [name]              Serve a local app on https://<name>.localhost (optionally --expose)
+  stop [name]               Stop a foreground or detached serve owner
   expose [name]             Expose a local port publicly through a routeup server
   routes                    List active local routes
   config                    Show resolved project configuration
@@ -229,7 +235,7 @@ routeup
   forward <from> <to>       TCP byte-pipe used by the macOS port-443 LaunchDaemon
 ```
 
-`server`, `token`, `agent run`, and `forward` are `Hidden: true` in cobra — real
+`server`, `token`, `serve-owner`, `agent run`, and `forward` are hidden Cobra commands — real
 commands, just kept out of `--help`. `server` and `token` are operator commands
 that open the server's database directly (the server need not be running).
 

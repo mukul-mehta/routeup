@@ -47,7 +47,8 @@ curl https://myapp.localhost:47444/
 `just uninstall-devel` stops the isolated agent, removes the development CA from
 the trust store, deletes its state, and removes the `routeup-devel` binary. It
 never removes normal routeup trust, the global port helper, or Linux
-capabilities.
+capabilities. It refuses to proceed while a development runner or standalone
+exposure is active; stop that command in its terminal and retry.
 
 Override the defaults when parallel profiles or another port are needed:
 

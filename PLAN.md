@@ -267,8 +267,9 @@ discovery. `ROUTEUP_AGENT_SOCKET` remains a socket-only override with higher
 precedence.
 
 Long-running CLI owners keep non-secret runtime identity records under the state
-root (`owners/`: route, owner kind, and PID only). These records do not persist
-targets, exposure configuration, or tokens. They let lifecycle commands
+root (`owners/`: random record ID, route, owner kind, and PID). These records do not persist
+targets, exposure configuration, or tokens. Normal exits remove records;
+lifecycle checks prune records whose PID is dead. They let lifecycle commands
 distinguish an inactive route from a live owner temporarily restoring the
 in-memory agent after a restart.
 
@@ -501,7 +502,7 @@ Live CLI owners own desired state route registrations, exposure, child processes
 
 Foreground commands normally release their own registrations and exposures on
 exit. `serve --detach` re-execs a detached CLI owner with the same reconciliation
-behavior; `routeup stop <name>` asks that owner to exit through a live agent
+behavior; `routeup stop [name]` asks that owner to exit through a live agent
 control stream rather than signaling a registry PID. If an owner crashes, the
 agent reaps state owned by its dead PID and tears down matching connections.
 Other active claims and connections are unaffected. No `proxy start` or `proxy
@@ -653,7 +654,6 @@ routeup logs
 routeup logs myapp
 routeup logs api.myapp
 routeup logs api.myapp --follow
-routeup logs api.myapp --follow --plain
 routeup logs api.myapp --public
 routeup logs api.myapp --local
 routeup logs api.myapp --json
@@ -667,15 +667,15 @@ detached routes are followed explicitly with `routeup logs <route> --follow`.
 Default log line:
 
 ```txt
-12:41:03 public api.myapp POST /api/webhooks/github 200 38ms req_Ap7kQ3mN8vR2xLzC
-12:41:07 local  myapp     GET  /settings             200 12ms req_B9vL5rTs1mX8qK2d
+TIME      ROUTE                         SOURCE  STATUS  ID                    METHOD   DURATION  PATH
+12:41:03  api.myapp                     public  200     req_Ap7kQ3mN8vR2xLzC  POST     38ms      /api/webhooks/github
+12:41:07  myapp                         local   200     req_B9vL5rTs1mX8qK2d  GET      432us     /settings
 ```
 
-In an interactive terminal, `--follow` opens a Bubble Tea live viewer with a
-bounded 200-row display, scrolling, reconnect handling, and responsive columns.
-`--plain` forces append-only lines in a terminal, redirected output selects that
-format automatically, and `--json` writes NDJSON. Human terminal output uses
-Lip Gloss styling and honors `NO_COLOR`; machine output never contains ANSI
+`--follow` always writes append-only request rows; `--json` writes NDJSON. The
+full-screen reconnecting viewer is `routeup dashboard`, not `routeup logs`.
+Human rows use fixed-width columns and microsecond precision for sub-millisecond
+requests. Terminal output honors `NO_COLOR`; machine output never contains ANSI
 formatting.
 
 Request IDs are compact opaque values in `req_<16-char-random>` form. The log
