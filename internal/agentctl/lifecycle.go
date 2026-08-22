@@ -215,8 +215,9 @@ func (c *Client) spawn() error {
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	// Inherit environment so ROUTEUP_AGENT_SOCKET (and friends) propagate.
-	cmd.Env = os.Environ()
+	// Inherit state/socket overrides, but do not retain the public-server token
+	// in the long-lived agent. Exposure credentials arrive over local IPC.
+	cmd.Env = withoutEnv(os.Environ(), "ROUTEUP_TOKEN")
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start agent: %w", err)
@@ -224,6 +225,18 @@ func (c *Client) spawn() error {
 	// Don't wait; we want it detached.
 	_ = cmd.Process.Release()
 	return nil
+}
+
+func withoutEnv(env []string, key string) []string {
+	prefix := key + "="
+	out := make([]string, 0, len(env))
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 func (c *Client) waitReady(ctx context.Context, budget time.Duration) error {

@@ -53,3 +53,42 @@ func TestClientConfigPath(t *testing.T) {
 		t.Errorf("path = %q", path)
 	}
 }
+
+func TestClientConfigCorrectsExistingPermissions(t *testing.T) {
+	t.Setenv(StateDirEnv, t.TempDir())
+	path, err := ClientConfigPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureParentDir(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"token":"secret"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ReadClientConfig(); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("client config permissions = %o, want 600", got)
+	}
+
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteClientConfig(ClientConfig{Token: "replacement"}); err != nil {
+		t.Fatal(err)
+	}
+	info, err = os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("rewritten client config permissions = %o, want 600", got)
+	}
+}

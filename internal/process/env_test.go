@@ -88,3 +88,18 @@ func TestInjectEnv_NoCACertPath(t *testing.T) {
 		t.Errorf("NODE_EXTRA_CA_CERTS should not be set when CACertPath is empty, got %q", got["NODE_EXTRA_CA_CERTS"])
 	}
 }
+
+func TestInjectEnv_RemovesRouteupToken(t *testing.T) {
+	got := envMap(InjectEnv([]string{
+		"PATH=/usr/bin",
+		"ROUTEUP_TOKEN=sk_routeup_secret",
+		"ROUTEUP_SERVER=https://edge.example.com",
+	}, EnvInputs{}))
+
+	if _, ok := got["ROUTEUP_TOKEN"]; ok {
+		t.Fatal("ROUTEUP_TOKEN was inherited by the child")
+	}
+	if got["ROUTEUP_SERVER"] != "https://edge.example.com" {
+		t.Fatalf("ROUTEUP_SERVER = %q, want it preserved", got["ROUTEUP_SERVER"])
+	}
+}

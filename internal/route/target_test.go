@@ -34,11 +34,40 @@ func TestMatchTarget_LongestPrefixWithBoundary(t *testing.T) {
 
 func TestPathAllowed_PrefixWildcard(t *testing.T) {
 	patterns := []string{"/api/*"}
-	if !PathAllowed(patterns, "/api/users") {
+	if !PathAllowed(patterns, "/api/users", "/api/users") {
 		t.Fatal("/api/users should be exposed")
 	}
-	if PathAllowed(patterns, "/") {
+	if PathAllowed(patterns, "/", "/") {
 		t.Fatal("/ should not be exposed")
+	}
+}
+
+func TestPathAllowedRejectsAmbiguousPaths(t *testing.T) {
+	patterns := []string{"/api/*"}
+	tests := []struct {
+		name        string
+		path        string
+		escapedPath string
+	}{
+		{name: "dot segment", path: "/api/../admin", escapedPath: "/api/../admin"},
+		{name: "encoded dot segment", path: "/api/../admin", escapedPath: "/api/%2e%2e/admin"},
+		{name: "encoded slash", path: "/api/admin", escapedPath: "/api%2fadmin"},
+		{name: "double encoded slash", path: "/api/%2fadmin", escapedPath: "/api/%252fadmin"},
+		{name: "deep encoded dot segment", path: "/api/%25252e%25252e/admin", escapedPath: "/api/%2525252e%2525252e/admin"},
+		{name: "backslash", path: `/api\..\admin`, escapedPath: "/api%5c..%5cadmin"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if PathAllowed(patterns, test.path, test.escapedPath) {
+				t.Fatalf("PathAllowed(%q, %q) = true, want false", test.path, test.escapedPath)
+			}
+		})
+	}
+}
+
+func TestPathAllowedAllPathsDoesNotApplyRestrictionPolicy(t *testing.T) {
+	if !PathAllowed([]string{"/*"}, "/files/a/b", "/files/a%2fb") {
+		t.Fatal("/* should expose all paths, including encoded path forms")
 	}
 }
 

@@ -121,6 +121,9 @@ func runSetup(cmd *cobra.Command, opts runSetupOpts) error {
 	needCreate := false
 	switch caState {
 	case certs.CAPresent:
+		if _, err := certs.EnsureCA(certPath, keyPath); err != nil {
+			return fmt.Errorf("validating local CA: %w", err)
+		}
 		_, _ = fmt.Fprintln(out, styles.stepOK("certificate authority", "already set up"))
 
 	case certs.CAPartial, certs.CABroken:

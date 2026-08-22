@@ -154,7 +154,7 @@ func serveTargets(w http.ResponseWriter, r *http.Request, targets []route.Target
 		}
 	}()
 
-	if !route.PathAllowed(exposedPaths, r.URL.Path) {
+	if !route.PathAllowed(exposedPaths, r.URL.Path, r.URL.EscapedPath()) {
 		response.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		response.WriteHeader(http.StatusNotFound)
 		_, _ = io.WriteString(response, "routeup: path does not exist or is not exposed\n")
@@ -183,7 +183,11 @@ func serveTargets(w http.ResponseWriter, r *http.Request, targets []route.Target
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(targetURL)
 			pr.Out.Host = pr.In.Host
-			pr.SetXForwarded()
+			if entry.Source == logs.SourcePublic {
+				copyForwardedHeaders(pr.Out.Header, pr.In.Header)
+			} else {
+				pr.SetXForwarded()
+			}
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
 			logger.Warn("proxy upstream error",
@@ -202,6 +206,14 @@ func serveTargets(w http.ResponseWriter, r *http.Request, targets []route.Target
 		},
 	}
 	rp.ServeHTTP(response, r)
+}
+
+func copyForwardedHeaders(dst, src http.Header) {
+	for _, name := range []string{"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto"} {
+		if values := src.Values(name); len(values) > 0 {
+			dst[name] = append([]string(nil), values...)
+		}
+	}
 }
 
 // statusWriter observes the status emitted by the proxy without changing the

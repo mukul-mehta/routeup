@@ -3,6 +3,7 @@ package route
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -109,9 +110,11 @@ func NormalizePathPatterns(patterns []string) ([]string, error) {
 	return out, nil
 }
 
-// PathAllowed reports whether requestPath is allowed by patterns. An empty
-// pattern list means all paths are exposed.
-func PathAllowed(patterns []string, requestPath string) bool {
+// PathAllowed reports whether requestPath is allowed by patterns. escapedPath
+// is the URL-escaped form used on the wire. Restricted exposures fail closed
+// for path forms that an upstream could normalize differently.
+// An empty pattern list means all paths are exposed.
+func PathAllowed(patterns []string, requestPath, escapedPath string) bool {
 	if len(patterns) == 0 {
 		return true
 	}
@@ -125,6 +128,11 @@ func PathAllowed(patterns []string, requestPath string) bool {
 		if pattern == "/*" {
 			return true
 		}
+	}
+	if !unambiguousRequestPath(requestPath, escapedPath) {
+		return false
+	}
+	for _, pattern := range patterns {
 		if strings.HasSuffix(pattern, "/*") {
 			prefix := strings.TrimSuffix(pattern, "/*")
 			if targetPathMatches(prefix, requestPath) {
@@ -133,6 +141,44 @@ func PathAllowed(patterns []string, requestPath string) bool {
 			continue
 		}
 		if requestPath == pattern {
+			return true
+		}
+	}
+	return false
+}
+
+func unambiguousRequestPath(requestPath, escapedPath string) bool {
+	if ambiguousDecodedPath(requestPath) {
+		return false
+	}
+	if escapedPath == "" {
+		escapedPath = (&url.URL{Path: requestPath}).EscapedPath()
+	}
+	for range 3 {
+		lower := strings.ToLower(escapedPath)
+		if strings.Contains(lower, "%2f") || strings.Contains(lower, "%5c") {
+			return false
+		}
+		decoded, err := url.PathUnescape(escapedPath)
+		if err != nil || decoded == escapedPath {
+			return err == nil
+		}
+		if ambiguousDecodedPath(decoded) {
+			return false
+		}
+		escapedPath = decoded
+	}
+	// More than three layers of encoding are not needed for a normal request.
+	// Fail closed rather than guessing how many times an upstream may decode it.
+	return false
+}
+
+func ambiguousDecodedPath(requestPath string) bool {
+	if strings.Contains(requestPath, `\`) {
+		return true
+	}
+	for _, segment := range strings.Split(requestPath, "/") {
+		if segment == "." || segment == ".." {
 			return true
 		}
 	}

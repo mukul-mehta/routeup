@@ -88,6 +88,43 @@ func TestLocalProxy_PathTargets(t *testing.T) {
 	assertLocalBody(t, proxyServer.URL+"/api/ping", "myapp.localhost", "api")
 }
 
+func TestLocalProxyReplacesSpoofedForwardingHeaders(t *testing.T) {
+	headers := make(chan http.Header, 1)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		headers <- r.Header.Clone()
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer backend.Close()
+
+	proxyServer := httptest.NewServer(New(testTargetLookup{"myapp": {
+		{Path: "/", Port: testServerPort(t, backend.URL)},
+	}}, logs.NewStore(), nil))
+	defer proxyServer.Close()
+
+	req, err := http.NewRequest(http.MethodGet, proxyServer.URL+"/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Host = "myapp.localhost"
+	req.Header.Set("Forwarded", "for=attacker")
+	req.Header.Set("X-Forwarded-For", "attacker")
+	req.Header.Set("X-Forwarded-Host", "attacker.example")
+	req.Header.Set("X-Forwarded-Proto", "ftp")
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+
+	got := <-headers
+	if got.Get("Forwarded") != "" || strings.Contains(got.Get("X-Forwarded-For"), "attacker") {
+		t.Fatalf("spoofed forwarding headers reached backend: %#v", got)
+	}
+	if got.Get("X-Forwarded-Host") != "myapp.localhost" || got.Get("X-Forwarded-Proto") != "http" {
+		t.Fatalf("forwarding headers = %#v", got)
+	}
+}
+
 func TestLocalProxy_RecordsCompletedRequest(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusCreated)
