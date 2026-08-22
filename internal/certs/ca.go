@@ -146,6 +146,9 @@ func Create(certPath, keyPath string) (*CA, error) {
 	if err := os.WriteFile(keyPath, keyPEM, 0o600); err != nil {
 		return nil, fmt.Errorf("write %s: %w", keyPath, err)
 	}
+	if err := os.Chmod(keyPath, 0o600); err != nil {
+		return nil, fmt.Errorf("secure %s: %w", keyPath, err)
+	}
 
 	return &CA{
 		Cert:    cert,
@@ -157,6 +160,11 @@ func Create(certPath, keyPath string) (*CA, error) {
 // EnsureCA returns the CA when usable; otherwise an error suggesting
 // `routeup setup`. Callers add their own framing prefix.
 func EnsureCA(certPath, keyPath string) (*CA, error) {
+	if fileExists(keyPath) {
+		if err := os.Chmod(keyPath, 0o600); err != nil {
+			return nil, fmt.Errorf("secure ca key at %s: %w", keyPath, err)
+		}
+	}
 	state, ca, inspectErr := Inspect(certPath, keyPath)
 	switch state {
 	case CAPresent:

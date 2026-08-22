@@ -137,8 +137,23 @@ func (c Config) Validate() error {
 	if c.PortEnvVar != "" && !validEnvVarName(c.PortEnvVar) {
 		return fmt.Errorf("port_env_var %q is not a valid environment variable name", c.PortEnvVar)
 	}
+	if c.PortEnvVar != "PORT" && reservedPortEnvVar(c.PortEnvVar) {
+		return fmt.Errorf("port_env_var %q is reserved by routeup", c.PortEnvVar)
+	}
 
 	return nil
+}
+
+func reservedPortEnvVar(name string) bool {
+	if strings.HasPrefix(name, "ROUTEUP_") {
+		return true
+	}
+	switch name {
+	case "HOST", "PATH", "NODE_EXTRA_CA_CERTS":
+		return true
+	default:
+		return false
+	}
 }
 
 func validEnvVarName(name string) bool {

@@ -30,6 +30,29 @@ curl -fsSL https://get.routeup.dev | sh
 > only a manual Releases-page download is quarantined — clear it with
 > `xattr -d com.apple.quarantine ./routeup`.
 
+## Agent Skill
+
+Install the official Routeup skill to teach OpenCode, Claude Code, Codex,
+Cursor, Copilot, and other compatible agents how to install, configure, and use
+the CLI safely:
+
+```bash
+npx skills add mukul-mehta/routeup --skill routeup -g
+```
+
+Then ask your agent:
+
+```txt
+Use the Routeup skill to install and set up Routeup on this machine, verify the
+setup, and give this project a stable local HTTPS route.
+```
+
+The skill defaults to local-only routing and asks before machine setup or public
+exposure when those actions were not already requested. Its source is
+[`skills/routeup/SKILL.md`](skills/routeup/SKILL.md); see the
+[Agent Skill guide](https://routeup.dev/docs/getting-started/agent-skill) for
+project-scoped installation and example prompts.
+
 ## Setup
 
 One-time. Creates a local CA, adds it to your OS trust store, and binds port 443:
@@ -124,7 +147,8 @@ ROUTEUP_URL       — https://myapp.localhost  (same as local until expose.enabl
 ```
 
 The route is registered before the app starts and unregistered when the process
-exits. Your command must honor `PORT` and `HOST`.
+exits. Your command must honor `PORT` and `HOST`. Public-server credentials are
+used by routeup itself and are not inherited by the application process.
 
 Most frameworks that respect `PORT` (Next.js, Nuxt, Express) work with no
 changes. Vite and Astro need one line of config — see
@@ -153,7 +177,8 @@ routeup exec -- yarn start:consumer:webhook
 `ROUTEUP_URL`, `NODE_EXTRA_CA_CERTS`, and the project-local binary path. If the
 route already has a public exposure, `ROUTEUP_URL` uses that public URL;
 otherwise it matches the local URL. It does not start the agent, register or
-expose a route, or wait for a listening port.
+expose a route, or wait for a listening port. It does not pass `ROUTEUP_TOKEN`
+to the child command.
 
 With no arguments, `routeup exec` runs the configured `script` or `command`.
 An explicit command after `--` takes precedence.
@@ -269,7 +294,9 @@ routeup serve --expose
 ```
 
 Local `.localhost` routing serves all targets. `expose.paths` limits which paths
-go through the public tunnel.
+go through the public tunnel. Restricted exposures reject dot segments,
+backslashes, and encoded separators rather than risk a different normalization
+at the upstream application.
 
 ## Request logs and inspect
 
@@ -301,14 +328,20 @@ Then inspect individual exchanges:
 ```bash
 routeup inspect req_Ap7kQ3mN8vR2xLzC
 routeup inspect req_Ap7kQ3mN8vR2xLzC --json
+routeup inspect req_Ap7kQ3mN8vR2xLzC --curl
 ```
 
 The default report escapes control and binary bytes so captured traffic cannot
 write terminal control sequences. `--raw` restores unescaped retained values
 and is unsafe for direct terminal output; `--json` emits byte-exact bodies as
-base64. Captured data lives in agent memory only (256 KiB per captured request
-or response, 1024-entry ring). It resets when the agent restarts. Capture is off
-by default.
+base64. `--curl` requires a complete request capture and writes a shell-safe
+IPv4 command targeting the corresponding local `.localhost` route. Every
+retained header is emitted; headers configured in `redact_headers` remain absent
+because capture never stored them. Request bodies are included directly when
+they are safe text; binary bodies use a base64 decode pipe. The command may
+contain sensitive data. Captured data lives in agent memory only (256 KiB per
+captured request or response, 1024-entry ring). It resets when the agent
+restarts. Capture is off by default.
 
 Interactive terminal output uses color and emphasis while redirected output
 stays plain. Set `NO_COLOR=1` to disable styling. JSON and NDJSON output never

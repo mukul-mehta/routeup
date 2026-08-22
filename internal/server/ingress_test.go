@@ -370,6 +370,53 @@ func TestIngress_ClientDisconnectCancelsUpstream(t *testing.T) {
 	}
 }
 
+func TestIngressPreservesTrustedForwardingHeadersThroughTunnel(t *testing.T) {
+	headers := make(chan http.Header, 1)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		headers <- r.Header.Clone()
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer backend.Close()
+
+	tunnelHandler := proxy.NewTargets([]route.Target{{
+		Path: "/", Port: testServerPort(t, backend.URL),
+	}}, nil, "hmr", false, false, nil, nil, nil)
+	_, host, srv, cleanup := startIngressTunnelWithRateLimit(t, tunnelHandler, RateLimiterConfig{})
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "https://"+host+"/headers", nil)
+	req.Host = host
+	req.RemoteAddr = "203.0.113.10:43123"
+	req.Header.Set("Forwarded", "for=attacker")
+	req.Header.Set("X-Forwarded-For", "attacker")
+	req.Header.Set("X-Forwarded-Host", "attacker.example")
+	req.Header.Set("X-Forwarded-Proto", "ftp")
+	req.Header.Set("X-Forwarded-Port", "22")
+	req.Header.Set("X-Real-IP", "198.51.100.4")
+	response := httptest.NewRecorder()
+	srv.serveIngress(response, req)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.Code)
+	}
+
+	got := <-headers
+	if got.Get("Forwarded") != "" {
+		t.Fatalf("spoofed Forwarded header reached backend: %q", got.Get("Forwarded"))
+	}
+	if got.Get("X-Forwarded-Port") != "" || got.Get("X-Real-IP") != "" {
+		t.Fatalf("alternate forwarding headers reached backend: %#v", got)
+	}
+	if got.Get("X-Forwarded-For") != "203.0.113.10" {
+		t.Fatalf("X-Forwarded-For = %q, want edge peer", got.Get("X-Forwarded-For"))
+	}
+	if got.Get("X-Forwarded-Host") != host {
+		t.Fatalf("X-Forwarded-Host = %q, want %q", got.Get("X-Forwarded-Host"), host)
+	}
+	if got.Get("X-Forwarded-Proto") != "https" {
+		t.Fatalf("X-Forwarded-Proto = %q, want https", got.Get("X-Forwarded-Proto"))
+	}
+}
+
 func startIngressTunnel(t *testing.T, backend http.Handler) (publicURL string, host string, cleanup func()) {
 	publicURL, host, _, cleanup = startIngressTunnelWithRateLimit(t, backend, RateLimiterConfig{})
 	return publicURL, host, cleanup

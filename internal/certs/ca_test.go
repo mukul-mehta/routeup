@@ -90,6 +90,44 @@ func TestCreate_WritesFilesWithCorrectPerms(t *testing.T) {
 	}
 }
 
+func TestEnsureCACorrectsExistingKeyPermissions(t *testing.T) {
+	certPath, keyPath := caPaths(t)
+	if _, err := Create(certPath, keyPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(keyPath, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := EnsureCA(certPath, keyPath); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("key permissions = %o, want 600", got)
+	}
+}
+
+func TestEnsureCACorrectsPartialKeyPermissions(t *testing.T) {
+	certPath, keyPath := caPaths(t)
+	if err := os.WriteFile(keyPath, []byte("partial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EnsureCA(certPath, keyPath); err == nil || !strings.Contains(err.Error(), "partial CA state") {
+		t.Fatalf("EnsureCA() error = %v, want partial state", err)
+	}
+	info, err := os.Stat(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("partial key permissions = %o, want 600", got)
+	}
+}
+
 func TestLoad_Roundtrip(t *testing.T) {
 	certPath, keyPath := caPaths(t)
 

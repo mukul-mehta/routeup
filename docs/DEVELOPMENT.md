@@ -97,12 +97,3 @@ Fast contributor checks:
 ```bash
 just check
 ```
-
-Isolated macOS integration harness:
-
-```bash
-just smoke-macos
-```
-
-The smoke harness uses a temporary state tree and dynamic ports. It never
-changes trust, port 443, or global service configuration.

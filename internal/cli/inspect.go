@@ -28,6 +28,7 @@ import (
 type inspectOpts struct {
 	raw  bool
 	json bool
+	curl bool
 }
 
 func newInspectCmd() *cobra.Command {
@@ -35,7 +36,7 @@ func newInspectCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "inspect <request-id>",
 		Short:   "Show an opted-in captured request and response",
-		Example: "routeup inspect req_Ap7kQ3mN8vR2xLzC",
+		Example: "routeup inspect req_Ap7kQ3mN8vR2xLzC\nrouteup inspect req_Ap7kQ3mN8vR2xLzC --curl",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runInspect(cmd, args[0], opts)
@@ -66,7 +67,8 @@ func newInspectCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&opts.raw, "raw", false, "write unescaped captured values (unsafe for direct terminal output)")
 	cmd.Flags().BoolVar(&opts.json, "json", false, "write the captured exchange as JSON")
-	cmd.MarkFlagsMutuallyExclusive("raw", "json")
+	cmd.Flags().BoolVar(&opts.curl, "curl", false, "write a curl command from the captured request")
+	cmd.MarkFlagsMutuallyExclusive("raw", "json", "curl")
 	return cmd
 }
 
@@ -94,6 +96,9 @@ func runInspect(cmd *cobra.Command, id string, opts inspectOpts) error {
 			return fmt.Errorf("write inspected request json: %w", err)
 		}
 		return nil
+	}
+	if opts.curl {
+		return writeInspectCurl(cmd.OutOrStdout(), entry, state.TLSPortOrDefault())
 	}
 	return writeInspectEntry(cmd.OutOrStdout(), entry, opts.raw)
 }

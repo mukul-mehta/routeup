@@ -26,6 +26,8 @@ func TestConfig_Validate(t *testing.T) {
 		{name: "targets config", cfg: Config{Targets: []route.Target{{Path: "/", Port: 3000}, {Path: "/api", Port: 8080}}}, errSubstr: ""},
 		{name: "capture config", cfg: Config{Capture: CaptureConfig{Request: true}}, errSubstr: ""},
 		{name: "redacted headers config", cfg: Config{Capture: CaptureConfig{RedactHeaders: []string{"Authorization", "cookie"}}}, errSubstr: ""},
+		{name: "custom port env", cfg: Config{PortEnvVar: "APP_PORT"}, errSubstr: ""},
+		{name: "port itself", cfg: Config{PortEnvVar: "PORT"}, errSubstr: ""},
 
 		// Invalid cases
 		{name: "double dot in name", cfg: Config{Name: "api..myapp"}, errSubstr: "invalid name"},
@@ -36,6 +38,8 @@ func TestConfig_Validate(t *testing.T) {
 		{name: "invalid redacted header", cfg: Config{Capture: CaptureConfig{RedactHeaders: []string{"bad header"}}}, errSubstr: "invalid header name"},
 		{name: "invalid port env prefix", cfg: Config{PortEnvVar: "9PORT"}, errSubstr: "environment variable name"},
 		{name: "invalid port env punctuation", cfg: Config{PortEnvVar: "WEB-PORT"}, errSubstr: "environment variable name"},
+		{name: "reserved host port env", cfg: Config{PortEnvVar: "HOST"}, errSubstr: "reserved by routeup"},
+		{name: "reserved routeup port env", cfg: Config{PortEnvVar: "ROUTEUP_TOKEN"}, errSubstr: "reserved by routeup"},
 	}
 
 	for _, tc := range cases {

@@ -192,8 +192,11 @@ Non-redacted data remains in agent memory only. If a body exceeds the limit or
 forwarding ends before EOF, the retained prefix is marked `Complete: false`.
 Configured redacted headers are forwarded normally but excluded from capture.
 `routeup inspect <request-id>` escapes untrusted bytes by default; `--raw` and
-`--json` are explicit alternatives. Path-filtered and unmatched-target requests
-still produce metadata logs when they reach the agent, but are not captured.
+`--json` are explicit alternatives. `--curl` exports a complete captured request
+as a shell-safe command targeting its local `.localhost` route. It renders every
+retained header; configured redactions remain absent because capture excluded
+them. Path-filtered and unmatched-target requests still produce metadata logs
+when they reach the agent, but are not captured.
 
 ### Public Server
 
@@ -407,8 +410,11 @@ Step by step, with the code path:
    handler (`proxy.NewTargets`). The agent is the HTTP *server*.
 7. **Local proxy** — the handler optionally applies `expose.paths`, chooses the
    longest target path prefix (`/api` beats `/`), and forwards to the matched
-   `http://localhost:<port>` while preserving the public Host header; the agent's
-   `http.Server` serializes the response back onto the stream.
+   `http://localhost:<port>` while preserving the public Host header and the
+   server-generated `X-Forwarded-For`, `X-Forwarded-Host`, and
+   `X-Forwarded-Proto` values. Client-supplied forwarding aliases are removed at
+   public ingress. The agent's `http.Server` serializes the response back onto
+   the stream.
 8. **Response back** — the server's `Transport` reads the response off the
    stream; `ReverseProxy` streams (and flushes) status, headers, and body to the
    public client.
@@ -611,7 +617,9 @@ routeup.json:                command  runs a shell command directly
 The package loader resolves `script` to its command string before returning the
 config. The runner executes that string through `sh -c` with the project
 `node_modules/.bin` prepended to `PATH`; it does not invoke package-manager
-lifecycle hooks for the selected child script.
+lifecycle hooks for the selected child script. Application children and the
+long-lived local agent do not inherit `ROUTEUP_TOKEN`; the CLI sends exposure
+credentials to the agent over local IPC only when opening a tunnel.
 
 `routeup exec` is the process-only half of runner mode. With no arguments it
 uses the same resolved config command; argv after `--` overrides it without
@@ -657,7 +665,7 @@ sets `ROUTEUP_URL` to the granted public URL when that exposure is enabled.
 In an interactive terminal, routeup gives the child group foreground ownership,
 so terminal Ctrl-C reaches the child directly and the child must respond to
 SIGINT. When routeup itself is cancelled, it forwards that signal to the child
-group and escalates to SIGKILL after five seconds. A child that exits
+group and escalates to SIGKILL after ten seconds. A child that exits
 successfully before listening is reported as a startup failure rather than a
 successful run.
 

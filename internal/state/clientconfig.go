@@ -34,6 +34,9 @@ func ReadClientConfig() (ClientConfig, error) {
 	if err != nil {
 		return ClientConfig{}, err
 	}
+	if err := os.Chmod(path, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return ClientConfig{}, fmt.Errorf("secure %s: %w", path, err)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -64,6 +67,9 @@ func WriteClientConfig(c ClientConfig) error {
 	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return fmt.Errorf("secure %s: %w", path, err)
 	}
 	return nil
 }

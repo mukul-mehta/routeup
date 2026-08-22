@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"strings"
 	"sync"
 	"time"
 
@@ -246,6 +247,10 @@ func newSessionProxy(session *yamux.Session, host string, logger *slog.Logger, o
 			pr.Out.URL.Scheme = "http"
 			pr.Out.URL.Host = host   // placeholder; the dialer ignores the addr
 			pr.Out.Host = pr.In.Host // preserve the public Host end-to-end
+			// Rewrite removed any client-supplied forwarding headers before this
+			// callback. Set authoritative edge metadata for the trusted tunnel hop.
+			removeForwardingAliases(pr.Out.Header)
+			pr.SetXForwarded()
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
 			if observer != nil {
@@ -255,6 +260,18 @@ func newSessionProxy(session *yamux.Session, host string, logger *slog.Logger, o
 			logger.Debug("tunnel forward failure details", "host", host, "err", err)
 			http.Error(w, "routeup: tunnel error", http.StatusBadGateway)
 		},
+	}
+}
+
+func removeForwardingAliases(header http.Header) {
+	for name := range header {
+		lower := strings.ToLower(name)
+		if strings.HasPrefix(lower, "x-forwarded-") {
+			header.Del(name)
+		}
+	}
+	for _, name := range []string{"Client-IP", "CF-Connecting-IP", "Fly-Client-IP", "Forwarded", "True-Client-IP", "X-Client-IP", "X-Real-IP"} {
+		header.Del(name)
 	}
 }
 

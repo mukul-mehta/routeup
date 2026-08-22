@@ -33,21 +33,21 @@ type EnvInputs struct {
 // InjectEnv returns base with routeup's variables applied: PORT, HOST,
 // ROUTEUP_LOCAL_URL, ROUTEUP_URL, and WorkDir/node_modules/.bin prepended to
 // PATH. Existing entries for those keys are replaced in place (no duplicates),
-// and unrelated variables are preserved. Pass os.Environ() as base to inherit
-// the current environment.
+// and unrelated variables are preserved except ROUTEUP_TOKEN, which must not be
+// exposed to application children. Pass os.Environ() as base to inherit the
+// current environment.
 func InjectEnv(base []string, in EnvInputs) []string {
-	env := make([]string, len(base))
-	copy(env, base)
+	env := withoutEnv(base, "ROUTEUP_TOKEN")
 
 	if in.WorkDir != "" {
 		env = prependPath(env, filepath.Join(in.WorkDir, "node_modules", ".bin"))
 	}
 	if in.Port > 0 {
-		portVar := "PORT"
-		if in.PortEnvVar != "" {
-			portVar = in.PortEnvVar
+		port := strconv.Itoa(in.Port)
+		env = upsert(env, "PORT", port)
+		if in.PortEnvVar != "" && in.PortEnvVar != "PORT" {
+			env = upsert(env, in.PortEnvVar, port)
 		}
-		env = upsert(env, portVar, strconv.Itoa(in.Port))
 	}
 	host := in.Host
 	if host == "" {
@@ -66,6 +66,18 @@ func InjectEnv(base []string, in EnvInputs) []string {
 		env = upsert(env, "NODE_EXTRA_CA_CERTS", in.CACertPath)
 	}
 	return env
+}
+
+func withoutEnv(env []string, key string) []string {
+	prefix := key + "="
+	out := make([]string, 0, len(env))
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 func upsert(env []string, key, val string) []string {

@@ -133,7 +133,8 @@ internal/
     routes.go              #   `routeup routes` — list active local routes (+ public)
     logs.go                #   `routeup logs` — metadata list and follow
     logs_stream.go         #   dashboard live-log reconnect and responsive row formatting
-    inspect.go              #   `routeup inspect` — retained exchange output
+    inspect.go             #   `routeup inspect` — retained exchange output
+    inspect_curl.go        #   shell-safe curl export for complete request captures
     terminal.go             #   safe escaping, TTY detection, and Lip Gloss theme
     update.go              #   `routeup update` — self update
     uninstall.go           #   `routeup uninstall` — reverse setup
@@ -252,7 +253,7 @@ with both local and exposed runner traffic.
 
 With a TTY, the child process group owns the foreground terminal, so Ctrl-C is
 delivered directly to that group. Direct cancellation of routeup forwards the
-signal and escalates to SIGKILL after five seconds; an interactive child that
+signal and escalates to SIGKILL after ten seconds; an interactive child that
 ignores SIGINT cannot trigger that parent-side timer.
 
 The `serve` command (`serve.go`, `serve_owner.go`): resolves the route name and
@@ -490,7 +491,11 @@ agent-stamped registration time.
 not start one because the ring is process-local. A request without capture
 returns a conflict from the inspect endpoint, while an evicted or unknown ID
 returns not found. Inspect escapes retained bytes unless `--raw` is explicit;
-`--json` preserves byte bodies through base64.
+`--json` preserves byte bodies through base64. `--curl` requires a complete
+captured request and emits a shell-safe command for the local route with every
+retained header. Configured redactions remain absent because capture never
+stored them. Safe text bodies are embedded directly; binary bodies are carried
+through a base64 decode pipe.
 
 ---
 
