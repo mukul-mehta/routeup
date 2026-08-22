@@ -504,7 +504,7 @@ ROUTEUP_URL=https://myapp.localhost
 The route should become reachable after the child binds its assigned port. When
 the child exits after Ctrl-C, or routeup receives SIGTERM, the whole child
 process group should stop and the route should be removed. A direct cancellation
-of routeup escalates to SIGKILL after five seconds. After readiness, routeup
+of routeup escalates to SIGKILL after ten seconds. After readiness, routeup
 returns the child's exit status; a child that exits successfully before
 listening is treated as a startup failure.
 
@@ -669,7 +669,9 @@ Goal: make webhook debugging excellent.
 > target matching; blocked or unmatched requests receive metadata logs without
 > retained exchange data. `GET /v1/requests/{id}` serves the complete entry over
 > the agent's Unix socket, and `routeup inspect` safely formats it for the user.
-> `--raw` exposes unescaped retained values and `--json` emits the full exchange.
+> `--raw` exposes unescaped retained values, `--json` emits the full exchange,
+> and `--curl` exports a complete request as a shell-safe command targeting
+> the local route.
 > The 256 KiB per-direction limit includes headers and body; oversized or
 > incomplete bodies are returned as a retained prefix with `Complete: false`.
 
@@ -681,7 +683,7 @@ capture.redact_headers config for captured headers
 request and response header/body capture
 256 KiB per-direction capture limit
 routeup inspect <request-id>
-routeup inspect --raw/--json
+routeup inspect --raw/--json/--curl
 ```
 
 Acceptance:
@@ -694,7 +696,8 @@ Capture is disabled by default. Request and response retention are enabled
 independently in `routeup.json` or the `package.json` `routeup` block. Retained
 data remains only in the agent's 1024-entry in-memory ring and is limited to 256
 KiB per direction including headers and body. `routeup inspect` escapes retained
-bytes by default.
+bytes by default. Curl export emits every retained header; configured redactions
+remain absent because they were never captured.
 
 ## Phase 11: Public Server Rate Limiting
 

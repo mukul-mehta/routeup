@@ -240,6 +240,8 @@ the selected child script.
 without arguments. An explicit argv after `--` overrides it. Exec injects the
 project's local URL, an active public URL when available, and local CA trust,
 but does not start the agent, register a route, expose it, or wait for a target.
+Runner and exec children do not inherit `ROUTEUP_TOKEN`; exposure credentials
+remain in routeup-owned processes and local IPC.
 
 For frontend + API behind one route, use path targets:
 
@@ -325,7 +327,9 @@ Path-limited exposure comes from config:
 }
 ```
 
-That should be an opt-in constraint, not the default behavior.
+That should be an opt-in constraint, not the default behavior. When a path
+constraint is active, ambiguous dot segments, backslashes, and encoded
+separators fail closed before target matching.
 
 Phase 8.5 adds an explicit runner opt-in without changing what `expose.paths`
 means for standalone exposure:
@@ -705,11 +709,15 @@ blocked public paths and unmatched targets are logged without capture.
 
 ```bash
 routeup inspect req_Ap7kQ3mN8vR2xLzC
+routeup inspect req_Ap7kQ3mN8vR2xLzC --curl
 ```
 
 `routeup inspect` safely escapes retained values by default. `--raw` emits
 unescaped retained values, and `--json` emits the complete exchange with byte
-bodies encoded as base64.
+bodies encoded as base64. `--curl` requires a complete captured request and
+exports a shell-safe command for the local `.localhost` route. It emits every
+retained header; configured redactions remain absent because they were never
+captured. The retained body is included.
 
 ## Project Constraints
 

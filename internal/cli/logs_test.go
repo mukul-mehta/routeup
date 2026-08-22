@@ -167,10 +167,12 @@ func TestWriteInspectEntryEscapesUntrustedBytes(t *testing.T) {
 }
 
 func TestInspectFlagsAreMutuallyExclusive(t *testing.T) {
-	cmd := newInspectCmd()
-	cmd.SetArgs([]string{"req_test", "--raw", "--json"})
-	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "if any flags in the group") {
-		t.Fatalf("error = %v, want mutually exclusive flags error", err)
+	for _, flags := range [][]string{{"--raw", "--json"}, {"--raw", "--curl"}, {"--json", "--curl"}} {
+		cmd := newInspectCmd()
+		cmd.SetArgs(append([]string{"req_test"}, flags...))
+		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "if any flags in the group") {
+			t.Fatalf("flags %v error = %v, want mutually exclusive flags error", flags, err)
+		}
 	}
 }
 
@@ -184,6 +186,28 @@ func TestInspectCompletionReturnsCapturedIDs(t *testing.T) {
 	ids, directive := cmd.ValidArgsFunction(cmd, nil, "")
 	if directive != cobra.ShellCompDirectiveNoFileComp || len(ids) != 1 || ids[0] != "req_captured" {
 		t.Fatalf("completion = %#v, %v", ids, directive)
+	}
+}
+
+func TestInspectCurlReadsCaptureFromAgent(t *testing.T) {
+	entry := logs.Entry{
+		ID: "req_Ap7kQ3mN8vR2xLzC", Route: "myapp", Method: http.MethodPost, RequestPath: "/hook",
+		Capture: &logs.Capture{Request: &logs.CapturedMessage{Body: []byte("payload"), Complete: true}},
+	}
+	socketPath := startUnixHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(entry)
+	}))
+	t.Setenv("ROUTEUP_AGENT_SOCKET", socketPath)
+	t.Setenv("ROUTEUP_STATE_DIR", t.TempDir())
+	cmd := newInspectCmd()
+	var output bytes.Buffer
+	cmd.SetOut(&output)
+	cmd.SetArgs([]string{entry.ID, "--curl"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if got := output.String(); !strings.Contains(got, "https://myapp.localhost/hook") || !strings.Contains(got, "--data-raw 'payload'") {
+		t.Fatalf("curl output = %q", got)
 	}
 }
 

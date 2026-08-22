@@ -43,11 +43,11 @@ func InjectEnv(base []string, in EnvInputs) []string {
 		env = prependPath(env, filepath.Join(in.WorkDir, "node_modules", ".bin"))
 	}
 	if in.Port > 0 {
-		portVar := "PORT"
-		if in.PortEnvVar != "" {
-			portVar = in.PortEnvVar
+		port := strconv.Itoa(in.Port)
+		env = upsert(env, "PORT", port)
+		if in.PortEnvVar != "" && in.PortEnvVar != "PORT" {
+			env = upsert(env, in.PortEnvVar, port)
 		}
-		env = upsert(env, portVar, strconv.Itoa(in.Port))
 	}
 	host := in.Host
 	if host == "" {

@@ -103,3 +103,13 @@ func TestInjectEnv_RemovesRouteupToken(t *testing.T) {
 		t.Fatalf("ROUTEUP_SERVER = %q, want it preserved", got["ROUTEUP_SERVER"])
 	}
 }
+
+func TestInjectEnvSetsPortAndCustomPortVariable(t *testing.T) {
+	got := envMap(InjectEnv([]string{"PORT=1000", "APP_PORT=2000"}, EnvInputs{
+		Port:       5173,
+		PortEnvVar: "APP_PORT",
+	}))
+	if got["PORT"] != "5173" || got["APP_PORT"] != "5173" {
+		t.Fatalf("port environment = %#v, want PORT and APP_PORT set to 5173", got)
+	}
+}
