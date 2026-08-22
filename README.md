@@ -30,6 +30,29 @@ curl -fsSL https://get.routeup.dev | sh
 > only a manual Releases-page download is quarantined — clear it with
 > `xattr -d com.apple.quarantine ./routeup`.
 
+## Agent Skill
+
+Install the official Routeup skill to teach OpenCode, Claude Code, Codex,
+Cursor, Copilot, and other compatible agents how to install, configure, and use
+the CLI safely:
+
+```bash
+npx skills add mukul-mehta/routeup --skill routeup -g
+```
+
+Then ask your agent:
+
+```txt
+Use the Routeup skill to install and set up Routeup on this machine, verify the
+setup, and give this project a stable local HTTPS route.
+```
+
+The skill defaults to local-only routing and asks before machine setup or public
+exposure when those actions were not already requested. Its source is
+[`skills/routeup/SKILL.md`](skills/routeup/SKILL.md); see the
+[Agent Skill guide](https://routeup.dev/docs/getting-started/agent-skill) for
+project-scoped installation and example prompts.
+
 ## Setup
 
 One-time. Creates a local CA, adds it to your OS trust store, and binds port 443:
